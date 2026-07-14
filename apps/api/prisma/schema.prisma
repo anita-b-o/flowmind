@@ -1,0 +1,403 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserStatus {
+  ACTIVE
+  DISABLED
+}
+
+enum OrganizationRole {
+  owner
+  admin
+  editor
+  viewer
+}
+
+enum MemberStatus {
+  ACTIVE
+  INVITED
+  DISABLED
+}
+
+enum WorkflowStatus {
+  DRAFT
+  ACTIVE
+  PAUSED
+  ARCHIVED
+}
+
+enum WorkflowVersionStatus {
+  DRAFT
+  ACTIVE
+  ARCHIVED
+}
+
+enum ExecutionStatus {
+  PENDING
+  QUEUED
+  RUNNING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum StepExecutionStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+  SKIPPED
+  RETRYING
+}
+
+enum IdempotencyStatus {
+  STARTED
+  PROCESSING
+  ENQUEUED
+  COMPLETED
+  FAILED
+}
+
+enum ConnectionType {
+  smtp
+  http_api_key
+  oauth_future
+}
+
+enum ConnectionStatus {
+  ACTIVE
+  DISABLED
+}
+
+model User {
+  id           String     @id @default(uuid())
+  email        String     @unique
+  passwordHash String     @map("password_hash")
+  name         String
+  status       UserStatus @default(ACTIVE)
+  createdAt    DateTime   @default(now()) @map("created_at")
+  updatedAt    DateTime   @updatedAt @map("updated_at")
+
+  memberships OrganizationMember[]
+  workflows   Workflow[]            @relation("WorkflowCreatedBy")
+  versions    WorkflowVersion[]     @relation("WorkflowVersionCreatedBy")
+  sessions    RefreshTokenSession[]
+
+  @@map("users")
+}
+
+model RefreshTokenSession {
+  id        String    @id @default(uuid())
+  userId    String    @map("user_id")
+  tokenHash String    @map("token_hash")
+  revokedAt DateTime? @map("revoked_at")
+  expiresAt DateTime  @map("expires_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("refresh_token_sessions")
+}
+
+model Organization {
+  id        String   @id @default(uuid())
+  name      String
+  slug      String   @unique
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  members          OrganizationMember[]
+  workflows        Workflow[]
+  workflowVersions WorkflowVersion[]
+  workflowSteps    WorkflowStep[]
+  triggers         Trigger[]
+  executions       Execution[]
+  stepExecutions   StepExecution[]
+  connections      Connection[]
+  secrets          Secret[]
+  webhookEvents    WebhookEvent[]
+  auditLogs        AuditLog[]
+  idempotencyKeys  IdempotencyKey[]
+  internalRecords  InternalRecord[]
+
+  @@map("organizations")
+}
+
+model OrganizationMember {
+  id             String           @id @default(uuid())
+  organizationId String           @map("organization_id")
+  userId         String           @map("user_id")
+  role           OrganizationRole
+  status         MemberStatus     @default(ACTIVE)
+  createdAt      DateTime         @default(now()) @map("created_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, userId])
+  @@index([userId])
+  @@map("organization_members")
+}
+
+model Workflow {
+  id              String         @id @default(uuid())
+  organizationId  String         @map("organization_id")
+  name            String
+  description     String?
+  status          WorkflowStatus @default(DRAFT)
+  activeVersionId String?        @unique @map("active_version_id")
+  createdByUserId String         @map("created_by_user_id")
+  createdAt       DateTime       @default(now()) @map("created_at")
+  updatedAt       DateTime       @updatedAt @map("updated_at")
+
+  organization    Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdBy       User              @relation("WorkflowCreatedBy", fields: [createdByUserId], references: [id])
+  versions        WorkflowVersion[] @relation("WorkflowVersions")
+  activeVersion   WorkflowVersion?  @relation("ActiveWorkflowVersion", fields: [activeVersionId], references: [id])
+  triggers        Trigger[]
+  executions      Execution[]
+  internalRecords InternalRecord[]
+
+  @@index([organizationId, status])
+  @@map("workflows")
+}
+
+model WorkflowVersion {
+  id              String                @id @default(uuid())
+  organizationId  String                @map("organization_id")
+  workflowId      String                @map("workflow_id")
+  versionNumber   Int                   @map("version_number")
+  status          WorkflowVersionStatus @default(DRAFT)
+  definitionJson  Json                  @map("definition_json")
+  createdByUserId String                @map("created_by_user_id")
+  createdAt       DateTime              @default(now()) @map("created_at")
+  activatedAt     DateTime?             @map("activated_at")
+
+  organization      Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  workflow          Workflow         @relation("WorkflowVersions", fields: [workflowId], references: [id], onDelete: Cascade)
+  activeForWorkflow Workflow?        @relation("ActiveWorkflowVersion")
+  createdBy         User             @relation("WorkflowVersionCreatedBy", fields: [createdByUserId], references: [id])
+  steps             WorkflowStep[]
+  executions        Execution[]
+  internalRecords   InternalRecord[]
+
+  @@unique([workflowId, versionNumber])
+  @@index([organizationId, workflowId])
+  @@map("workflow_versions")
+}
+
+model WorkflowStep {
+  id                String   @id @default(uuid())
+  organizationId    String   @map("organization_id")
+  workflowVersionId String   @map("workflow_version_id")
+  key               String
+  name              String
+  type              String
+  position          Int
+  configJson        Json     @map("config_json")
+  retryPolicyJson   Json?    @map("retry_policy_json")
+  timeoutSeconds    Int?     @map("timeout_seconds")
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  organization    Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  workflowVersion WorkflowVersion @relation(fields: [workflowVersionId], references: [id], onDelete: Cascade)
+  stepExecutions  StepExecution[]
+
+  @@unique([workflowVersionId, key])
+  @@index([organizationId, workflowVersionId])
+  @@map("workflow_steps")
+}
+
+model Trigger {
+  id             String    @id @default(uuid())
+  organizationId String    @map("organization_id")
+  workflowId     String    @map("workflow_id")
+  type           String
+  tokenHash      String    @map("token_hash")
+  configJson     Json      @map("config_json")
+  enabled        Boolean   @default(true)
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+  rotatedAt      DateTime? @map("rotated_at")
+
+  organization  Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  workflow      Workflow       @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  webhookEvents WebhookEvent[]
+
+  @@index([workflowId, enabled])
+  @@map("triggers")
+}
+
+model Execution {
+  id                String          @id @default(uuid())
+  organizationId    String          @map("organization_id")
+  workflowId        String          @map("workflow_id")
+  workflowVersionId String          @map("workflow_version_id")
+  webhookEventId    String?         @map("webhook_event_id")
+  status            ExecutionStatus @default(PENDING)
+  inputJson         Json            @map("input_json")
+  contextJson       Json            @map("context_json")
+  errorJson         Json?           @map("error_json")
+  startedAt         DateTime?       @map("started_at")
+  completedAt       DateTime?       @map("completed_at")
+  createdAt         DateTime        @default(now()) @map("created_at")
+  updatedAt         DateTime        @updatedAt @map("updated_at")
+
+  organization    Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  workflow        Workflow         @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  workflowVersion WorkflowVersion  @relation(fields: [workflowVersionId], references: [id])
+  webhookEvent    WebhookEvent?    @relation(fields: [webhookEventId], references: [id])
+  steps           StepExecution[]
+  internalRecords InternalRecord[]
+
+  @@index([organizationId, workflowId, status])
+  @@map("executions")
+}
+
+model StepExecution {
+  id             String              @id @default(uuid())
+  organizationId String              @map("organization_id")
+  executionId    String              @map("execution_id")
+  workflowStepId String              @map("workflow_step_id")
+  stepKey        String              @map("step_key")
+  stepType       String              @map("step_type")
+  status         StepExecutionStatus @default(PENDING)
+  attempt        Int                 @default(1)
+  inputJson      Json                @map("input_json")
+  outputJson     Json?               @map("output_json")
+  errorJson      Json?               @map("error_json")
+  startedAt      DateTime?           @map("started_at")
+  completedAt    DateTime?           @map("completed_at")
+  durationMs     Int?                @map("duration_ms")
+  createdAt      DateTime            @default(now()) @map("created_at")
+  updatedAt      DateTime            @updatedAt @map("updated_at")
+
+  organization    Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  execution       Execution        @relation(fields: [executionId], references: [id], onDelete: Cascade)
+  workflowStep    WorkflowStep     @relation(fields: [workflowStepId], references: [id])
+  internalRecords InternalRecord[]
+
+  @@index([organizationId, executionId])
+  @@map("step_executions")
+}
+
+model WebhookEvent {
+  id                 String   @id @default(uuid())
+  organizationId     String   @map("organization_id")
+  workflowId         String   @map("workflow_id")
+  triggerId          String   @map("trigger_id")
+  idempotencyKey     String?  @map("idempotency_key")
+  requestHeadersJson Json     @map("request_headers_json")
+  payloadJson        Json     @map("payload_json")
+  payloadHash        String   @map("payload_hash")
+  sourceIp           String?  @map("source_ip")
+  receivedAt         DateTime @default(now()) @map("received_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  trigger      Trigger      @relation(fields: [triggerId], references: [id])
+  executions   Execution[]
+
+  @@index([organizationId, workflowId, receivedAt])
+  @@map("webhook_events")
+}
+
+model IdempotencyKey {
+  id             String            @id @default(uuid())
+  organizationId String            @map("organization_id")
+  scope          String
+  key            String
+  requestHash    String            @map("request_hash")
+  status         IdempotencyStatus @default(STARTED)
+  responseJson   Json?             @map("response_json")
+  lockedUntil    DateTime?         @map("locked_until")
+  expiresAt      DateTime          @map("expires_at")
+  createdAt      DateTime          @default(now()) @map("created_at")
+  updatedAt      DateTime          @updatedAt @map("updated_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, scope, key])
+  @@index([expiresAt])
+  @@map("idempotency_keys")
+}
+
+model Connection {
+  id              String           @id @default(uuid())
+  organizationId  String           @map("organization_id")
+  name            String
+  type            ConnectionType
+  configJson      Json             @map("config_json")
+  status          ConnectionStatus @default(ACTIVE)
+  createdByUserId String           @map("created_by_user_id")
+  createdAt       DateTime         @default(now()) @map("created_at")
+  updatedAt       DateTime         @updatedAt @map("updated_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  secrets      Secret[]
+
+  @@index([organizationId, type])
+  @@map("connections")
+}
+
+model Secret {
+  id                   String    @id @default(uuid())
+  organizationId       String    @map("organization_id")
+  connectionId         String?   @map("connection_id")
+  name                 String
+  encryptedValue       String    @map("encrypted_value")
+  encryptionKeyVersion String    @map("encryption_key_version")
+  createdAt            DateTime  @default(now()) @map("created_at")
+  rotatedAt            DateTime? @map("rotated_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  connection   Connection?  @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, connectionId])
+  @@map("secrets")
+}
+
+model AuditLog {
+  id             String   @id @default(uuid())
+  organizationId String   @map("organization_id")
+  actorUserId    String?  @map("actor_user_id")
+  action         String
+  resourceType   String   @map("resource_type")
+  resourceId     String   @map("resource_id")
+  metadataJson   Json     @map("metadata_json")
+  ipAddress      String?  @map("ip_address")
+  userAgent      String?  @map("user_agent")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, createdAt])
+  @@map("audit_logs")
+}
+
+model InternalRecord {
+  id                String   @id @default(uuid())
+  organizationId    String   @map("organization_id")
+  workflowId        String   @map("workflow_id")
+  workflowVersionId String?  @map("workflow_version_id")
+  executionId       String   @map("execution_id")
+  stepExecutionId   String   @map("step_execution_id")
+  collection        String
+  dataJson          Json     @map("data_json")
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  organization    Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  workflow        Workflow         @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  workflowVersion WorkflowVersion? @relation(fields: [workflowVersionId], references: [id])
+  execution       Execution        @relation(fields: [executionId], references: [id], onDelete: Cascade)
+  stepExecution   StepExecution    @relation(fields: [stepExecutionId], references: [id])
+
+  @@index([organizationId, collection, createdAt])
+  @@map("internal_records")
+}

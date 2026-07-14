@@ -1,0 +1,27 @@
+node_modules/
+.turbo/
+dist/
+.next/
+coverage/
+.env
+.env.local
+.venv/
+__pycache__/
+.pytest_cache/
+*.pyc
+postgres-data/
+redis-data/
+
+# Python build metadata
+*.egg-info/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# TypeScript incremental builds
+*.tsbuildinfo
+
+# Frontend/build outputs
+.next/
+dist/
+coverage/

@@ -1,0 +1,20 @@
+{
+  "name": "automation-platform",
+  "private": true,
+  "packageManager": "pnpm@9.15.4",
+  "scripts": {
+    "dev": "corepack pnpm -r --parallel --if-present dev",
+    "build": "corepack pnpm -r --if-present build",
+    "lint": "corepack pnpm -r --if-present lint",
+    "test": "corepack pnpm -r --if-present test",
+    "typecheck": "corepack pnpm --filter @automation/shared-types build && corepack pnpm --filter @automation/config build && corepack pnpm --filter @automation/ui build && corepack pnpm -r --if-present typecheck",
+    "format": "prettier --write \"**/*.{ts,tsx,js,json,md,yml,yaml,py}\"",
+    "db:generate": "corepack pnpm --filter @automation/api prisma:generate",
+    "db:migrate": "corepack pnpm --filter @automation/api prisma:migrate"
+  },
+  "devDependencies": {
+    "prettier": "^3.4.2",
+    "turbo": "^2.3.3",
+    "typescript": "^5.7.2"
+  }
+}
