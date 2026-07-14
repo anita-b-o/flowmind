@@ -1,21 +1,18 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
-import { getStoredSession, logoutLocal } from "../../lib/api-client";
+import { useEffect, type ReactNode } from "react";
+import { useAuth } from "./use-auth";
 
 export function RequireAuth({ children }: { children: ReactNode }) {
-  const [ready, setReady] = useState(false);
+  const { status } = useAuth();
 
   useEffect(() => {
-    const { accessToken, organizationId } = getStoredSession();
-    if (!accessToken || !organizationId) {
-      logoutLocal();
-      return;
+    if (status === "anonymous") {
+      window.location.href = "/login";
     }
-    setReady(true);
-  }, []);
+  }, [status]);
 
-  if (!ready) {
+  if (status === "loading" || status === "anonymous") {
     return <main className="content muted">Loading...</main>;
   }
 

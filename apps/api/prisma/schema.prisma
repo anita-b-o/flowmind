@@ -93,16 +93,26 @@ model User {
 }
 
 model RefreshTokenSession {
-  id        String    @id @default(uuid())
-  userId    String    @map("user_id")
-  tokenHash String    @map("token_hash")
-  revokedAt DateTime? @map("revoked_at")
-  expiresAt DateTime  @map("expires_at")
-  createdAt DateTime  @default(now()) @map("created_at")
+  id                  String    @id @default(uuid())
+  userId              String    @map("user_id")
+  tokenHash           String    @map("token_hash")
+  tokenFamily         String    @map("token_family")
+  revokedAt           DateTime? @map("revoked_at")
+  replacedBySessionId String?   @unique @map("replaced_by_session_id")
+  expiresAt           DateTime  @map("expires_at")
+  lastUsedAt          DateTime  @default(now()) @map("last_used_at")
+  userAgent           String?   @map("user_agent")
+  ipHash              String?   @map("ip_hash")
+  createdAt           DateTime  @default(now()) @map("created_at")
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user              User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  replacedBySession RefreshTokenSession?  @relation("RefreshTokenSessionReplacement", fields: [replacedBySessionId], references: [id])
+  replacesSessions  RefreshTokenSession[] @relation("RefreshTokenSessionReplacement")
 
   @@index([userId])
+  @@index([tokenFamily])
+  @@index([expiresAt])
+  @@index([revokedAt])
   @@map("refresh_token_sessions")
 }
 

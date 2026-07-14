@@ -1,8 +1,16 @@
 # Security
 
-Initial controls:
+Current controls:
 
-- JWT access tokens and refresh-token sessions.
+- Short-lived JWT access tokens live only in frontend memory. Access tokens include `tokenType: "access"` and guards reject refresh tokens used as Bearer tokens.
+- Refresh tokens are rotating JWTs stored in an HttpOnly cookie and persisted only as Argon2 hashes in `refresh_token_sessions`.
+- Refresh cookie flags: `HttpOnly`, `Path=/auth`, `SameSite=Lax` by default, `Secure` in production, optional configured domain, and max age aligned with refresh JWT expiry.
+- One session row is created per refresh-token rotation. Rows include `tokenFamily`, `lastUsedAt`, `revokedAt`, `replacedBySessionId`, `userAgent`, and a peppered hash of the normalized IP.
+- Refresh rotation is transactional. The previous row is revoked and points to the replacement row. Concurrent reuse of the same refresh token is rejected.
+- Reuse detection revokes the whole token family when a revoked or replaced refresh token is presented. The incident is logged without the raw token.
+- Logout revokes the current refresh session and clears the cookie. Logout-all revokes all active sessions for the user.
+- Concurrent sessions are supported and independently revocable via API endpoints.
+- Cookie-backed mutations (`/auth/refresh`, `/auth/logout`, `/auth/logout-all`) validate `Origin` against configured allowed origins. In production, absent origins are rejected unless explicitly configured otherwise.
 - Backend-only RBAC.
 - Organization guard based on `x-organization-id` plus membership lookup.
 - Every business table includes `organization_id`.
@@ -13,9 +21,11 @@ Initial controls:
 - AI service endpoints require `x-service-api-key`.
 - Sensitive headers are stripped from persisted webhook metadata.
 
+CSRF strategy: the current browser contract assumes same-site web and API deployment with `SameSite=Lax`, Bearer access tokens in memory for normal mutations, and explicit Origin validation for cookie-backed auth mutations. If `REFRESH_COOKIE_SAME_SITE=none` is used for cross-site production, add a CSRF token mechanism before launch; CORS alone is not CSRF protection.
+
 Planned controls:
 
-- Refresh-token rotation endpoint and revocation UI.
+- Advanced session management UI.
 - AES-GCM secret encryption helper.
 - OpenTelemetry traces.
 - Sentry sanitization rules.

@@ -38,6 +38,14 @@ POST /workflows/:workflowId/triggers
 
 The plaintext token is returned only on create or rotate. The API stores only a SHA-256 hash with `WEBHOOK_TOKEN_PEPPER`.
 
+## Authentication
+
+The web app keeps access tokens only in memory. `POST /auth/register` and `POST /auth/login` return a short-lived Bearer access token and set a rotating refresh token in an HttpOnly cookie named `refresh_token` by default. The refresh token is never returned in JSON and is stored only as an Argon2 hash in PostgreSQL.
+
+Browser refresh restores the session with `POST /auth/refresh` using `credentials: include`. API and CLI clients can still call protected endpoints with `Authorization: Bearer <accessToken>`; to refresh, use a cookie-preserving HTTP client and call `/auth/refresh`.
+
+Refresh cookies use `HttpOnly`, `SameSite=Lax`, `Path=/auth`, `Secure` in production, and optional `REFRESH_COOKIE_DOMAIN`. Refresh, logout, and logout-all validate `Origin` against `CORS_ORIGIN`. Cross-site `SameSite=None` deployments require an additional CSRF token before production.
+
 Use the returned URL:
 
 ```bash
