@@ -1,4 +1,4 @@
-import { IsArray, IsObject, IsString, ValidateNested } from "class-validator";
+import { IsArray, IsObject, IsOptional, IsString, ValidateNested } from "class-validator";
 import { Type } from "class-transformer";
 
 class WorkflowStepDto {
@@ -13,6 +13,13 @@ class WorkflowStepDto {
 
   @IsObject()
   config!: Record<string, unknown>;
+
+  @IsOptional()
+  @IsObject()
+  retryPolicy?: Record<string, unknown>;
+
+  @IsOptional()
+  timeoutSeconds?: number;
 }
 
 export class CreateWorkflowVersionDto {

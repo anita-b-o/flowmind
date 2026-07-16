@@ -1,114 +1,239 @@
 import { Injectable } from "@nestjs/common";
 import { ExecutionJobPayload, ExecutionStatus, StepExecutionStatus, WorkflowStepDefinition } from "@automation/shared-types";
+import { Prisma } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import { StepExecutor } from "./step-executor";
+import { ContextReconstructor } from "./context-reconstructor";
+import { ExecutionLeaseService } from "./execution-lease.service";
+import { LeaseLostError } from "./lease-lost.error";
+import { DeadLetterService } from "../dlq/dead-letter.service";
+
+export type WorkflowRunResult = { status: "completed" | "skipped" | "lost_lease" } | { status: "waiting"; nextRetryAt: Date };
 
 @Injectable()
 export class WorkflowRunner {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly stepExecutor: StepExecutor
+    private readonly stepExecutor: StepExecutor,
+    private readonly contextReconstructor: ContextReconstructor,
+    private readonly leaseService: ExecutionLeaseService,
+    private readonly deadLetterService: DeadLetterService
   ) {}
 
-  async run(payload: ExecutionJobPayload) {
-    const execution = await this.prisma.execution.findFirst({
-      where: {
-        id: payload.executionId,
-        organizationId: payload.organizationId
-      },
-      include: {
-        workflowVersion: {
-          include: { steps: { orderBy: { position: "asc" } } }
-        }
-      }
-    });
+  async run(payload: ExecutionJobPayload): Promise<WorkflowRunResult> {
+    const acquired = await this.leaseService.acquire(payload.executionId, payload.organizationId);
+    if (!acquired) {
+      return { status: "skipped" };
+    }
+    let heartbeat: NodeJS.Timeout | undefined;
+    const startHeartbeat = () => {
+      heartbeat = setInterval(() => {
+        void this.leaseService.heartbeat(payload.executionId).catch(() => undefined);
+      }, this.leaseService.heartbeatIntervalMs());
+    };
+    startHeartbeat();
+    const execution = await this.loadExecution(payload);
     if (!execution) {
       throw new Error(`Execution ${payload.executionId} not found`);
     }
     if ([ExecutionStatus.Completed, ExecutionStatus.Cancelled].includes(execution.status as ExecutionStatus)) {
-      return;
+      await this.leaseService.release(execution.id);
+      if (heartbeat) clearInterval(heartbeat);
+      return { status: "completed" };
     }
+    await this.prisma.execution.update({ where: { id: execution.id }, data: { startedAt: execution.startedAt ?? new Date(), completedAt: null } });
 
-    await this.prisma.execution.update({
-      where: { id: execution.id },
-      data: { status: ExecutionStatus.Running, startedAt: execution.startedAt ?? new Date() }
-    });
-
-    const context = execution.contextJson as any;
-    context.metadata = {
-      ...(context.metadata ?? {}),
-      organizationId: execution.organizationId,
-      workflowId: execution.workflowId,
-      workflowVersionId: execution.workflowVersionId,
-      executionId: execution.id
-    };
     try {
       let skipNext = false;
-      for (const dbStep of execution.workflowVersion.steps) {
+      let current = await this.loadExecution(payload);
+      if (!current) {
+        throw new Error(`Execution ${payload.executionId} not found`);
+      }
+
+      for (const dbStep of current.workflowVersion.steps) {
+        await this.leaseService.assertOwned(current.id);
         if (dbStep.position === 0) {
           continue;
         }
-        if (context.steps?.[dbStep.key]?.status === StepExecutionStatus.Completed) {
+
+        const step = toStepDefinition(dbStep);
+        let stepExecution = await this.stepExecutor.ensure({
+          organizationId: current.organizationId,
+          executionId: current.id,
+          workflowStepId: dbStep.id,
+          step
+        });
+
+        if (stepExecution.status === StepExecutionStatus.Completed) {
+          skipNext = shouldSkipNext(step, stepExecution.outputJson);
           continue;
         }
+        if (stepExecution.status === StepExecutionStatus.Skipped) {
+          skipNext = false;
+          continue;
+        }
+        if (stepExecution.status === StepExecutionStatus.Retrying && stepExecution.nextRetryAt && stepExecution.nextRetryAt > new Date()) {
+          await this.markWaiting(current.id);
+          if (heartbeat) clearInterval(heartbeat);
+          await this.leaseService.release(current.id);
+          return { status: "waiting", nextRetryAt: stepExecution.nextRetryAt };
+        }
+        if (stepExecution.status === StepExecutionStatus.Failed && stepExecution.attemptCount >= stepExecution.maxAttempts) {
+          throw new Error(`Step ${step.key} failed after ${stepExecution.attemptCount} attempts`);
+        }
 
-        const step: WorkflowStepDefinition = {
-          id: dbStep.id,
-          key: dbStep.key,
-          name: dbStep.name,
-          type: dbStep.type as any,
-          position: dbStep.position,
-          config: dbStep.configJson as Record<string, unknown>,
-          retryPolicy: dbStep.retryPolicyJson as any,
-          timeoutSeconds: dbStep.timeoutSeconds ?? undefined
-        };
         if (skipNext) {
           const { result } = await this.stepExecutor.skip({
-            organizationId: execution.organizationId,
-            executionId: execution.id,
+            organizationId: current.organizationId,
+            executionId: current.id,
             workflowStepId: dbStep.id,
             step,
+            stepExecution,
             reason: "skipNextOnFalse"
           });
-          context.steps[step.key] = { output: result.output, status: result.status };
+          await this.updateContextCache(current.id);
           skipNext = false;
-          await this.prisma.execution.update({
-            where: { id: execution.id },
-            data: { contextJson: context }
-          });
+          current = await this.reload(payload);
           continue;
         }
-        const { result } = await this.stepExecutor.execute({
-          organizationId: execution.organizationId,
-          executionId: execution.id,
+
+        const context = this.contextReconstructor.reconstruct(current, current.steps);
+        const outcome = await this.stepExecutor.execute({
+          organizationId: current.organizationId,
+          executionId: current.id,
           workflowStepId: dbStep.id,
           step,
-          context
+          context,
+          stepExecution
         });
-        context.steps[step.key] = { output: result.output, status: result.status };
-        if (result.control?.skipNext) {
-          skipNext = true;
+        await this.leaseService.assertOwned(current.id);
+        await this.updateContextCache(current.id);
+
+        if (outcome.outcome === "retrying") {
+          await this.markWaiting(current.id);
+          if (heartbeat) clearInterval(heartbeat);
+          await this.leaseService.release(current.id);
+          return { status: "waiting", nextRetryAt: outcome.nextRetryAt };
         }
-        await this.prisma.execution.update({
-          where: { id: execution.id },
-          data: { contextJson: context }
-        });
+        skipNext = Boolean(outcome.result.control?.skipNext);
+        current = await this.reload(payload);
       }
 
+      const context = await this.reconstructContextForExecution(execution.id);
       await this.prisma.execution.update({
         where: { id: execution.id },
-        data: { status: ExecutionStatus.Completed, completedAt: new Date(), contextJson: context }
+        data: { status: ExecutionStatus.Completed, completedAt: new Date(), contextJson: toJson(context), errorJson: undefined }
       });
+      if (heartbeat) clearInterval(heartbeat);
+      await this.leaseService.release(execution.id);
+      return { status: "completed" };
     } catch (error) {
+      if (heartbeat) clearInterval(heartbeat);
+      if (error instanceof LeaseLostError) {
+        return { status: "lost_lease" };
+      }
+      const context = await this.reconstructContextForExecution(execution.id);
+      const failedStep = await this.prisma.stepExecution.findFirst({
+        where: { executionId: execution.id, status: StepExecutionStatus.Failed },
+        orderBy: { updatedAt: "desc" }
+      });
       await this.prisma.execution.update({
         where: { id: execution.id },
         data: {
           status: ExecutionStatus.Failed,
           completedAt: new Date(),
+          contextJson: toJson(context),
           errorJson: { message: error instanceof Error ? error.message : String(error) }
         }
       });
+      await this.deadLetterService.create({
+        organizationId: execution.organizationId,
+        executionId: execution.id,
+        workflowId: execution.workflowId,
+        workflowVersionId: execution.workflowVersionId,
+        reason: failedStep?.effectStatus === "ambiguous" ? "ambiguous" : "failed",
+        failedStepKey: failedStep?.stepKey,
+        failedStepExecutionId: failedStep?.id,
+        attempts: failedStep?.attemptCount,
+        lastErrorJson: failedStep?.errorJson ?? { message: error instanceof Error ? error.message : String(error) },
+        jobId: `execution-${execution.id}`
+      });
+      await this.leaseService.release(execution.id);
       throw error;
     }
   }
+
+  private loadExecution(payload: ExecutionJobPayload) {
+    return this.prisma.execution.findFirst({
+      where: { id: payload.executionId, organizationId: payload.organizationId },
+      include: {
+        workflowVersion: { include: { steps: { orderBy: { position: "asc" } } } },
+        steps: { orderBy: { createdAt: "asc" } }
+      }
+    });
+  }
+
+  private async reload(payload: ExecutionJobPayload) {
+    const execution = await this.loadExecution(payload);
+    if (!execution) {
+      throw new Error(`Execution ${payload.executionId} not found`);
+    }
+    return execution;
+  }
+
+  private async reconstructContextForExecution(executionId: string) {
+    const execution = await this.prisma.execution.findUniqueOrThrow({
+      where: { id: executionId },
+      include: { steps: { orderBy: { createdAt: "asc" } } }
+    });
+    return this.contextReconstructor.reconstruct(execution, execution.steps);
+  }
+
+  private async updateContextCache(executionId: string) {
+    const context = await this.reconstructContextForExecution(executionId);
+    await this.prisma.execution.update({ where: { id: executionId }, data: { contextJson: toJson(context) } });
+  }
+
+  private markWaiting(executionId: string) {
+    return this.prisma.execution.update({
+      where: { id: executionId },
+      data: { status: ExecutionStatus.Retrying, completedAt: null }
+    });
+  }
+}
+
+function toStepDefinition(dbStep: {
+  id: string;
+  key: string;
+  name: string;
+  type: string;
+  position: number;
+  configJson: unknown;
+  retryPolicyJson: unknown;
+  timeoutSeconds: number | null;
+}): WorkflowStepDefinition {
+  return {
+    id: dbStep.id,
+    key: dbStep.key,
+    name: dbStep.name,
+    type: dbStep.type as any,
+    position: dbStep.position,
+    config: dbStep.configJson as Record<string, unknown>,
+    retryPolicy: dbStep.retryPolicyJson as any,
+    timeoutSeconds: dbStep.timeoutSeconds ?? undefined
+  };
+}
+
+function shouldSkipNext(step: WorkflowStepDefinition, output: unknown) {
+  return (
+    step.type === "conditional" &&
+    Boolean((step.config as any).skipNextOnFalse) &&
+    output !== null &&
+    typeof output === "object" &&
+    (output as any).passed === false
+  );
+}
+
+function toJson(value: unknown): Prisma.InputJsonValue {
+  return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
 }

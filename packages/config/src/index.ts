@@ -22,7 +22,12 @@ const baseEnvSchema = z.object({
   WEBHOOK_PAYLOAD_MAX_BYTES: z.coerce.number().int().positive().default(1_048_576),
   WEBHOOK_RATE_LIMIT_WINDOW_SECONDS: z.coerce.number().int().positive().default(60),
   WEBHOOK_RATE_LIMIT_MAX: z.coerce.number().int().positive().default(60),
-  WEBHOOK_BURST_LIMIT_MAX: z.coerce.number().int().positive().default(10)
+  WEBHOOK_BURST_LIMIT_MAX: z.coerce.number().int().positive().default(10),
+  EXECUTION_LEASE_DURATION_MS: z.coerce.number().int().positive().default(60_000),
+  EXECUTION_HEARTBEAT_INTERVAL_MS: z.coerce.number().int().positive().default(15_000),
+  EXECUTION_RECONCILIATION_INTERVAL_MS: z.coerce.number().int().positive().default(10_000),
+  WORKER_SHUTDOWN_TIMEOUT_MS: z.coerce.number().int().positive().default(30_000),
+  WORKER_HEALTH_PORT: z.coerce.number().int().positive().default(3002)
 });
 
 const webEnvSchema = z.object({

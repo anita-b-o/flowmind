@@ -3,6 +3,7 @@ import { Module } from "@nestjs/common";
 import { ConfigModule } from "@nestjs/config";
 import { AuthModule } from "./auth/auth.module";
 import { ExecutionsModule } from "./executions/executions.module";
+import { DeadLetterExecutionsModule } from "./dead-letter/dead-letter-executions.module";
 import { HealthModule } from "./health/health.module";
 import { OrganizationsModule } from "./organizations/organizations.module";
 import { PrismaModule } from "./prisma/prisma.module";
@@ -29,6 +30,7 @@ const redisUrl = new URL(process.env.REDIS_URL ?? "redis://localhost:6379");
     WorkflowsModule,
     TriggersModule,
     ExecutionsModule,
+    DeadLetterExecutionsModule,
     QueuesModule,
     WebhooksModule
   ]

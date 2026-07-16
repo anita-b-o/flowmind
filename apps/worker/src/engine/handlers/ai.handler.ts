@@ -2,6 +2,7 @@ import { Injectable } from "@nestjs/common";
 import { ExecutionContext, StepExecutionStatus, StepResult, StepType, WorkflowStepDefinition } from "@automation/shared-types";
 import { ExpressionResolver } from "../expression-resolver";
 import { StepHandler } from "../types";
+import { HttpStepError } from "../step-errors";
 
 const aiEndpointByStepType: Partial<Record<StepType, string>> = {
   [StepType.AiClassification]: "/classify",
@@ -33,7 +34,7 @@ export class AiHandler implements StepHandler {
     });
 
     if (!response.ok) {
-      throw new Error(`AI service failed with ${response.status}`);
+      throw new HttpStepError(response.status, `AI service failed with ${response.status}`);
     }
 
     return {

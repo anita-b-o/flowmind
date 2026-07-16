@@ -1,0 +1,83 @@
+import { InjectQueue } from "@nestjs/bullmq";
+import { Injectable, OnModuleDestroy } from "@nestjs/common";
+import { Prisma } from "@prisma/client";
+import { Queue } from "bullmq";
+import { PrismaService } from "../prisma/prisma.service";
+import { WORKFLOW_EXECUTIONS_DLQ } from "../queues/queue.constants";
+
+export type DeadLetterInput = {
+  organizationId: string;
+  executionId: string;
+  workflowId: string;
+  workflowVersionId: string;
+  reason: string;
+  failedStepKey?: string;
+  failedStepExecutionId?: string;
+  attempts?: number;
+  lastErrorJson?: unknown;
+  jobId?: string;
+};
+
+@Injectable()
+export class DeadLetterService implements OnModuleDestroy {
+  constructor(
+    private readonly prisma: PrismaService,
+    @InjectQueue(WORKFLOW_EXECUTIONS_DLQ) private readonly dlq: Queue
+  ) {}
+
+  async create(input: DeadLetterInput) {
+    const existing = await this.prisma.deadLetterExecution.findFirst({
+      where: { executionId: input.executionId, resolvedAt: null }
+    });
+    const row = existing ?? (await this.prisma.deadLetterExecution.create({
+      data: {
+        organizationId: input.organizationId,
+        executionId: input.executionId,
+        workflowId: input.workflowId,
+        workflowVersionId: input.workflowVersionId,
+        sourceQueue: "workflow-executions",
+        reason: input.reason,
+        failedStepKey: input.failedStepKey,
+        failedStepExecutionId: input.failedStepExecutionId,
+        attempts: input.attempts ?? 0,
+        lastErrorJson: toJson(input.lastErrorJson ?? {}),
+        jobId: input.jobId
+      }
+    }).catch(async () => {
+      const raced = await this.prisma.deadLetterExecution.findFirst({
+        where: { executionId: input.executionId, resolvedAt: null }
+      });
+      if (raced) return raced;
+      throw new Error("Failed to create dead letter execution");
+    }));
+
+    await this.publish(row.id).catch(() => undefined);
+    return row;
+  }
+
+  async publish(deadLetterId: string) {
+    const row = await this.prisma.deadLetterExecution.findUnique({ where: { id: deadLetterId } });
+    if (!row) return;
+    await this.dlq.add(
+      "dead-letter.execution",
+      {
+        deadLetterId: row.id,
+        organizationId: row.organizationId,
+        executionId: row.executionId,
+        workflowId: row.workflowId,
+        workflowVersionId: row.workflowVersionId,
+        reason: row.reason,
+        failedStepKey: row.failedStepKey
+      },
+      { jobId: `dead-letter-${row.id}`, attempts: 1, removeOnComplete: 1000, removeOnFail: false }
+    );
+  }
+
+  async onModuleDestroy() {
+    await this.dlq.close().catch(() => undefined);
+  }
+}
+
+function toJson(value: unknown): Prisma.InputJsonValue {
+  return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
+}

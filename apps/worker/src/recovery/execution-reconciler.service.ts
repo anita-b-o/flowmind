@@ -1,0 +1,125 @@
+import { InjectQueue } from "@nestjs/bullmq";
+import { Injectable, OnModuleDestroy, OnModuleInit } from "@nestjs/common";
+import { Queue } from "bullmq";
+import { ExecutionStatus, StepExecutionStatus } from "@automation/shared-types";
+import { PrismaService } from "../prisma/prisma.service";
+import { EXECUTION_RUN_JOB, WORKFLOW_EXECUTIONS_QUEUE } from "../queues/queue.constants";
+import { ShutdownStateService } from "../runtime/shutdown-state.service";
+
+@Injectable()
+export class ExecutionReconcilerService implements OnModuleInit, OnModuleDestroy {
+  private timer?: NodeJS.Timeout;
+  private running = false;
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly shutdown: ShutdownStateService,
+    @InjectQueue(WORKFLOW_EXECUTIONS_QUEUE) private readonly queue: Queue
+  ) {}
+
+  onModuleInit() {
+    this.timer = setInterval(() => void this.reconcile(), Number(process.env.EXECUTION_RECONCILIATION_INTERVAL_MS ?? 10_000));
+    this.timer.unref();
+    void this.reconcile();
+  }
+
+  async onModuleDestroy() {
+    if (this.timer) clearInterval(this.timer);
+    await this.queue.close().catch(() => undefined);
+  }
+
+  isActive() {
+    return Boolean(this.timer) && !this.shutdown.isShuttingDown();
+  }
+
+  async reconcile() {
+    if (this.running || this.shutdown.isShuttingDown()) return;
+    this.running = true;
+    try {
+      await this.recoverExpiredRunning();
+      await this.requeueDueRetries();
+      await this.requeueQueuedExecutions();
+    } finally {
+      this.running = false;
+    }
+  }
+
+  private async recoverExpiredRunning() {
+    const now = new Date();
+    const executions = await this.prisma.execution.findMany({
+      where: { status: ExecutionStatus.Running, lockedUntil: { lt: now } },
+      take: 50,
+      include: { steps: true }
+    });
+    for (const execution of executions) {
+      await this.prisma.execution.updateMany({
+        where: { id: execution.id, status: ExecutionStatus.Running, lockedUntil: { lt: now } },
+        data: { status: ExecutionStatus.Queued, lockedBy: null, lockedUntil: null }
+      });
+      for (const step of execution.steps.filter((entry) => entry.status === StepExecutionStatus.Running)) {
+        const ambiguous = isAmbiguousWhenAbandoned(step.stepType);
+        await this.prisma.stepExecution.update({
+          where: { id: step.id },
+          data: {
+            status: ambiguous ? StepExecutionStatus.Failed : StepExecutionStatus.Retrying,
+            effectStatus: ambiguous ? "ambiguous" : "failed",
+            errorJson: { message: "Step abandoned after execution lease expired", classification: ambiguous ? "ambiguous" : "retryable" },
+            nextRetryAt: ambiguous ? null : now
+          }
+        });
+      }
+      await this.enqueue(execution.id, execution.organizationId, execution.workflowId, execution.workflowVersionId);
+    }
+  }
+
+  private async requeueDueRetries() {
+    const now = new Date();
+    const executions = await this.prisma.execution.findMany({
+      where: {
+        OR: [
+          { status: ExecutionStatus.Retrying },
+          { status: ExecutionStatus.Queued }
+        ],
+        lockedBy: null,
+        steps: { some: { status: StepExecutionStatus.Retrying, nextRetryAt: { lte: now } } }
+      },
+      take: 100
+    });
+    for (const execution of executions) {
+      await this.prisma.execution.updateMany({
+        where: { id: execution.id, status: { in: [ExecutionStatus.Retrying, ExecutionStatus.Queued] } },
+        data: { status: ExecutionStatus.Queued }
+      });
+      await this.enqueue(execution.id, execution.organizationId, execution.workflowId, execution.workflowVersionId);
+    }
+  }
+
+  private async requeueQueuedExecutions() {
+    const now = new Date();
+    const executions = await this.prisma.execution.findMany({
+      where: {
+        status: ExecutionStatus.Queued,
+        lockedBy: null,
+        NOT: {
+          steps: { some: { status: StepExecutionStatus.Retrying, nextRetryAt: { lte: now } } }
+        }
+      },
+      take: 100
+    });
+    for (const execution of executions) {
+      await this.enqueue(execution.id, execution.organizationId, execution.workflowId, execution.workflowVersionId);
+    }
+  }
+
+  private enqueue(executionId: string, organizationId: string, workflowId: string, workflowVersionId: string) {
+    return this.queue.add(
+      EXECUTION_RUN_JOB,
+      { executionId, organizationId, workflowId, workflowVersionId, requestId: "reconciler" },
+      { jobId: `execution-${executionId}`, attempts: 1, removeOnComplete: 1000, removeOnFail: false }
+    );
+  }
+}
+
+function isAmbiguousWhenAbandoned(stepType: string) {
+  return stepType === "email_notification" || stepType === "http_request";
+}

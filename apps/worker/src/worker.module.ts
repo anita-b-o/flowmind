@@ -3,6 +3,7 @@ import { Module } from "@nestjs/common";
 import { PrismaService } from "./prisma/prisma.service";
 import { ExecutionsProcessor } from "./queues/executions.processor";
 import { WORKFLOW_EXECUTIONS_QUEUE } from "./queues/queue.constants";
+import { WORKFLOW_EXECUTIONS_DLQ } from "./queues/queue.constants";
 import { WorkflowRunner } from "./engine/workflow-runner";
 import { StepExecutor } from "./engine/step-executor";
 import { StepRegistry } from "./engine/step-registry";
@@ -13,6 +14,15 @@ import { DatabaseRecordHandler } from "./engine/handlers/database-record.handler
 import { AiHandler } from "./engine/handlers/ai.handler";
 import { EmailNotificationHandler } from "./engine/handlers/email-notification.handler";
 import { SafeHttpClient } from "./http/safe-http-client";
+import { ErrorClassifier } from "./engine/error-classifier";
+import { RetryPolicyResolver } from "./engine/retry-policy-resolver";
+import { ContextReconstructor } from "./engine/context-reconstructor";
+import { WorkerIdentityService } from "./runtime/worker-identity.service";
+import { ShutdownStateService } from "./runtime/shutdown-state.service";
+import { ExecutionLeaseService } from "./engine/execution-lease.service";
+import { DeadLetterService } from "./dlq/dead-letter.service";
+import { ExecutionReconcilerService } from "./recovery/execution-reconciler.service";
+import { WorkerHealthService } from "./health/worker-health.service";
 
 const redisUrl = new URL(process.env.REDIS_URL ?? "redis://localhost:6379");
 
@@ -24,7 +34,7 @@ const redisUrl = new URL(process.env.REDIS_URL ?? "redis://localhost:6379");
         port: Number(redisUrl.port || 6379)
       }
     }),
-    BullModule.registerQueue({ name: WORKFLOW_EXECUTIONS_QUEUE })
+    BullModule.registerQueue({ name: WORKFLOW_EXECUTIONS_QUEUE }, { name: WORKFLOW_EXECUTIONS_DLQ })
   ],
   providers: [
     PrismaService,
@@ -33,6 +43,15 @@ const redisUrl = new URL(process.env.REDIS_URL ?? "redis://localhost:6379");
     StepExecutor,
     StepRegistry,
     ExpressionResolver,
+    ErrorClassifier,
+    RetryPolicyResolver,
+    ContextReconstructor,
+    WorkerIdentityService,
+    ShutdownStateService,
+    ExecutionLeaseService,
+    DeadLetterService,
+    ExecutionReconcilerService,
+    WorkerHealthService,
     SafeHttpClient,
     HttpRequestHandler,
     ConditionalHandler,

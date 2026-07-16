@@ -5,6 +5,13 @@ import { PrismaService } from "../prisma/prisma.service";
 import { CreateWorkflowDto } from "./dto/create-workflow.dto";
 import { CreateWorkflowVersionDto } from "./dto/create-workflow-version.dto";
 
+const MAX_ATTEMPTS_MIN = 1;
+const MAX_ATTEMPTS_MAX = 5;
+const BACKOFF_MIN_MS = 100;
+const BACKOFF_MAX_MS = 60_000;
+const TIMEOUT_MIN_SECONDS = 1;
+const TIMEOUT_MAX_SECONDS = 120;
+
 @Injectable()
 export class WorkflowsService {
   constructor(private readonly prisma: PrismaService) {}
@@ -71,7 +78,9 @@ export class WorkflowsService {
                 name: step.name,
                 type: step.type,
                 position: index + 1,
-                configJson: toPrismaJson(step.config)
+                configJson: toPrismaJson(step.config),
+                retryPolicyJson: step.retryPolicy ? toPrismaJson(normalizeRetryPolicy(step.retryPolicy)) : undefined,
+                timeoutSeconds: normalizeTimeoutSeconds(step.timeoutSeconds)
               }))
             ]
           }
@@ -108,6 +117,35 @@ export class WorkflowsService {
       });
     });
   }
+}
+
+function normalizeRetryPolicy(raw: Record<string, unknown>) {
+  const retry = isRecord(raw.retry) ? raw.retry : raw;
+  return {
+    retry: {
+      maxAttempts: clampNumber(Number(retry.maxAttempts ?? 1), MAX_ATTEMPTS_MIN, MAX_ATTEMPTS_MAX),
+      backoffMs: clampNumber(Number(retry.backoffMs ?? 1000), BACKOFF_MIN_MS, BACKOFF_MAX_MS),
+      strategy: retry.strategy === "exponential" ? "exponential" : "fixed"
+    }
+  };
+}
+
+function normalizeTimeoutSeconds(value: unknown) {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  return clampNumber(Number(value), TIMEOUT_MIN_SECONDS, TIMEOUT_MAX_SECONDS);
+}
+
+function clampNumber(value: number, min: number, max: number) {
+  if (!Number.isFinite(value)) {
+    return min;
+  }
+  return Math.min(max, Math.max(min, Math.trunc(value)));
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
 function toPrismaJson(value: unknown): Prisma.InputJsonValue {

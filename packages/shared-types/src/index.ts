@@ -22,6 +22,7 @@ export enum ExecutionStatus {
   Pending = "PENDING",
   Queued = "QUEUED",
   Running = "RUNNING",
+  Retrying = "RETRYING",
   Completed = "COMPLETED",
   Failed = "FAILED",
   Cancelled = "CANCELLED"
@@ -51,8 +52,8 @@ export type JsonObject = Record<string, unknown>;
 
 export interface RetryPolicyDefinition {
   maxAttempts: number;
-  backoff: "fixed" | "exponential";
-  initialDelayMs: number;
+  backoffMs: number;
+  strategy: "fixed" | "exponential";
 }
 
 export interface WorkflowStepDefinition {

@@ -1,0 +1,2 @@
+-- RenameIndex
+ALTER INDEX "internal_records_organization_id_execution_id_collection_dedupe" RENAME TO "internal_records_organization_id_execution_id_collection_de_key";

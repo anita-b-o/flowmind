@@ -27,17 +27,28 @@ export class DatabaseRecordHandler implements StepHandler {
     const workflowVersionId = metadata.workflowVersionId;
     const executionId = runtime.executionId ?? metadata.executionId;
     const stepExecutionId = runtime.stepExecutionId;
+    const dedupeKey = runtime.effectKey ?? `${executionId}:${step.key}`;
     if (!organizationId || !workflowId || !executionId || !stepExecutionId) {
       throw new Error("Database record step is missing execution metadata");
     }
-    const record = await this.prisma.internalRecord.create({
-      data: {
+    const record = await this.prisma.internalRecord.upsert({
+      where: {
+        organizationId_executionId_collection_dedupeKey: {
+          organizationId,
+          executionId,
+          collection: config.collection,
+          dedupeKey
+        }
+      },
+      update: {},
+      create: {
         organizationId,
         workflowId,
         workflowVersionId,
         executionId,
         stepExecutionId,
         collection: config.collection,
+        dedupeKey,
         dataJson: toJson(config.data)
       }
     });

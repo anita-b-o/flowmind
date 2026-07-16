@@ -42,6 +42,7 @@ enum ExecutionStatus {
   PENDING
   QUEUED
   RUNNING
+  RETRYING
   COMPLETED
   FAILED
   CANCELLED
@@ -84,10 +85,11 @@ model User {
   createdAt    DateTime   @default(now()) @map("created_at")
   updatedAt    DateTime   @updatedAt @map("updated_at")
 
-  memberships OrganizationMember[]
-  workflows   Workflow[]            @relation("WorkflowCreatedBy")
-  versions    WorkflowVersion[]     @relation("WorkflowVersionCreatedBy")
-  sessions    RefreshTokenSession[]
+  memberships               OrganizationMember[]
+  workflows                 Workflow[]            @relation("WorkflowCreatedBy")
+  versions                  WorkflowVersion[]     @relation("WorkflowVersionCreatedBy")
+  sessions                  RefreshTokenSession[]
+  requestedExecutionRetries Execution[]           @relation("ExecutionRetryRequestedBy")
 
   @@map("users")
 }
@@ -123,19 +125,20 @@ model Organization {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  members          OrganizationMember[]
-  workflows        Workflow[]
-  workflowVersions WorkflowVersion[]
-  workflowSteps    WorkflowStep[]
-  triggers         Trigger[]
-  executions       Execution[]
-  stepExecutions   StepExecution[]
-  connections      Connection[]
-  secrets          Secret[]
-  webhookEvents    WebhookEvent[]
-  auditLogs        AuditLog[]
-  idempotencyKeys  IdempotencyKey[]
-  internalRecords  InternalRecord[]
+  members              OrganizationMember[]
+  workflows            Workflow[]
+  workflowVersions     WorkflowVersion[]
+  workflowSteps        WorkflowStep[]
+  triggers             Trigger[]
+  executions           Execution[]
+  stepExecutions       StepExecution[]
+  deadLetterExecutions DeadLetterExecution[]
+  connections          Connection[]
+  secrets              Secret[]
+  webhookEvents        WebhookEvent[]
+  auditLogs            AuditLog[]
+  idempotencyKeys      IdempotencyKey[]
+  internalRecords      InternalRecord[]
 
   @@map("organizations")
 }
@@ -167,13 +170,14 @@ model Workflow {
   createdAt       DateTime       @default(now()) @map("created_at")
   updatedAt       DateTime       @updatedAt @map("updated_at")
 
-  organization    Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  createdBy       User              @relation("WorkflowCreatedBy", fields: [createdByUserId], references: [id])
-  versions        WorkflowVersion[] @relation("WorkflowVersions")
-  activeVersion   WorkflowVersion?  @relation("ActiveWorkflowVersion", fields: [activeVersionId], references: [id])
-  triggers        Trigger[]
-  executions      Execution[]
-  internalRecords InternalRecord[]
+  organization         Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdBy            User                  @relation("WorkflowCreatedBy", fields: [createdByUserId], references: [id])
+  versions             WorkflowVersion[]     @relation("WorkflowVersions")
+  activeVersion        WorkflowVersion?      @relation("ActiveWorkflowVersion", fields: [activeVersionId], references: [id])
+  triggers             Trigger[]
+  executions           Execution[]
+  internalRecords      InternalRecord[]
+  deadLetterExecutions DeadLetterExecution[]
 
   @@index([organizationId, status])
   @@map("workflows")
@@ -190,13 +194,14 @@ model WorkflowVersion {
   createdAt       DateTime              @default(now()) @map("created_at")
   activatedAt     DateTime?             @map("activated_at")
 
-  organization      Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  workflow          Workflow         @relation("WorkflowVersions", fields: [workflowId], references: [id], onDelete: Cascade)
-  activeForWorkflow Workflow?        @relation("ActiveWorkflowVersion")
-  createdBy         User             @relation("WorkflowVersionCreatedBy", fields: [createdByUserId], references: [id])
-  steps             WorkflowStep[]
-  executions        Execution[]
-  internalRecords   InternalRecord[]
+  organization         Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  workflow             Workflow              @relation("WorkflowVersions", fields: [workflowId], references: [id], onDelete: Cascade)
+  activeForWorkflow    Workflow?             @relation("ActiveWorkflowVersion")
+  createdBy            User                  @relation("WorkflowVersionCreatedBy", fields: [createdByUserId], references: [id])
+  steps                WorkflowStep[]
+  executions           Execution[]
+  internalRecords      InternalRecord[]
+  deadLetterExecutions DeadLetterExecution[]
 
   @@unique([workflowId, versionNumber])
   @@index([organizationId, workflowId])
@@ -246,28 +251,43 @@ model Trigger {
 }
 
 model Execution {
-  id                String          @id @default(uuid())
-  organizationId    String          @map("organization_id")
-  workflowId        String          @map("workflow_id")
-  workflowVersionId String          @map("workflow_version_id")
-  webhookEventId    String?         @map("webhook_event_id")
-  status            ExecutionStatus @default(PENDING)
-  inputJson         Json            @map("input_json")
-  contextJson       Json            @map("context_json")
-  errorJson         Json?           @map("error_json")
-  startedAt         DateTime?       @map("started_at")
-  completedAt       DateTime?       @map("completed_at")
-  createdAt         DateTime        @default(now()) @map("created_at")
-  updatedAt         DateTime        @updatedAt @map("updated_at")
+  id                     String          @id @default(uuid())
+  organizationId         String          @map("organization_id")
+  workflowId             String          @map("workflow_id")
+  workflowVersionId      String          @map("workflow_version_id")
+  webhookEventId         String?         @map("webhook_event_id")
+  retryOfExecutionId     String?         @map("retry_of_execution_id")
+  retryRequestedByUserId String?         @map("retry_requested_by_user_id")
+  retryRequestedAt       DateTime?       @map("retry_requested_at")
+  retryReason            String?         @map("retry_reason")
+  status                 ExecutionStatus @default(PENDING)
+  inputJson              Json            @map("input_json")
+  contextJson            Json            @map("context_json")
+  errorJson              Json?           @map("error_json")
+  lockedBy               String?         @map("locked_by")
+  lockedUntil            DateTime?       @map("locked_until")
+  lastHeartbeatAt        DateTime?       @map("last_heartbeat_at")
+  runAttempt             Int             @default(0) @map("run_attempt")
+  startedAt              DateTime?       @map("started_at")
+  completedAt            DateTime?       @map("completed_at")
+  createdAt              DateTime        @default(now()) @map("created_at")
+  updatedAt              DateTime        @updatedAt @map("updated_at")
 
-  organization    Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  workflow        Workflow         @relation(fields: [workflowId], references: [id], onDelete: Cascade)
-  workflowVersion WorkflowVersion  @relation(fields: [workflowVersionId], references: [id])
-  webhookEvent    WebhookEvent?    @relation(fields: [webhookEventId], references: [id])
-  steps           StepExecution[]
-  internalRecords InternalRecord[]
+  organization     Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  workflow         Workflow              @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  workflowVersion  WorkflowVersion       @relation(fields: [workflowVersionId], references: [id])
+  webhookEvent     WebhookEvent?         @relation(fields: [webhookEventId], references: [id])
+  retryOfExecution Execution?            @relation("ExecutionRetries", fields: [retryOfExecutionId], references: [id])
+  retryExecutions  Execution[]           @relation("ExecutionRetries")
+  retryRequestedBy User?                 @relation("ExecutionRetryRequestedBy", fields: [retryRequestedByUserId], references: [id])
+  steps            StepExecution[]
+  internalRecords  InternalRecord[]
+  deadLetters      DeadLetterExecution[] @relation("DeadLetterOriginalExecution")
+  retryDeadLetters DeadLetterExecution[] @relation("DeadLetterRetryExecution")
 
   @@index([organizationId, workflowId, status])
+  @@index([status, lockedUntil])
+  @@index([retryOfExecutionId, status])
   @@map("executions")
 }
 
@@ -280,6 +300,12 @@ model StepExecution {
   stepType       String              @map("step_type")
   status         StepExecutionStatus @default(PENDING)
   attempt        Int                 @default(1)
+  attemptCount   Int                 @default(0) @map("attempt_count")
+  maxAttempts    Int                 @default(1) @map("max_attempts")
+  nextRetryAt    DateTime?           @map("next_retry_at")
+  effectKey      String?             @map("effect_key")
+  effectStatus   String?             @map("effect_status")
+  workerId       String?             @map("worker_id")
   inputJson      Json                @map("input_json")
   outputJson     Json?               @map("output_json")
   errorJson      Json?               @map("error_json")
@@ -289,11 +315,13 @@ model StepExecution {
   createdAt      DateTime            @default(now()) @map("created_at")
   updatedAt      DateTime            @updatedAt @map("updated_at")
 
-  organization    Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  execution       Execution        @relation(fields: [executionId], references: [id], onDelete: Cascade)
-  workflowStep    WorkflowStep     @relation(fields: [workflowStepId], references: [id])
+  organization    Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  execution       Execution             @relation(fields: [executionId], references: [id], onDelete: Cascade)
+  workflowStep    WorkflowStep          @relation(fields: [workflowStepId], references: [id])
   internalRecords InternalRecord[]
+  deadLetters     DeadLetterExecution[] @relation("DeadLetterFailedStep")
 
+  @@unique([executionId, workflowStepId])
   @@index([organizationId, executionId])
   @@map("step_executions")
 }
@@ -399,6 +427,7 @@ model InternalRecord {
   executionId       String   @map("execution_id")
   stepExecutionId   String   @map("step_execution_id")
   collection        String
+  dedupeKey         String   @map("dedupe_key")
   dataJson          Json     @map("data_json")
   createdAt         DateTime @default(now()) @map("created_at")
 
@@ -408,6 +437,39 @@ model InternalRecord {
   execution       Execution        @relation(fields: [executionId], references: [id], onDelete: Cascade)
   stepExecution   StepExecution    @relation(fields: [stepExecutionId], references: [id])
 
+  @@unique([organizationId, executionId, collection, dedupeKey])
   @@index([organizationId, collection, createdAt])
   @@map("internal_records")
+}
+
+model DeadLetterExecution {
+  id                    String    @id @default(uuid())
+  organizationId        String    @map("organization_id")
+  executionId           String    @map("execution_id")
+  workflowId            String    @map("workflow_id")
+  workflowVersionId     String    @map("workflow_version_id")
+  sourceQueue           String    @map("source_queue")
+  reason                String
+  failedStepKey         String?   @map("failed_step_key")
+  failedStepExecutionId String?   @map("failed_step_execution_id")
+  attempts              Int       @default(0)
+  lastErrorJson         Json?     @map("last_error_json")
+  jobId                 String?   @map("job_id")
+  retryExecutionId      String?   @map("retry_execution_id")
+  createdAt             DateTime  @default(now()) @map("created_at")
+  resolvedAt            DateTime? @map("resolved_at")
+  resolution            String?
+
+  organization        Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  execution           Execution       @relation("DeadLetterOriginalExecution", fields: [executionId], references: [id], onDelete: Cascade)
+  workflow            Workflow        @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  workflowVersion     WorkflowVersion @relation(fields: [workflowVersionId], references: [id])
+  failedStepExecution StepExecution?  @relation("DeadLetterFailedStep", fields: [failedStepExecutionId], references: [id])
+  retryExecution      Execution?      @relation("DeadLetterRetryExecution", fields: [retryExecutionId], references: [id])
+
+  @@index([organizationId])
+  @@index([executionId])
+  @@index([createdAt])
+  @@index([resolvedAt])
+  @@map("dead_letter_executions")
 }

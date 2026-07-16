@@ -11,8 +11,7 @@ export class QueueService {
   enqueueExecution(payload: ExecutionJobPayload) {
     return this.executionsQueue.add(EXECUTION_RUN_JOB, payload, {
       jobId: `execution-${payload.executionId}`,
-      attempts: 3,
-      backoff: { type: "exponential", delay: 1000 },
+      attempts: 1,
       removeOnComplete: 1000,
       removeOnFail: false
     });

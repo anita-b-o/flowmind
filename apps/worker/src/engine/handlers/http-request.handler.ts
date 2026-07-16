@@ -3,6 +3,7 @@ import { StepExecutionStatus, StepType, WorkflowStepDefinition, ExecutionContext
 import { ExpressionResolver } from "../expression-resolver";
 import { StepHandler } from "../types";
 import { SafeHttpClient } from "../../http/safe-http-client";
+import { HttpStepError } from "../step-errors";
 
 @Injectable()
 export class HttpRequestHandler implements StepHandler {
@@ -21,13 +22,22 @@ export class HttpRequestHandler implements StepHandler {
       body?: unknown;
     };
 
+    const method = (config.method ?? "GET").toUpperCase();
+    const headers = { ...(config.headers ?? {}) };
+    const runtime = (context.metadata?.runtime ?? {}) as Record<string, string>;
+    if (["POST", "PATCH", "DELETE"].includes(method) && runtime.effectKey && !hasHeader(headers, "idempotency-key")) {
+      headers["Idempotency-Key"] = runtime.effectKey;
+    }
     const response = await this.safeHttpClient.request({
       url: config.url,
-      method: config.method,
-      headers: config.headers,
+      method,
+      headers,
       body: config.body,
       timeoutMs: (step.timeoutSeconds ?? 15) * 1000
     });
+    if (!response.ok) {
+      throw new HttpStepError(response.status);
+    }
     return {
       status: StepExecutionStatus.Completed,
       output: {
@@ -37,4 +47,8 @@ export class HttpRequestHandler implements StepHandler {
       }
     };
   }
+}
+
+function hasHeader(headers: Record<string, string>, name: string) {
+  return Object.keys(headers).some((key) => key.toLowerCase() === name.toLowerCase());
 }
