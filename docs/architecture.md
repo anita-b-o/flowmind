@@ -21,11 +21,17 @@ The workflow detail API exposes all versions and ordered steps so the UI can sho
 
 Connections are organization-scoped metadata records with encrypted `Secret` rows. Workflow versions store `connectionId` for HTTP and email steps rather than credentials. The worker resolves and decrypts the active secret immediately before executing a step, then persists only sanitized operational output.
 
+Workflow step configs can use the shared expression engine to reference webhook data, previous step outputs, safe workflow/execution/organization metadata, non-secret variables, and safe connection metadata. New workflow versions created by the Builder use strict expression validation; older versions remain legacy-compatible.
+
 ## Step Recovery Engine
 
 PostgreSQL is the source of truth for workflow recovery. BullMQ delivers execution jobs at least once, but step retry is controlled by `StepExecution`, not by job attempts. Each logical workflow step has one row keyed by `(execution_id, workflow_step_id)`, with `attemptCount`, `maxAttempts`, `nextRetryAt`, `effectKey`, `effectStatus`, and `workerId`.
 
 The runner reloads `Execution`, `WorkflowVersion`, `WorkflowStep`, and `StepExecution` before progressing. Completed and skipped steps are reused from persisted output; `contextJson` is only a cache rebuilt from step rows.
+
+Workflow versions with `workflowDefinitionSchemaVersion: 2` add an acyclic `definitionJson.graph` on top of the flat step list. The worker follows persisted control outputs for If/Switch, skips unselected branch steps, and uses `StepExecution.nextRetryAt` for durable Delay/Wait Until pauses. Versions without schema v2 continue through the legacy linear runner.
+
+Before a handler runs, the worker reconstructs expression scope from persisted execution input and completed `StepExecution.outputJson`, resolves the current step config once, and stores only the resolved step input on `StepExecution.inputJson`.
 
 Retry policies are normalized on version creation to `maxAttempts` 1..5, `backoffMs` 100..60000, `strategy` fixed/exponential, and `timeoutSeconds` 1..120. Values outside the allowed range are clamped rather than rejected so clients can submit conservative defaults without breaking version creation.
 

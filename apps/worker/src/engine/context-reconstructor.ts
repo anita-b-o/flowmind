@@ -6,7 +6,12 @@ type ExecutionLike = {
   organizationId: string;
   workflowId: string;
   workflowVersionId: string;
+  correlationId?: string | null;
+  retryOfExecutionId?: string | null;
+  startedAt?: Date | null;
   inputJson: unknown;
+  workflow?: { name: string; organization?: { id: string; slug?: string | null } } | null;
+  workflowVersion?: { definitionJson: unknown; workflow?: { name: string; organization?: { id: string; slug?: string | null } } | null } | null;
 };
 
 type StepExecutionLike = {
@@ -19,15 +24,37 @@ type StepExecutionLike = {
 export class ContextReconstructor {
   reconstruct(execution: ExecutionLike, stepExecutions: StepExecutionLike[]): ExecutionContext {
     const input = asRecord(execution.inputJson);
+    const definition = asRecord(execution.workflowVersion?.definitionJson);
+    const workflow = execution.workflowVersion?.workflow ?? execution.workflow;
+    const organization = workflow?.organization;
     const context: ExecutionContext = {
       trigger: asRecord(input.trigger),
       steps: {},
+      workflow: {
+        id: execution.workflowId,
+        versionId: execution.workflowVersionId,
+        name: workflow?.name,
+        variables: asRecord(definition.workflowVariables)
+      },
+      execution: {
+        id: execution.id,
+        correlationId: execution.correlationId,
+        retryOfExecutionId: execution.retryOfExecutionId,
+        startedAt: execution.startedAt?.toISOString()
+      },
+      organization: {
+        id: execution.organizationId,
+        slug: organization?.slug,
+        variables: {}
+      },
+      connection: {},
       metadata: {
         ...asRecord(input.metadata),
         organizationId: execution.organizationId,
         workflowId: execution.workflowId,
         workflowVersionId: execution.workflowVersionId,
-        executionId: execution.id
+        executionId: execution.id,
+        expressionMode: definition.expressionMode === "strict" ? "strict" : "legacy"
       }
     };
 

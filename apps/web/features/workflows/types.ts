@@ -15,6 +15,10 @@ export type StepType =
   | "ai_structured_extraction"
   | "ai_summary"
   | "conditional"
+  | "if"
+  | "switch"
+  | "delay"
+  | "wait_until"
   | "email_notification"
   | "database_record";
 
@@ -67,6 +71,16 @@ export interface WorkflowStepDto {
 export interface WorkflowDefinitionDto {
   trigger: WorkflowStepDto;
   steps: WorkflowStepDto[];
+  workflowDefinitionSchemaVersion?: 1 | 2;
+  graph?: WorkflowGraphDto;
+  expressionMode?: "legacy" | "strict";
+  workflowVariables?: Record<string, unknown>;
+}
+
+export interface WorkflowGraphDto {
+  entryStepKey: string;
+  edges: Array<{ from: string; to: string; kind: "next" | "if_true" | "if_false" | "switch_case" | "switch_default"; label?: string; caseKey?: string }>;
+  terminalStepKeys?: string[];
 }
 
 export interface CreateWorkflowDto {

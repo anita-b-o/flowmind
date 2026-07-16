@@ -95,11 +95,19 @@ x-organization-id: <organization-id>
       "retryPolicy": { "maxAttempts": 1, "backoffMs": 1000, "strategy": "fixed" },
       "timeoutSeconds": 30
     }
-  ]
+  ],
+  "workflowDefinitionSchemaVersion": 2,
+  "graph": {
+    "entryStepKey": "save_lead",
+    "edges": [],
+    "terminalStepKeys": ["save_lead"]
+  },
+  "expressionMode": "strict",
+  "workflowVariables": {}
 }
 ```
 
-Retry and timeout values are normalized by existing bounds on version creation. `PATCH /workflows/:workflowId/versions/:versionId/activate` explicitly activates an existing version and archives the previous active version; creation never activates automatically.
+Retry and timeout values are normalized by existing bounds on version creation. For schema version 2, the API validates graph targets, cycles, required If/Switch branches, and Delay/Wait Until literals before persistence. `PATCH /workflows/:workflowId/versions/:versionId/activate` explicitly activates an existing version and archives the previous active version; creation never activates automatically.
 
 HTTP and email step configs should reference connections:
 
@@ -111,7 +119,19 @@ HTTP and email step configs should reference connections:
 { "connectionId": "connection-id", "to": "ops@example.com", "subject": "Lead", "text": "Hello" }
 ```
 
-The API validates that referenced connections belong to the organization, are active, and match the step type. Plaintext secrets are never accepted in public responses.
+The API validates that referenced connections belong to the organization, are active, and match the step type. Plaintext secrets are never accepted in public responses. New strict versions also validate expression syntax, namespaces, unsafe segments, and references to unavailable steps.
+
+Expression helper endpoints:
+
+- `GET /workflows/:workflowId/variables/catalog?versionId=...`
+- `POST /workflows/:workflowId/expressions/validate`
+- `POST /workflows/:workflowId/expressions/preview`
+- `GET /variables/organization`
+- `PUT|DELETE /variables/organization/:key`
+- `GET /workflows/:workflowId/variables`
+- `PUT|DELETE /workflows/:workflowId/variables/:key`
+
+Variables store JSON values for expression use and are not a secret store.
 
 ## Connections
 
@@ -143,7 +163,7 @@ Webhook responses include the authoritative `correlationId` in the body. If an i
 
 `GET /dead-letter-executions/:deadLetterId` returns 404 when the row does not exist or belongs to another organization. Responses include workflow, workflow version, original execution, public failure category/code/message, resolution state, retry execution, and correlation ID. Raw provider errors, payloads, headers, queue job IDs, worker IDs, locks, tokens, cookies, and secrets are not returned.
 
-Public reason catalog: `non_retryable`, `attempts_exhausted`, `ambiguous_effect`, `inconsistent_state`, `execution_limit`, `unknown`.
+Public reason catalog: `non_retryable`, `attempts_exhausted`, `ambiguous_effect`, `inconsistent_state`, `invalid_wait`, `branch_resolution_failed`, `control_validation_failed`, `execution_limit`, `unknown`.
 
 ## Manual Retry
 

@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@automation/config": "workspace:*",
+    "@automation/expression-engine": "workspace:*",
     "@automation/observability": "workspace:*",
     "@automation/shared-types": "workspace:*",
     "@nestjs/bullmq": "^10.2.3",

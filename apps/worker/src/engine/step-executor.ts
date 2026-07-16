@@ -8,14 +8,17 @@ import { RetryPolicyResolver, type RetryPolicy } from "./retry-policy-resolver";
 import { JobContextService } from "../observability/job-context.service";
 import { WorkerLoggerService } from "../observability/worker-logger.service";
 import { WorkerMetricsService, workerErrorCategory } from "../metrics/worker-metrics.service";
+import { ExpressionResolver } from "./expression-resolver";
 
 export type StepExecutionRecord = {
   id: string;
   attemptCount: number;
   maxAttempts: number;
   status: string;
+  nextRetryAt?: Date | null;
   effectKey: string | null;
   effectStatus: string | null;
+  outputJson?: unknown;
 };
 
 @Injectable()
@@ -25,6 +28,7 @@ export class StepExecutor {
     private readonly registry: StepRegistry,
     private readonly errorClassifier: ErrorClassifier,
     private readonly retryPolicyResolver: RetryPolicyResolver,
+    private readonly expressionResolver?: ExpressionResolver,
     private readonly jobContext?: JobContextService,
     private readonly logger?: WorkerLoggerService,
     private readonly metrics?: WorkerMetricsService
@@ -79,7 +83,7 @@ export class StepExecutor {
         completedAt: null,
         nextRetryAt: null,
         workerId: workerId(),
-        inputJson: toJson(input.context)
+        inputJson: {}
       }
     });
     this.logger?.info("worker.step.started", {
@@ -104,9 +108,43 @@ export class StepExecutor {
           correlationId: trace?.correlationId
         }
       };
+      input.context.connection = await this.safeConnectionMetadata(input.organizationId, input.step.config);
+      const mode = input.context.metadata?.expressionMode === "strict" ? "strict" : "legacy";
+      const resolvedConfig = this.expressionResolver
+        ? this.expressionResolver.resolveValue(input.step.config, input.context, { mode })
+        : input.step.config;
+      const resolvedStep = { ...input.step, config: resolvedConfig as Record<string, unknown> };
+      await this.prisma.stepExecution.update({
+        where: { id: input.stepExecution.id },
+        data: { inputJson: toJson({ config: resolvedConfig }) }
+      });
       const handler = this.registry.get(input.step.type);
-      const result = await withTimeout(handler.execute(input.step, input.context), policy.timeoutSeconds * 1000);
+      const result = await withTimeout(handler.execute(resolvedStep, input.context), policy.timeoutSeconds * 1000);
       const completedAt = new Date();
+      const control = result.control;
+      const waitUntil = control?.waitUntil ? new Date(control.waitUntil) : null;
+      if (waitUntil && Number.isFinite(waitUntil.getTime()) && waitUntil > completedAt) {
+        await this.prisma.stepExecution.update({
+          where: { id: input.stepExecution.id },
+          data: {
+            status: StepExecutionStatus.Retrying,
+            outputJson: result.output as object,
+            errorJson: Prisma.JsonNull,
+            completedAt,
+            durationMs: completedAt.getTime() - startedAt.getTime(),
+            nextRetryAt: waitUntil,
+            effectStatus: control?.waitReason ?? "waiting"
+          }
+        });
+        this.logger?.info(control?.waitReason === "wait_until" ? "worker.flow.wait_until_scheduled" : "worker.flow.delay_scheduled", {
+          stepExecutionId: input.stepExecution.id,
+          stepKey: input.step.key,
+          stepType: input.step.type,
+          nextRetryAt: waitUntil
+        });
+        this.metrics?.recordWait(input.step.type, control?.waitReason ?? "delay", Math.max(0, (waitUntil.getTime() - completedAt.getTime()) / 1000));
+        return { outcome: "retrying" as const, nextRetryAt: waitUntil };
+      }
       await this.prisma.stepExecution.update({
         where: { id: input.stepExecution.id },
         data: {
@@ -190,6 +228,41 @@ export class StepExecutor {
     return {
       result: { status: StepExecutionStatus.Skipped, output }
     };
+  }
+
+  async completeWait(input: { step: WorkflowStepDefinition; stepExecution: StepExecutionRecord }) {
+    const now = new Date();
+    const output = input.stepExecution.outputJson ?? { resumed: true };
+    await this.prisma.stepExecution.update({
+      where: { id: input.stepExecution.id },
+      data: {
+        status: StepExecutionStatus.Completed,
+        outputJson: toJson(output),
+        errorJson: Prisma.JsonNull,
+        completedAt: now,
+        nextRetryAt: null,
+        durationMs: 0,
+        effectStatus: "succeeded"
+      }
+    });
+    this.logger?.info("worker.flow.wait_resumed", {
+      stepExecutionId: input.stepExecution.id,
+      stepKey: input.step.key,
+      stepType: input.step.type
+    });
+    this.metrics?.recordStep(input.step.type, "completed", 0);
+    return { result: { status: StepExecutionStatus.Completed, output } };
+  }
+
+  private async safeConnectionMetadata(organizationId: string, config: Record<string, unknown>) {
+    const connectionId = typeof config.connectionId === "string" ? config.connectionId : undefined;
+    if (!connectionId) return {};
+    const connection = await this.prisma.connection.findFirst({
+      where: { id: connectionId, organizationId, deletedAt: null },
+      select: { id: true, name: true, type: true }
+    });
+    if (!connection) return {};
+    return { id: connection.id, name: connection.name, type: connection.type };
   }
 }
 

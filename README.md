@@ -84,7 +84,7 @@ Webhook intake accepts JSON only, applies `WEBHOOK_PAYLOAD_MAX_BYTES`, and rate-
 
 The web app includes a form-based workflow builder at `/workflows`. Users can create a workflow, edit a local draft, add linear steps, configure each step with type-specific fields, validate immediately, create a new version, and explicitly activate a selected version. Draft edits stay in the browser until `Create version`; no workflow version is activated automatically.
 
-Supported step forms map to the existing engine types: HTTP request, AI classification, AI structured extraction, AI summary, email notification, database record, and conditional. The builder uses the existing webhook trigger definition when creating versions.
+Supported step forms map to the existing engine types: HTTP request, AI classification, AI structured extraction, AI summary, email notification, database record, conditional, If, Switch, Delay, and Wait Until. The builder uses the existing webhook trigger definition when creating versions.
 
 HTTP and email steps can select organization-scoped connections. New workflow versions store only `connectionId`; the worker decrypts the active secret only while executing the step. Legacy versions without connections remain readable during the transition.
 
@@ -102,6 +102,10 @@ The MVP conditional is linear and supports `skipNextOnFalse`:
 ```
 
 When false, the next step is persisted as `SKIPPED` and the runner continues with the following step.
+
+## Advanced Flow Control
+
+New builder versions with steps are stored as `workflowDefinitionSchemaVersion: 2` and include a form-generated acyclic graph in `definitionJson.graph`. `If` and `Switch` persist the selected branch in step output; unselected branch steps are marked `SKIPPED` with `branch_not_selected`. `Delay` and `Wait Until` use durable `nextRetryAt` waits and resume through the existing worker queue/reconciler path. See `docs/flow-control.md`.
 
 ## Executions
 

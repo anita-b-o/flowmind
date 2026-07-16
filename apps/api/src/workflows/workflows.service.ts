@@ -5,6 +5,8 @@ import { PrismaService } from "../prisma/prisma.service";
 import { CreateWorkflowDto } from "./dto/create-workflow.dto";
 import { CreateWorkflowVersionDto } from "./dto/create-workflow-version.dto";
 import { AuditLogsService } from "../audit-logs/audit-logs.service";
+import { ExpressionsService } from "../expressions/expressions.service";
+import { graphAvailableStepKeys, validateWorkflowGraph } from "./workflow-graph-validator";
 
 const MAX_ATTEMPTS_MIN = 1;
 const MAX_ATTEMPTS_MAX = 5;
@@ -17,7 +19,8 @@ const TIMEOUT_MAX_SECONDS = 120;
 export class WorkflowsService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly auditLogs?: AuditLogsService
+    private readonly auditLogs?: AuditLogsService,
+    private readonly expressions?: ExpressionsService
   ) {}
 
   list(organizationId: string) {
@@ -75,11 +78,24 @@ export class WorkflowsService {
       where: { workflowId, organizationId },
       orderBy: { versionNumber: "desc" }
     });
+    const schemaVersion = dto.workflowDefinitionSchemaVersion ?? (dto.graph ? 2 : 1);
+    if (schemaVersion === 2) {
+      validateWorkflowGraph(dto.steps, dto.graph);
+    }
     await this.validateConnectionReferences(organizationId, [...dto.steps, dto.trigger]);
+    this.validateExpressions(dto.steps, schemaVersion === 2 ? dto.graph : undefined);
     const versionNumber = (latest?.versionNumber ?? 0) + 1;
-    const definition = toPrismaJson({ trigger: dto.trigger, steps: dto.steps });
+    const expressionMode = dto.expressionMode ?? "strict";
+    const definition = toPrismaJson({
+      trigger: dto.trigger,
+      steps: dto.steps,
+      expressionMode,
+      workflowDefinitionSchemaVersion: schemaVersion,
+      ...(schemaVersion === 2 ? { graph: dto.graph } : {}),
+      workflowVariables: dto.workflowVariables ?? {}
+    });
 
-    return this.prisma.workflowVersion.create({
+    const version = await this.prisma.workflowVersion.create({
       data: {
         organizationId,
         workflowId,
@@ -113,6 +129,17 @@ export class WorkflowsService {
       },
       include: { steps: true }
     });
+    if (schemaVersion === 2) {
+      await this.auditLogs?.record({
+        organizationId,
+        actorUserId: createdByUserId,
+        action: "workflow.version.graph_created",
+        resourceType: "WorkflowVersion",
+        resourceId: version.id,
+        metadata: { workflowId, versionNumber }
+      });
+    }
+    return version;
   }
 
   async activateVersion(organizationId: string, userId: string, workflowId: string, versionId: string) {
@@ -121,6 +148,22 @@ export class WorkflowsService {
     });
     if (!version) {
       throw new NotFoundException("Workflow version not found");
+    }
+    const definition = isRecord(version.definitionJson) ? version.definitionJson : {};
+    if (definition.workflowDefinitionSchemaVersion === 2) {
+      try {
+        validateWorkflowGraph((definition.steps as Array<{ key: string; type: string; config: Record<string, unknown> }>) ?? [], definition.graph as Record<string, unknown>);
+      } catch (error) {
+        await this.auditLogs?.record({
+          organizationId,
+          actorUserId: userId,
+          action: "workflow.activation.graph_rejected",
+          resourceType: "WorkflowVersion",
+          resourceId: versionId,
+          metadata: { workflowId, message: error instanceof Error ? error.message : String(error) }
+        });
+        throw error;
+      }
     }
 
     return this.prisma.$transaction(async (tx) => {
@@ -147,7 +190,7 @@ export class WorkflowsService {
           action: "workflow.activated",
           resourceType: "Workflow",
           resourceId: workflowId,
-          metadata: { workflowVersionId: versionId, versionNumber: version.versionNumber }
+          metadata: { workflowVersionId: versionId, versionNumber: version.versionNumber, workflowDefinitionSchemaVersion: definition.workflowDefinitionSchemaVersion ?? 1 }
         },
         tx
       );
@@ -175,6 +218,15 @@ export class WorkflowsService {
         }
         await this.assertConnection(organizationId, connectionId, "smtp");
       }
+    }
+  }
+
+  private validateExpressions(steps: Array<{ key: string; type: string; config: Record<string, unknown> }>, graph?: Record<string, unknown>) {
+    const previous: string[] = [];
+    for (const step of steps) {
+      const available = graph ? graphAvailableStepKeys(step.key, steps, graph) : previous;
+      this.expressions?.validateValue(step.config, available, step.key);
+      previous.push(step.key);
     }
   }
 

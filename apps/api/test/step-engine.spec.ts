@@ -179,9 +179,95 @@ describe("step recovery engine", () => {
     const execution = await prisma.execution.findUniqueOrThrow({ where: { id: seed.executionId } });
     expect((execution.contextJson as any).steps.ai.output).toEqual({ summary: "cached" });
   });
+
+  it("resolves step config centrally and preserves complete expression types", async () => {
+    const seed = await seedExecution([
+      step("first", StepType.Conditional),
+      { ...step("second", StepType.Conditional), config: { left: "{{steps.first.output.count}}", operator: "equals", right: 3 } }
+    ]);
+    let secondConfig: Record<string, unknown> | undefined;
+    const runner = runnerWith(
+      {
+        [StepType.Conditional]: async (workflowStep: WorkflowStepDefinition) => {
+          if (workflowStep.key === "first") {
+            return { status: StepExecutionStatus.Completed, output: { count: 3 } };
+          }
+          secondConfig = workflowStep.config;
+          return { status: StepExecutionStatus.Completed, output: { passed: workflowStep.config.left === 3 } };
+        }
+      },
+      new ExpressionResolver()
+    );
+
+    await runner.run(seed.payload);
+
+    expect(secondConfig?.left).toBe(3);
+  });
+
+  it("executes graph if branches and skips the unselected branch", async () => {
+    const seed = await seedExecution(
+      [
+        step("route", StepType.If),
+        step("vip", StepType.DatabaseRecord),
+        step("normal", StepType.DatabaseRecord)
+      ],
+      {
+        workflowDefinitionSchemaVersion: 2,
+        graph: {
+          entryStepKey: "route",
+          edges: [
+            { from: "route", to: "vip", kind: "if_true", label: "true" },
+            { from: "route", to: "normal", kind: "if_false", label: "false" },
+            { from: "vip", to: "normal", kind: "next" }
+          ]
+        }
+      }
+    );
+    const runner = runnerWith({
+      [StepType.If]: async () => ({ status: StepExecutionStatus.Completed, output: { matched: false, branch: "false", nextStepKey: "normal" }, control: { nextStepKey: "normal" } }),
+      [StepType.DatabaseRecord]: async (workflowStep: WorkflowStepDefinition) => ({ status: StepExecutionStatus.Completed, output: { key: workflowStep.key } })
+    });
+
+    await runner.run(seed.payload);
+
+    const rows = await prisma.stepExecution.findMany({ orderBy: { stepKey: "asc" } });
+    expect(rows.map((entry) => [entry.stepKey, entry.status, (entry.outputJson as any)?.reason])).toEqual([
+      ["normal", StepExecutionStatus.Completed, undefined],
+      ["route", StepExecutionStatus.Completed, undefined],
+      ["vip", StepExecutionStatus.Skipped, "branch_not_selected"]
+    ]);
+  });
+
+  it("schedules and resumes graph delay without recalculating it", async () => {
+    const seed = await seedExecution(
+      [step("delay", StepType.Delay), step("done", StepType.Conditional)],
+      {
+        workflowDefinitionSchemaVersion: 2,
+        graph: { entryStepKey: "delay", edges: [{ from: "delay", to: "done", kind: "next" }] }
+      }
+    );
+    const runner = runnerWith({
+      [StepType.Delay]: async () => ({
+        status: StepExecutionStatus.Completed,
+        output: { waitUntil: new Date(Date.now() + 60_000).toISOString(), durationMs: 60_000, waitReason: "delay" },
+        control: { waitUntil: new Date(Date.now() + 60_000).toISOString(), waitReason: "delay" }
+      }),
+      [StepType.Conditional]: async () => ({ status: StepExecutionStatus.Completed, output: { done: true } })
+    });
+
+    const first = await runner.run(seed.payload);
+    expect(first.status).toBe("waiting");
+    await prisma.stepExecution.updateMany({ where: { stepKey: "delay" }, data: { nextRetryAt: new Date(Date.now() - 1) } });
+    const second = await runner.run(seed.payload);
+
+    expect(second.status).toBe("completed");
+    const delay = await prisma.stepExecution.findFirstOrThrow({ where: { stepKey: "delay" } });
+    expect(delay.status).toBe(StepExecutionStatus.Completed);
+    expect(delay.attemptCount).toBe(1);
+  });
 });
 
-function runnerWith(handlers: Partial<Record<StepType, StepHandler["execute"]>>) {
+function runnerWith(handlers: Partial<Record<StepType, StepHandler["execute"]>>, expressionResolver?: ExpressionResolver) {
   const registry = {
     get(type: string) {
       const execute = handlers[type as StepType];
@@ -193,7 +279,7 @@ function runnerWith(handlers: Partial<Record<StepType, StepHandler["execute"]>>)
   };
   return new WorkflowRunner(
     prisma as any,
-    new StepExecutor(prisma as any, registry as any, new ErrorClassifier(), new RetryPolicyResolver()),
+    new StepExecutor(prisma as any, registry as any, new ErrorClassifier(), new RetryPolicyResolver(), expressionResolver),
     new ContextReconstructor(),
     {
       acquire: async () => true,
@@ -209,7 +295,10 @@ function step(key: string, type: StepType, retryPolicy?: Record<string, unknown>
   return { key, name: key, type, config: {}, retryPolicy };
 }
 
-async function seedExecution(steps: Array<{ key: string; name: string; type: StepType; config: Record<string, unknown>; retryPolicy?: Record<string, unknown> }>) {
+async function seedExecution(
+  steps: Array<{ key: string; name: string; type: StepType; config: Record<string, unknown>; retryPolicy?: Record<string, unknown> }>,
+  definitionJson: Record<string, unknown> = {}
+) {
   const user = await prisma.user.create({
     data: { email: `${Math.random()}@example.com`, name: "Test", passwordHash: "hash" }
   });
@@ -225,7 +314,7 @@ async function seedExecution(steps: Array<{ key: string; name: string; type: Ste
       workflowId: workflow.id,
       versionNumber: 1,
       status: "ACTIVE",
-      definitionJson: {},
+      definitionJson: toJson(definitionJson),
       createdByUserId: user.id,
       steps: {
         createMany: {

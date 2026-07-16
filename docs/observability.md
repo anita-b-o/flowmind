@@ -75,6 +75,10 @@ Worker:
 - `flowmind_step_retries_total`
 - `flowmind_step_failures_total`
 - `flowmind_step_duration_seconds`
+- `flowmind_step_wait_scheduled_total`
+- `flowmind_step_wait_duration_seconds`
+- `flowmind_branch_selected_total`
+- `flowmind_graph_validation_failures_total`
 - `flowmind_dlq_entries_total`
 - `flowmind_dlq_publish_failures_total`
 - `flowmind_worker_active_jobs`
@@ -95,7 +99,7 @@ The fake AI provider reports zero tokens and zero cost because it does not recei
 
 ## Labels
 
-Allowed labels are controlled catalogs: `service`, `method`, `route`, `status_code`, `status_class`, `outcome`, `step_type`, `error_category`, `operation`, `provider`, `queue`, `trigger_type`, and `reason_code`.
+Allowed labels are controlled catalogs: `service`, `method`, `route`, `status_code`, `status_class`, `outcome`, `step_type`, `error_category`, `operation`, `provider`, `queue`, `trigger_type`, `branch`, `reason`, and `reason_code`.
 
 Prohibited labels include `requestId`, `correlationId`, `organizationId`, `userId`, `workflowId`, `workflowVersionId`, `executionId`, `stepExecutionId`, `jobId`, `workerId`, `email`, `hostname`, `IP`, full URL, free-form error message, and free-form reason.
 
@@ -108,5 +112,7 @@ Logs carry sanitized context for debugging and may include request/correlation I
 Metrics servers close during graceful shutdown. Metrics availability is not part of API or worker readiness.
 
 AuditLog is used for critical user-visible actions such as manual retry, DLQ resolution, trigger changes, workflow activation, logout-all, and refresh-session reuse detection. Technical events such as heartbeats, step completion, metrics increments, automatic retry, and reconciler passes stay in logs/metrics rather than AuditLog.
+
+Flow-control runtime decisions such as branch selection, skipped branches, scheduled waits, and resumed waits are logs/metrics, not AuditLog events. Creating or activating graph-backed workflow versions remains a business audit event.
 
 Connection create, update, rotate, revoke, delete, and test actions are AuditLog events. Audit metadata must contain only safe fields such as connection id, type, status, and test outcome; encrypted payload fields and plaintext credentials are redacted by the shared sanitizer.

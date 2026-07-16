@@ -74,7 +74,8 @@ export function StepCard({
       />
       {step.expanded && (
         <>
-          <StepForm index={index} type={step.type} register={register} errors={errors} disabled={disabled} />
+          <StepForm index={index} type={step.type} register={register} errors={errors} disabled={disabled} setValue={setValue} getValues={getValues} />
+          {!["if", "switch"].includes(step.type) && <NextStepRouting index={index} disabled={disabled} register={register} getValues={getValues} />}
           <div className="workflow-form-grid">
             <RetryEditor index={index} register={register} disabled={disabled} />
             <TimeoutEditor index={index} register={register} disabled={disabled} />
@@ -82,5 +83,33 @@ export function StepCard({
         </>
       )}
     </article>
+  );
+}
+
+function NextStepRouting({
+  index,
+  disabled,
+  register,
+  getValues
+}: {
+  index: number;
+  disabled: boolean;
+  register: UseFormRegister<WorkflowEditorFormValue>;
+  getValues: UseFormGetValues<WorkflowEditorFormValue>;
+}) {
+  const targets = getValues("steps").slice(index + 1).filter((candidate) => candidate.key);
+  if (!targets.length) return null;
+  return (
+    <label>
+      Next step
+      <select disabled={disabled} {...register(`steps.${index}.config.nextStepKey` as any)}>
+        <option value="">Next card in order</option>
+        {targets.map((target) => (
+          <option key={target.key} value={target.key}>
+            {target.name || target.key}
+          </option>
+        ))}
+      </select>
+    </label>
   );
 }

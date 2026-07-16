@@ -146,6 +146,8 @@ model Organization {
   auditLogs            AuditLog[]
   idempotencyKeys      IdempotencyKey[]
   internalRecords      InternalRecord[]
+  organizationVariables OrganizationVariable[]
+  workflowVariables    WorkflowVariable[]
 
   @@map("organizations")
 }
@@ -185,6 +187,7 @@ model Workflow {
   executions           Execution[]
   internalRecords      InternalRecord[]
   deadLetterExecutions DeadLetterExecution[]
+  variables            WorkflowVariable[]
 
   @@index([organizationId, status])
   @@map("workflows")
@@ -495,4 +498,38 @@ model DeadLetterExecution {
   @@index([createdAt])
   @@index([resolvedAt])
   @@map("dead_letter_executions")
+}
+
+model OrganizationVariable {
+  id             String   @id @default(uuid())
+  organizationId String   @map("organization_id")
+  key            String
+  valueJson      Json     @map("value_json")
+  description    String?
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, key])
+  @@index([organizationId])
+  @@map("organization_variables")
+}
+
+model WorkflowVariable {
+  id             String   @id @default(uuid())
+  organizationId String   @map("organization_id")
+  workflowId     String   @map("workflow_id")
+  key            String
+  valueJson      Json     @map("value_json")
+  description    String?
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  workflow     Workflow     @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+
+  @@unique([workflowId, key])
+  @@index([organizationId, workflowId])
+  @@map("workflow_variables")
 }

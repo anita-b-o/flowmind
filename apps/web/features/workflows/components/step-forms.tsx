@@ -1,35 +1,55 @@
 "use client";
 
 import Link from "next/link";
-import type { FieldErrors, UseFormRegister } from "react-hook-form";
+import type { FieldErrors, UseFormGetValues, UseFormRegister, UseFormSetValue } from "react-hook-form";
 import { useConnections } from "../../connections/hooks";
 import type { WorkflowEditorFormValue } from "../workflow-builder";
+import { catalogForSteps } from "../expressions";
+import { ExpressionPreview } from "./expression-preview";
+import { VariablePicker } from "./variable-picker";
+import { DelayStepForm, IfStepForm, SwitchStepForm, WaitUntilStepForm } from "./control-step-forms";
 
 type StepFormProps = {
   index: number;
   register: UseFormRegister<WorkflowEditorFormValue>;
+  setValue: UseFormSetValue<WorkflowEditorFormValue>;
+  getValues: UseFormGetValues<WorkflowEditorFormValue>;
   errors: FieldErrors<WorkflowEditorFormValue>;
   disabled: boolean;
 };
 
-export function StepForm({ index, type, register, errors, disabled }: StepFormProps & { type: string }) {
+export function StepForm({ index, type, register, errors, disabled, setValue, getValues }: StepFormProps & { type: string }) {
   if (type === "http_request") {
-    return <HttpStepForm index={index} register={register} errors={errors} disabled={disabled} />;
+    return <HttpStepForm index={index} register={register} errors={errors} disabled={disabled} setValue={setValue} getValues={getValues} />;
   }
   if (type.startsWith("ai_")) {
-    return <AiStepForm index={index} type={type} register={register} errors={errors} disabled={disabled} />;
+    return <AiStepForm index={index} type={type} register={register} errors={errors} disabled={disabled} setValue={setValue} getValues={getValues} />;
   }
   if (type === "email_notification") {
-    return <EmailStepForm index={index} register={register} errors={errors} disabled={disabled} />;
+    return <EmailStepForm index={index} register={register} errors={errors} disabled={disabled} setValue={setValue} getValues={getValues} />;
   }
   if (type === "database_record") {
-    return <DatabaseStepForm index={index} register={register} errors={errors} disabled={disabled} />;
+    return <DatabaseStepForm index={index} register={register} errors={errors} disabled={disabled} setValue={setValue} getValues={getValues} />;
   }
-  return <ConditionalStepForm index={index} register={register} errors={errors} disabled={disabled} />;
+  if (type === "if") {
+    return <IfStepForm index={index} register={register} errors={errors} disabled={disabled} setValue={setValue} getValues={getValues} />;
+  }
+  if (type === "switch") {
+    return <SwitchStepForm index={index} register={register} errors={errors} disabled={disabled} setValue={setValue} getValues={getValues} />;
+  }
+  if (type === "delay") {
+    return <DelayStepForm index={index} register={register} errors={errors} disabled={disabled} setValue={setValue} getValues={getValues} />;
+  }
+  if (type === "wait_until") {
+    return <WaitUntilStepForm index={index} register={register} errors={errors} disabled={disabled} setValue={setValue} getValues={getValues} />;
+  }
+  return <ConditionalStepForm index={index} register={register} errors={errors} disabled={disabled} setValue={setValue} getValues={getValues} />;
 }
 
-export function HttpStepForm({ index, register, errors, disabled }: StepFormProps) {
+export function HttpStepForm({ index, register, errors, disabled, setValue, getValues }: StepFormProps) {
   const connections = useConnections({ type: "HTTP_API_KEY", status: "ACTIVE" });
+  const entries = catalogForSteps(getValues("steps"), index);
+  const previousKeys = getValues("steps").slice(0, index).map((step) => step.key);
   return (
     <div className="stack">
       <div className="workflow-form-grid">
@@ -59,6 +79,7 @@ export function HttpStepForm({ index, register, errors, disabled }: StepFormProp
         <label>
           URL
           <input disabled={disabled} placeholder="https://api.example.com/items" {...register(`steps.${index}.config.url`)} />
+          <ExpressionTools field={`steps.${index}.config.url`} entries={entries} previousKeys={previousKeys} disabled={disabled} getValues={getValues} setValue={setValue} />
           <FieldError message={configError(errors, index, "url")} />
         </label>
       </div>
@@ -68,18 +89,22 @@ export function HttpStepForm({ index, register, errors, disabled }: StepFormProp
       <label>
         Headers
         <textarea rows={4} disabled={disabled} {...register(`steps.${index}.config.headers`)} />
+        <ExpressionTools field={`steps.${index}.config.headers`} entries={entries} previousKeys={previousKeys} disabled={disabled} getValues={getValues} setValue={setValue} />
         <FieldError message={configError(errors, index, "headers")} />
       </label>
       <label>
         Body
         <textarea rows={5} disabled={disabled} placeholder='{"status":"new"}' {...register(`steps.${index}.config.body`)} />
+        <ExpressionTools field={`steps.${index}.config.body`} entries={entries} previousKeys={previousKeys} disabled={disabled} getValues={getValues} setValue={setValue} />
         <FieldError message={configError(errors, index, "body")} />
       </label>
     </div>
   );
 }
 
-export function AiStepForm({ index, type, register, errors, disabled }: StepFormProps & { type: string }) {
+export function AiStepForm({ index, type, register, errors, disabled, setValue, getValues }: StepFormProps & { type: string }) {
+  const entries = catalogForSteps(getValues("steps"), index);
+  const previousKeys = getValues("steps").slice(0, index).map((step) => step.key);
   return (
     <div className="stack">
       <div className="workflow-form-grid">
@@ -97,6 +122,7 @@ export function AiStepForm({ index, type, register, errors, disabled }: StepForm
       <label>
         Prompt
         <textarea rows={5} disabled={disabled} {...register(`steps.${index}.config.text`)} />
+        <ExpressionTools field={`steps.${index}.config.text`} entries={entries} previousKeys={previousKeys} disabled={disabled} getValues={getValues} setValue={setValue} />
         <FieldError message={configError(errors, index, "text")} />
       </label>
       {type === "ai_classification" && (
@@ -109,6 +135,7 @@ export function AiStepForm({ index, type, register, errors, disabled }: StepForm
         <label>
           Schema
           <textarea rows={5} disabled={disabled} {...register(`steps.${index}.config.schema`)} />
+          <ExpressionTools field={`steps.${index}.config.schema`} entries={entries} previousKeys={previousKeys} disabled={disabled} getValues={getValues} setValue={setValue} />
           <FieldError message={configError(errors, index, "schema")} />
         </label>
       )}
@@ -116,8 +143,10 @@ export function AiStepForm({ index, type, register, errors, disabled }: StepForm
   );
 }
 
-export function EmailStepForm({ index, register, errors, disabled }: StepFormProps) {
+export function EmailStepForm({ index, register, errors, disabled, setValue, getValues }: StepFormProps) {
   const connections = useConnections({ type: "SMTP", status: "ACTIVE" });
+  const entries = catalogForSteps(getValues("steps"), index);
+  const previousKeys = getValues("steps").slice(0, index).map((step) => step.key);
   return (
     <div className="stack">
       <div className="workflow-form-grid">
@@ -136,11 +165,13 @@ export function EmailStepForm({ index, register, errors, disabled }: StepFormPro
         <label>
           Recipient
           <input disabled={disabled} placeholder="sales@example.com" {...register(`steps.${index}.config.to`)} />
+          <ExpressionTools field={`steps.${index}.config.to`} entries={entries} previousKeys={previousKeys} disabled={disabled} getValues={getValues} setValue={setValue} />
           <FieldError message={configError(errors, index, "to")} />
         </label>
         <label>
           Subject
           <input disabled={disabled} {...register(`steps.${index}.config.subject`)} />
+          <ExpressionTools field={`steps.${index}.config.subject`} entries={entries} previousKeys={previousKeys} disabled={disabled} getValues={getValues} setValue={setValue} />
           <FieldError message={configError(errors, index, "subject")} />
         </label>
       </div>
@@ -150,13 +181,16 @@ export function EmailStepForm({ index, register, errors, disabled }: StepFormPro
       <label>
         Body
         <textarea rows={5} disabled={disabled} {...register(`steps.${index}.config.text`)} />
+        <ExpressionTools field={`steps.${index}.config.text`} entries={entries} previousKeys={previousKeys} disabled={disabled} getValues={getValues} setValue={setValue} />
         <FieldError message={configError(errors, index, "text")} />
       </label>
     </div>
   );
 }
 
-export function DatabaseStepForm({ index, register, errors, disabled }: StepFormProps) {
+export function DatabaseStepForm({ index, register, errors, disabled, setValue, getValues }: StepFormProps) {
+  const entries = catalogForSteps(getValues("steps"), index);
+  const previousKeys = getValues("steps").slice(0, index).map((step) => step.key);
   return (
     <div className="stack">
       <label>
@@ -167,19 +201,23 @@ export function DatabaseStepForm({ index, register, errors, disabled }: StepForm
       <label>
         Data
         <textarea rows={6} disabled={disabled} {...register(`steps.${index}.config.data`)} />
+        <ExpressionTools field={`steps.${index}.config.data`} entries={entries} previousKeys={previousKeys} disabled={disabled} getValues={getValues} setValue={setValue} />
         <FieldError message={configError(errors, index, "data")} />
       </label>
     </div>
   );
 }
 
-export function ConditionalStepForm({ index, register, errors, disabled }: StepFormProps) {
+export function ConditionalStepForm({ index, register, errors, disabled, setValue, getValues }: StepFormProps) {
+  const entries = catalogForSteps(getValues("steps"), index);
+  const previousKeys = getValues("steps").slice(0, index).map((step) => step.key);
   return (
     <div className="stack">
       <div className="workflow-form-grid">
         <label>
           Expression
           <input disabled={disabled} placeholder="{{trigger.body.priority}}" {...register(`steps.${index}.config.left`)} />
+          <ExpressionTools field={`steps.${index}.config.left`} entries={entries} previousKeys={previousKeys} disabled={disabled} getValues={getValues} setValue={setValue} />
           <FieldError message={configError(errors, index, "left")} />
         </label>
         <label>
@@ -194,6 +232,7 @@ export function ConditionalStepForm({ index, register, errors, disabled }: StepF
         <label>
           Compare with
           <input disabled={disabled} {...register(`steps.${index}.config.right`)} />
+          <ExpressionTools field={`steps.${index}.config.right`} entries={entries} previousKeys={previousKeys} disabled={disabled} getValues={getValues} setValue={setValue} />
         </label>
       </div>
       <label className="workflow-checkbox">
@@ -201,6 +240,29 @@ export function ConditionalStepForm({ index, register, errors, disabled }: StepF
         Skip next step when false
       </label>
     </div>
+  );
+}
+
+function ExpressionTools({
+  field,
+  entries,
+  previousKeys,
+  disabled,
+  getValues,
+  setValue
+}: {
+  field: `steps.${number}.config.${string}`;
+  entries: ReturnType<typeof catalogForSteps>;
+  previousKeys: string[];
+  disabled: boolean;
+  getValues: UseFormGetValues<WorkflowEditorFormValue>;
+  setValue: UseFormSetValue<WorkflowEditorFormValue>;
+}) {
+  return (
+    <>
+      <VariablePicker field={field} entries={entries} disabled={disabled} getValues={getValues} setValue={setValue} />
+      <ExpressionPreview value={getValues(field as any)} availableStepKeys={previousKeys} />
+    </>
   );
 }
 

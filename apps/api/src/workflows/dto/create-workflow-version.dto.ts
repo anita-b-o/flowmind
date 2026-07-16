@@ -1,4 +1,4 @@
-import { IsArray, IsObject, IsOptional, IsString, ValidateNested } from "class-validator";
+import { IsArray, IsIn, IsObject, IsOptional, IsString, ValidateNested } from "class-validator";
 import { Type } from "class-transformer";
 
 class WorkflowStepDto {
@@ -30,4 +30,20 @@ export class CreateWorkflowVersionDto {
   @ValidateNested({ each: true })
   @Type(() => WorkflowStepDto)
   steps!: WorkflowStepDto[];
+
+  @IsOptional()
+  @IsIn(["legacy", "strict"])
+  expressionMode?: "legacy" | "strict";
+
+  @IsOptional()
+  @IsIn([1, 2])
+  workflowDefinitionSchemaVersion?: 1 | 2;
+
+  @IsOptional()
+  @IsObject()
+  graph?: Record<string, unknown>;
+
+  @IsOptional()
+  @IsObject()
+  workflowVariables?: Record<string, unknown>;
 }

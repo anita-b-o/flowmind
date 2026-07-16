@@ -44,6 +44,10 @@ export enum StepType {
   AiStructuredExtraction = "ai_structured_extraction",
   AiSummary = "ai_summary",
   Conditional = "conditional",
+  If = "if",
+  Switch = "switch",
+  Delay = "delay",
+  WaitUntil = "wait_until",
   EmailNotification = "email_notification",
   DatabaseRecord = "database_record"
 }
@@ -87,12 +91,43 @@ export interface WorkflowStepDefinition {
 export interface WorkflowDefinition {
   trigger: WorkflowStepDefinition;
   steps: WorkflowStepDefinition[];
+  workflowDefinitionSchemaVersion?: 1 | 2;
+  graph?: WorkflowGraphDefinition;
+}
+
+export type WorkflowGraphEdgeKind = "next" | "if_true" | "if_false" | "switch_case" | "switch_default";
+
+export interface WorkflowGraphEdgeDefinition {
+  from: string;
+  to: string;
+  kind: WorkflowGraphEdgeKind;
+  label?: string;
+  caseKey?: string;
+}
+
+export interface WorkflowGraphDefinition {
+  entryStepKey: string;
+  edges: WorkflowGraphEdgeDefinition[];
+  terminalStepKeys?: string[];
 }
 
 export interface ExecutionContext {
   trigger: JsonObject;
   steps: Record<string, { output: unknown; status: StepExecutionStatus }>;
   metadata: JsonObject;
+  workflow?: JsonObject;
+  execution?: JsonObject;
+  organization?: JsonObject;
+  connection?: JsonObject;
+}
+
+export type ExpressionMode = "legacy" | "strict";
+
+export interface WorkflowDefinitionMetadata {
+  workflowDefinitionSchemaVersion?: 1 | 2;
+  expressionMode?: ExpressionMode;
+  workflowVariables?: JsonObject;
+  graph?: WorkflowGraphDefinition;
 }
 
 export interface StepResult {
@@ -100,6 +135,9 @@ export interface StepResult {
   output: unknown;
   control?: {
     skipNext?: boolean;
+    nextStepKey?: string;
+    waitUntil?: string;
+    waitReason?: "delay" | "wait_until";
   };
 }
 

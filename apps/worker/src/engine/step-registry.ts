@@ -6,6 +6,10 @@ import { ConditionalHandler } from "./handlers/conditional.handler";
 import { DatabaseRecordHandler } from "./handlers/database-record.handler";
 import { EmailNotificationHandler } from "./handlers/email-notification.handler";
 import { HttpRequestHandler } from "./handlers/http-request.handler";
+import { IfHandler } from "./handlers/if.handler";
+import { SwitchHandler } from "./handlers/switch.handler";
+import { DelayHandler } from "./handlers/delay.handler";
+import { WaitUntilHandler } from "./handlers/wait-until.handler";
 
 @Injectable()
 export class StepRegistry implements OnModuleInit {
@@ -14,13 +18,17 @@ export class StepRegistry implements OnModuleInit {
   constructor(
     private readonly httpRequestHandler: HttpRequestHandler,
     private readonly conditionalHandler: ConditionalHandler,
+    private readonly ifHandler: IfHandler,
+    private readonly switchHandler: SwitchHandler,
+    private readonly delayHandler: DelayHandler,
+    private readonly waitUntilHandler: WaitUntilHandler,
     private readonly databaseRecordHandler: DatabaseRecordHandler,
     private readonly aiHandler: AiHandler,
     private readonly emailNotificationHandler: EmailNotificationHandler
   ) {}
 
   onModuleInit() {
-    [this.httpRequestHandler, this.conditionalHandler, this.databaseRecordHandler, this.emailNotificationHandler].forEach(
+    [this.httpRequestHandler, this.conditionalHandler, this.ifHandler, this.switchHandler, this.delayHandler, this.waitUntilHandler, this.databaseRecordHandler, this.emailNotificationHandler].forEach(
       (handler) => this.handlers.set(handler.type, handler)
     );
     this.handlers.set(StepType.AiClassification, this.aiHandler);

@@ -25,6 +25,9 @@ Current controls:
 - Connection APIs are tenant-scoped by `x-organization-id`. Editors can list and use connection metadata, admins can manage and rotate, and only owners can delete.
 - Connection secrets are encrypted at rest with AES-256-GCM using `CONNECTION_ENCRYPTION_KEY`. The key is loaded from environment, must decode to 32 bytes, and is not stored in the database.
 - Connection plaintext is accepted only during create/rotate/test and is never returned after saving. Workflow versions store `connectionId`, not credentials.
+- Expressions use an allowlisted namespace model and never expose connection plaintext, encrypted secrets, API keys, SMTP passwords, webhook tokens, cookies, raw sensitive headers, worker locks, queue internals, or raw provider errors.
+- Expression path resolution blocks `constructor`, `prototype`, `__proto__`, `eval`, unsupported syntax, and inherited object properties.
+- Graph-backed workflows reject branch cycles, self-targets, missing If/Switch branches, invalid timestamps, and non-positive waits before version persistence. Runtime wait expressions are revalidated after resolution.
 
 CSRF strategy: the current browser contract assumes same-site web and API deployment with `SameSite=Lax`, Bearer access tokens in memory for normal mutations, and explicit Origin validation for cookie-backed auth mutations. If `REFRESH_COOKIE_SAME_SITE=none` is used for cross-site production, add a CSRF token mechanism before launch; CORS alone is not CSRF protection.
 

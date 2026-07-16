@@ -9,7 +9,7 @@ export type WorkerErrorCategory = "retryable" | "non_retryable" | "ambiguous" | 
 export type LeaseOutcome = "acquired" | "conflict" | "expired_recovery" | "lost" | "released";
 export type StepOutcome = "completed" | "retry_scheduled" | "failed" | "skipped" | "ambiguous";
 export type ReconcilerReason = "run_completed" | "run_failed" | "execution_requeued" | "retry_recovered" | "expired_lease_recovered" | "queued_job_recovered";
-export type DlqReason = "non_retryable" | "attempts_exhausted" | "ambiguous_effect" | "inconsistent_state";
+export type DlqReason = "non_retryable" | "attempts_exhausted" | "ambiguous_effect" | "inconsistent_state" | "invalid_wait" | "branch_resolution_failed" | "control_validation_failed";
 
 @Injectable()
 export class WorkerMetricsService implements OnModuleInit, OnModuleDestroy {
@@ -116,6 +116,31 @@ export class WorkerMetricsService implements OnModuleInit, OnModuleDestroy {
     buckets: [0.01, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30],
     registers: [this.registry]
   });
+  readonly stepWaitScheduled = new Counter({
+    name: "flowmind_step_wait_scheduled_total",
+    help: "Intentional workflow waits scheduled by step type.",
+    labelNames: ["step_type", "reason"],
+    registers: [this.registry]
+  });
+  readonly stepWaitDuration = new Histogram({
+    name: "flowmind_step_wait_duration_seconds",
+    help: "Intentional workflow wait duration.",
+    labelNames: ["step_type"],
+    buckets: [1, 5, 10, 30, 60, 300, 900, 3600, 7200, 21600],
+    registers: [this.registry]
+  });
+  readonly branchSelected = new Counter({
+    name: "flowmind_branch_selected_total",
+    help: "Branch selections by control step type.",
+    labelNames: ["step_type", "branch"],
+    registers: [this.registry]
+  });
+  readonly graphValidationFailures = new Counter({
+    name: "flowmind_graph_validation_failures_total",
+    help: "Workflow graph validation failures.",
+    labelNames: ["reason_code"],
+    registers: [this.registry]
+  });
 
   constructor() {
     this.registry.setDefaultLabels({ service: "worker" });
@@ -163,6 +188,15 @@ export class WorkerMetricsService implements OnModuleInit, OnModuleDestroy {
     if (outcome === "failed" || outcome === "ambiguous") this.stepFailures.inc({ step_type: safeStepType(stepType), error_category: errorCategory ?? "unknown" });
   }
 
+  recordWait(stepType: string, reason: string, durationSeconds: number) {
+    this.stepWaitScheduled.inc({ step_type: safeStepType(stepType), reason: safeReason(reason) });
+    this.stepWaitDuration.observe({ step_type: safeStepType(stepType) }, durationSeconds);
+  }
+
+  recordBranch(stepType: string, branch: string) {
+    this.branchSelected.inc({ step_type: safeStepType(stepType), branch: safeReason(branch) });
+  }
+
   private hasCredential(authorization: string | undefined, header: string | string[] | undefined) {
     return Boolean(bearerToken(authorization) || headerValue(header));
   }
@@ -189,7 +223,14 @@ export function dlqReasonCode(reason: string | undefined): DlqReason {
   if (reason === "ambiguous") return "ambiguous_effect";
   if (reason === "failed") return "attempts_exhausted";
   if (reason === "non_retryable") return "non_retryable";
+  if (reason === "invalid_wait") return "invalid_wait";
+  if (reason === "branch_resolution_failed") return "branch_resolution_failed";
+  if (reason === "control_validation_failed") return "control_validation_failed";
   return "inconsistent_state";
+}
+
+function safeReason(value: string) {
+  return /^[a-z][a-z0-9_]{0,40}$/.test(value) ? value : "unknown";
 }
 
 function bearerToken(value: string | undefined) {

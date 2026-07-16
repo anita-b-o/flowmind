@@ -171,7 +171,7 @@ export function WorkflowEditor({ workflow, onRefresh }: { workflow: WorkflowDeta
           <div className="workflow-title-row">
             <div>
               <h2>Steps</h2>
-              <p className="muted">Drag cards to reorder the linear automation.</p>
+              <p className="muted">Drag cards to order the form-based flow. Routing fields can branch to later steps.</p>
             </div>
             <div className="workflow-actions">
               <select

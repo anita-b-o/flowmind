@@ -40,7 +40,11 @@ describe("workflow builder model", () => {
     };
 
     expect(toWorkflowDefinition(values)).toEqual({
+      expressionMode: "strict",
+      workflowDefinitionSchemaVersion: 2,
+      workflowVariables: {},
       trigger: { key: "webhook", name: "Webhook", type: "webhook_trigger", config: {} },
+      graph: { entryStepKey: "save", edges: [], terminalStepKeys: ["save"] },
       steps: [
         {
           key: "save",
@@ -52,6 +56,28 @@ describe("workflow builder model", () => {
         }
       ]
     });
+  });
+
+  it("serializes if routing into graph v2", () => {
+    const values: WorkflowEditorFormValue = {
+      name: "Branch flow",
+      description: "",
+      steps: [
+        { ...emptyStep(0, "if"), key: "route", name: "Route", config: { left: "{{trigger.body.kind}}", operator: "equals", right: "vip", trueStepKey: "vip", falseStepKey: "normal" } },
+        { ...emptyStep(1, "database_record"), key: "vip", name: "VIP", config: { collection: "leads", data: "{}" } },
+        { ...emptyStep(2, "database_record"), key: "normal", name: "Normal", config: { collection: "leads", data: "{}" } }
+      ]
+    };
+
+    const definition = toWorkflowDefinition(values);
+    expect(definition.workflowDefinitionSchemaVersion).toBe(2);
+    expect(definition.graph?.edges).toEqual(
+      expect.arrayContaining([
+        { from: "route", to: "vip", kind: "if_true", label: "true" },
+        { from: "route", to: "normal", kind: "if_false", label: "false" },
+        { from: "vip", to: "normal", kind: "next" }
+      ])
+    );
   });
 
   it("drops incompatible config when type changes", () => {

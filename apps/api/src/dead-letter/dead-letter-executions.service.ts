@@ -130,6 +130,9 @@ function internalReasons(reason: PublicDeadLetterReason) {
     attempts_exhausted: ["attempts_exhausted", "failed"],
     ambiguous_effect: ["ambiguous_effect", "ambiguous"],
     inconsistent_state: ["inconsistent_state"],
+    invalid_wait: ["invalid_wait"],
+    branch_resolution_failed: ["branch_resolution_failed"],
+    control_validation_failed: ["control_validation_failed"],
     execution_limit: ["execution_limit"],
     unknown: ["unknown"]
   };

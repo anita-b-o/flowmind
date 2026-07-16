@@ -10,6 +10,10 @@ import { StepRegistry } from "./engine/step-registry";
 import { ExpressionResolver } from "./engine/expression-resolver";
 import { HttpRequestHandler } from "./engine/handlers/http-request.handler";
 import { ConditionalHandler } from "./engine/handlers/conditional.handler";
+import { IfHandler } from "./engine/handlers/if.handler";
+import { SwitchHandler } from "./engine/handlers/switch.handler";
+import { DelayHandler } from "./engine/handlers/delay.handler";
+import { WaitUntilHandler } from "./engine/handlers/wait-until.handler";
 import { DatabaseRecordHandler } from "./engine/handlers/database-record.handler";
 import { AiHandler } from "./engine/handlers/ai.handler";
 import { EmailNotificationHandler } from "./engine/handlers/email-notification.handler";
@@ -65,6 +69,10 @@ const redisUrl = new URL(process.env.REDIS_URL ?? "redis://localhost:6379");
     SafeHttpClient,
     HttpRequestHandler,
     ConditionalHandler,
+    IfHandler,
+    SwitchHandler,
+    DelayHandler,
+    WaitUntilHandler,
     DatabaseRecordHandler,
     AiHandler,
     EmailNotificationHandler

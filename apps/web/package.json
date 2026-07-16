@@ -10,6 +10,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@automation/expression-engine": "workspace:*",
     "@automation/ui": "workspace:*",
     "@hookform/resolvers": "^3.9.1",
     "@tanstack/react-query": "^5.62.8",
