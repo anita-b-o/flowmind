@@ -1,8 +1,9 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 
 from app.api import classify, evaluate, extract, summarize
 from app.core.config import settings
 from app.core.logging import configure_logging, log_event
+from app.core.metrics import protected_metrics
 from app.core.security import ServiceAuthMiddleware
 from app.core.trace import TraceMiddleware
 
@@ -23,5 +24,5 @@ def health() -> dict[str, str]:
 
 
 @app.get("/metrics")
-def metrics() -> str:
-    return "# metrics placeholder\n"
+async def metrics(request: Request):
+    return await protected_metrics(request)

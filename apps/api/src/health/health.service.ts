@@ -3,13 +3,15 @@ import Redis from "ioredis";
 import { PrismaService } from "../prisma/prisma.service";
 import { ShutdownStateService } from "../runtime/shutdown-state.service";
 import { StructuredLoggerService } from "../observability/structured-logger.service";
+import { ApiMetricsService } from "../metrics/metrics.service";
 
 @Injectable()
 export class HealthService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly shutdown: ShutdownStateService,
-    private readonly logger?: StructuredLoggerService
+    private readonly logger?: StructuredLoggerService,
+    private readonly metrics?: ApiMetricsService
   ) {}
 
   async ready() {
@@ -20,6 +22,11 @@ export class HealthService {
     checks.redis = await this.checkRedis();
     const ready = Object.values(checks).every((value) => ["up", "valid", "ok"].includes(value));
     if (!ready) {
+      for (const [key, value] of Object.entries(checks)) {
+        if (!["up", "valid", "ok"].includes(value)) {
+          this.metrics?.readinessFailures.inc({ reason_code: key });
+        }
+      }
       this.logger?.warn("api.health.readiness_failed", { checks });
     }
     return { status: ready ? "ready" : "not_ready", checks };

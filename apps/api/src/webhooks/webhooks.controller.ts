@@ -12,11 +12,15 @@ import {
 } from "@nestjs/common";
 import { ApiTags } from "@nestjs/swagger";
 import { WebhooksService } from "./webhooks.service";
+import { ApiMetricsService } from "../metrics/metrics.service";
 
 @ApiTags("webhooks")
 @Controller("webhooks")
 export class WebhooksController {
-  constructor(private readonly webhooksService: WebhooksService) {}
+  constructor(
+    private readonly webhooksService: WebhooksService,
+    private readonly metrics: ApiMetricsService
+  ) {}
 
   @Post(":workflowId/:token")
   @HttpCode(HttpStatus.ACCEPTED)
@@ -27,8 +31,13 @@ export class WebhooksController {
     @Ip() sourceIp: string,
     @Body() body: unknown
   ) {
-    assertJsonContentType(headers["content-type"]);
-    assertPayloadSize(headers["content-length"]);
+    try {
+      assertJsonContentType(headers["content-type"]);
+      assertPayloadSize(headers["content-length"]);
+    } catch (error) {
+      this.metrics.recordWebhook("rejected", error instanceof PayloadTooLargeException ? "payload_too_large" : "unsupported_content_type");
+      throw error;
+    }
     return this.webhooksService.receive({ workflowId, token, headers, sourceIp, body });
   }
 }

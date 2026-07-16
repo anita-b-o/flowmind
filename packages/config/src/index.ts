@@ -28,6 +28,12 @@ const baseEnvSchema = z.object({
   EXECUTION_RECONCILIATION_INTERVAL_MS: z.coerce.number().int().positive().default(10_000),
   WORKER_SHUTDOWN_TIMEOUT_MS: z.coerce.number().int().positive().default(30_000),
   WORKER_HEALTH_PORT: z.coerce.number().int().positive().default(3002),
+  METRICS_ENABLED: z.coerce.boolean().default(false),
+  METRICS_API_KEY: z.string().default(""),
+  METRICS_HOST: z.string().ip().default("127.0.0.1"),
+  API_METRICS_PORT: z.coerce.number().int().min(1).max(65535).default(9464),
+  WORKER_METRICS_PORT: z.coerce.number().int().min(1).max(65535).default(9465),
+  AI_METRICS_PORT: z.coerce.number().int().min(1).max(65535).default(9466),
   LOG_LEVEL: z.enum(["trace", "debug", "info", "warn", "error", "fatal", "silent"]).default("info"),
   LOG_FORMAT: z.enum(["json", "pretty"]).optional(),
   LOG_REDACT_ENABLED: z.coerce.boolean().default(true),
@@ -50,7 +56,9 @@ export type WebEnv = z.infer<typeof webEnvSchema>;
 export type MailEnv = z.infer<typeof mailEnvSchema>;
 
 export function parseBaseEnv(env: NodeJS.ProcessEnv): BaseEnv {
-  return baseEnvSchema.parse(env);
+  const parsed = baseEnvSchema.parse(env);
+  validateMetricsConfig(parsed);
+  return parsed;
 }
 
 export function parseWebEnv(env: NodeJS.ProcessEnv): WebEnv {
@@ -59,4 +67,18 @@ export function parseWebEnv(env: NodeJS.ProcessEnv): WebEnv {
 
 export function parseMailEnv(env: NodeJS.ProcessEnv): MailEnv {
   return mailEnvSchema.parse(env);
+}
+
+function validateMetricsConfig(env: BaseEnv) {
+  if (!env.METRICS_ENABLED) {
+    return;
+  }
+  if (env.NODE_ENV === "production" && !isNonTrivialMetricsKey(env.METRICS_API_KEY)) {
+    throw new Error("METRICS_API_KEY must be configured with a non-trivial value when metrics are enabled in production");
+  }
+}
+
+function isNonTrivialMetricsKey(value: string) {
+  const trimmed = value.trim();
+  return trimmed.length >= 16 && !["change-me", "changeme", "dev", "test", "password", "metrics"].includes(trimmed.toLowerCase());
 }

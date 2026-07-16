@@ -9,6 +9,7 @@ import { JobContextService } from "../observability/job-context.service";
 import { WorkerLoggerService } from "../observability/worker-logger.service";
 import { WorkerIdentityService } from "../runtime/worker-identity.service";
 import { newTraceId } from "@automation/observability";
+import { WorkerMetricsService } from "../metrics/worker-metrics.service";
 
 @Processor(WORKFLOW_EXECUTIONS_QUEUE)
 export class ExecutionsProcessor extends WorkerHost {
@@ -20,7 +21,8 @@ export class ExecutionsProcessor extends WorkerHost {
     @InjectQueue(WORKFLOW_EXECUTIONS_QUEUE) private readonly queue: Queue<ExecutionJobPayload>,
     private readonly jobContext: JobContextService,
     private readonly logger: WorkerLoggerService,
-    private readonly identity: WorkerIdentityService
+    private readonly identity: WorkerIdentityService,
+    private readonly metrics: WorkerMetricsService
   ) {
     super();
   }
@@ -29,21 +31,27 @@ export class ExecutionsProcessor extends WorkerHost {
     if (this.shutdown.isShuttingDown()) {
       return;
     }
+    this.metrics.jobsReceived.inc({ queue: WORKFLOW_EXECUTIONS_QUEUE });
+    this.metrics.activeJobs.inc({ queue: WORKFLOW_EXECUTIONS_QUEUE });
     return this.jobContext.run(this.jobContext.create(job, this.identity.id), async () => {
-      this.logger.info("worker.job.received", { jobId: job.id });
-      const result = await this.runner.run(job.data);
-      if (result.status === "waiting") {
-        await this.queue.add(
-          EXECUTION_RUN_JOB,
-          { ...job.data, requestId: newTraceId(), enqueuedAt: new Date().toISOString() },
-          {
-            jobId: `execution-${job.data.executionId}-retry-${result.nextRetryAt.getTime()}`,
-            delay: Math.max(0, result.nextRetryAt.getTime() - Date.now()),
-            attempts: 1,
-            removeOnComplete: 1000,
-            removeOnFail: false
-          }
-        );
+      try {
+        this.logger.info("worker.job.received", { jobId: job.id });
+        const result = await this.runner.run(job.data);
+        if (result.status === "waiting") {
+          await this.queue.add(
+            EXECUTION_RUN_JOB,
+            { ...job.data, requestId: newTraceId(), enqueuedAt: new Date().toISOString() },
+            {
+              jobId: `execution-${job.data.executionId}-retry-${result.nextRetryAt.getTime()}`,
+              delay: Math.max(0, result.nextRetryAt.getTime() - Date.now()),
+              attempts: 1,
+              removeOnComplete: 1000,
+              removeOnFail: false
+            }
+          );
+        }
+      } finally {
+        this.metrics.activeJobs.dec({ queue: WORKFLOW_EXECUTIONS_QUEUE });
       }
     });
   }

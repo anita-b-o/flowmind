@@ -32,3 +32,11 @@ Every API HTTP request receives a boundary-local `requestId` and a flow-level `c
 Webhook intake stores `requestId` and `correlationId` on `WebhookEvent`, stores `correlationId` on `Execution`, and includes `correlationId` plus enqueue metadata in the BullMQ payload. Idempotent webhook repeats keep the original execution correlation ID. Manual retries inherit the original execution correlation ID so the incident and retry remain linked.
 
 Logs in API, worker, and AI service are structured. Production uses JSON, development can use pretty output. Logs use centralized redaction for credentials and sensitive fields, and do not include webhook bodies, prompts, cookies, bearer tokens, refresh tokens, API keys, or full step outputs by default.
+
+## Operational Metrics
+
+API and worker each own an explicit Prometheus registry and expose metrics from a protected, minimal HTTP server only when `METRICS_ENABLED=true`. The API server binds `METRICS_HOST:API_METRICS_PORT`; the worker server binds `METRICS_HOST:WORKER_METRICS_PORT`. Metrics servers are closed during graceful shutdown and are not part of functional readiness.
+
+The AI service exposes protected `/metrics` from FastAPI in this iteration to keep the Python service small; `AI_METRICS_PORT` remains configured for a future split server. Metrics use bounded labels only. Business IDs, trace IDs, emails, hostnames, IPs, full URLs, and free-form errors are never metric labels.
+
+See `docs/observability.md` for the catalog and label policy.

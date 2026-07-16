@@ -7,6 +7,7 @@ import { ErrorClassifier } from "./error-classifier";
 import { RetryPolicyResolver, type RetryPolicy } from "./retry-policy-resolver";
 import { JobContextService } from "../observability/job-context.service";
 import { WorkerLoggerService } from "../observability/worker-logger.service";
+import { WorkerMetricsService, workerErrorCategory } from "../metrics/worker-metrics.service";
 
 export type StepExecutionRecord = {
   id: string;
@@ -25,7 +26,8 @@ export class StepExecutor {
     private readonly errorClassifier: ErrorClassifier,
     private readonly retryPolicyResolver: RetryPolicyResolver,
     private readonly jobContext?: JobContextService,
-    private readonly logger?: WorkerLoggerService
+    private readonly logger?: WorkerLoggerService,
+    private readonly metrics?: WorkerMetricsService
   ) {}
 
   async ensure(input: {
@@ -122,6 +124,7 @@ export class StepExecutor {
         stepType: input.step.type,
         durationMs: completedAt.getTime() - startedAt.getTime()
       });
+      this.metrics?.recordStep(input.step.type, "completed", (completedAt.getTime() - startedAt.getTime()) / 1000);
       return { result, outcome: "completed" as const };
     } catch (error) {
       const completedAt = new Date();
@@ -148,8 +151,15 @@ export class StepExecutor {
         retrying: canRetry
       });
       if (canRetry) {
+        this.metrics?.recordStep(input.step.type, "retry_scheduled", (completedAt.getTime() - startedAt.getTime()) / 1000, workerErrorCategory(classification));
         return { outcome: "retrying" as const, nextRetryAt: nextRetryAt as Date };
       }
+      this.metrics?.recordStep(
+        input.step.type,
+        classification === "ambiguous" ? "ambiguous" : "failed",
+        (completedAt.getTime() - startedAt.getTime()) / 1000,
+        workerErrorCategory(classification)
+      );
       throw error;
     }
   }
@@ -176,6 +186,7 @@ export class StepExecutor {
         effectStatus: "skipped"
       }
     });
+    this.metrics?.recordStep(input.step.type, "skipped", 0);
     return {
       result: { status: StepExecutionStatus.Skipped, output }
     };

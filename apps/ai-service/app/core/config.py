@@ -9,6 +9,10 @@ class Settings(BaseSettings):
     llm_provider: str = "fake"
     openai_api_key: str | None = None
     anthropic_api_key: str | None = None
+    metrics_enabled: bool = False
+    metrics_api_key: str = ""
+    metrics_host: str = "127.0.0.1"
+    ai_metrics_port: int = 9466
 
 
 settings = Settings()

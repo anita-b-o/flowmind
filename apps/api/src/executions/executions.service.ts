@@ -7,6 +7,8 @@ import { PrismaService } from "../prisma/prisma.service";
 import { QueueService } from "../queues/queue.service";
 import { RequestContextService } from "../observability/request-context.service";
 import { StructuredLoggerService } from "../observability/structured-logger.service";
+import { ApiMetricsService } from "../metrics/metrics.service";
+import { classifyError } from "../metrics/metrics-catalog";
 
 @Injectable()
 export class ExecutionsService {
@@ -14,7 +16,8 @@ export class ExecutionsService {
     private readonly prisma: PrismaService,
     private readonly queueService: QueueService,
     private readonly requestContext?: RequestContextService,
-    private readonly logger?: StructuredLoggerService
+    private readonly logger?: StructuredLoggerService,
+    private readonly metrics?: ApiMetricsService
   ) {}
 
   async list(organizationId: string, query: ListExecutionsQueryDto) {
@@ -112,9 +115,15 @@ export class ExecutionsService {
       where: { id: executionId, organizationId },
       include: { deadLetters: { where: { resolvedAt: null } } }
     });
-    if (!original) throw new NotFoundException("Execution not found");
+    if (!original) {
+      this.metrics?.recordManualRetry("not_found");
+      throw new NotFoundException("Execution not found");
+    }
     const eligible = original.status === ExecutionStatus.Failed || original.deadLetters.length > 0;
-    if (!eligible) throw new ConflictException("Execution is not retryable");
+    if (!eligible) {
+      this.metrics?.recordManualRetry("conflict");
+      throw new ConflictException("Execution is not retryable");
+    }
     const activeRetry = await this.prisma.execution.findFirst({
       where: {
         retryOfExecutionId: original.id,
@@ -122,7 +131,10 @@ export class ExecutionsService {
         status: { in: [ExecutionStatus.Pending, ExecutionStatus.Queued, ExecutionStatus.Running, ExecutionStatus.Retrying] }
       }
     });
-    if (activeRetry) throw new ConflictException("A retry is already active for this execution");
+    if (activeRetry) {
+      this.metrics?.recordManualRetry("conflict");
+      throw new ConflictException("A retry is already active for this execution");
+    }
 
     const correlationId = original.correlationId ?? this.requestContext?.getCorrelationId() ?? newTraceId();
     const next = await this.prisma.$transaction(async (tx) => {
@@ -164,15 +176,22 @@ export class ExecutionsService {
       return created;
     });
 
-    await this.queueService.enqueueExecution({
-      organizationId,
-      executionId: next.id,
-      workflowId: next.workflowId,
-      workflowVersionId: next.workflowVersionId,
-      requestId: this.requestContext?.getRequestId() ?? `manual-retry-${next.id}`,
-      correlationId: next.correlationId ?? correlationId,
-      enqueuedAt: new Date().toISOString()
-    });
+    try {
+      await this.queueService.enqueueExecution({
+        organizationId,
+        executionId: next.id,
+        workflowId: next.workflowId,
+        workflowVersionId: next.workflowVersionId,
+        requestId: this.requestContext?.getRequestId() ?? `manual-retry-${next.id}`,
+        correlationId: next.correlationId ?? correlationId,
+        enqueuedAt: new Date().toISOString()
+      });
+    } catch (error) {
+      this.metrics?.recordManualRetry("enqueue_failed");
+      this.metrics?.recordEnqueueFailure("manual_retry", classifyError(error));
+      throw error;
+    }
+    this.metrics?.recordManualRetry("success");
     this.logger?.info("api.execution.retry_requested", {
       organizationId,
       userId,

@@ -19,6 +19,7 @@ Current controls:
 - Webhook intake enforces JSON content type, payload size limits and Redis-backed rate limits.
 - HTTP Request steps use the safe HTTP client: protocol allowlist, URL credential rejection, DNS resolution, private/reserved/link-local/metadata IP blocking, manual redirect validation, timeout and response-size limits.
 - AI service endpoints require `x-service-api-key`.
+- Metrics endpoints are disabled by default and, when enabled, require `Authorization: Bearer <METRICS_API_KEY>` or the operational `x-metrics-api-key` header. Metrics keys are never accepted in query strings.
 - Sensitive headers are stripped from persisted webhook metadata.
 
 CSRF strategy: the current browser contract assumes same-site web and API deployment with `SameSite=Lax`, Bearer access tokens in memory for normal mutations, and explicit Origin validation for cookie-backed auth mutations. If `REFRESH_COOKIE_SAME_SITE=none` is used for cross-site production, add a CSRF token mechanism before launch; CORS alone is not CSRF protection.
@@ -37,3 +38,5 @@ Trace IDs are diagnostic metadata only. They are not authentication or authoriza
 Structured logs redact sensitive fields case-insensitively, including `authorization`, `cookie`, `set-cookie`, `password`, `token`, `accessToken`, `refreshToken`, `apiKey`, `x-api-key`, `secret`, `clientSecret`, `smtpPassword`, and `privateKey`. URL usernames/passwords and sensitive query parameters such as `token`, `key`, `secret`, and `signature` are redacted before logging.
 
 Logs must not include full webhook bodies, prompts, provider inputs, provider outputs, cookies, bearer tokens, refresh tokens, webhook tokens, internal API keys, or secrets. Persisted execution errors remain operational data, but log events should include only sanitized summaries and categories.
+
+Metrics are separate from logs and AuditLog. They use bounded labels only and must not contain `requestId`, `correlationId`, organization/user/workflow/execution IDs, emails, hostnames, IPs, full URLs, cookies, tokens, or free-form error messages. See `docs/observability.md`.

@@ -25,6 +25,7 @@ import { ExecutionReconcilerService } from "./recovery/execution-reconciler.serv
 import { WorkerHealthService } from "./health/worker-health.service";
 import { JobContextService } from "./observability/job-context.service";
 import { WorkerLoggerService } from "./observability/worker-logger.service";
+import { WorkerMetricsService } from "./metrics/worker-metrics.service";
 
 const redisUrl = new URL(process.env.REDIS_URL ?? "redis://localhost:6379");
 
@@ -56,6 +57,7 @@ const redisUrl = new URL(process.env.REDIS_URL ?? "redis://localhost:6379");
     WorkerHealthService,
     JobContextService,
     WorkerLoggerService,
+    WorkerMetricsService,
     SafeHttpClient,
     HttpRequestHandler,
     ConditionalHandler,

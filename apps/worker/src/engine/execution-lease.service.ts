@@ -3,6 +3,7 @@ import { ExecutionStatus } from "@automation/shared-types";
 import { PrismaService } from "../prisma/prisma.service";
 import { WorkerIdentityService } from "../runtime/worker-identity.service";
 import { LeaseLostError } from "./lease-lost.error";
+import { WorkerMetricsService } from "../metrics/worker-metrics.service";
 
 const PROCESSABLE_STATUSES = [ExecutionStatus.Pending, ExecutionStatus.Queued, ExecutionStatus.Retrying, ExecutionStatus.Running];
 
@@ -10,7 +11,8 @@ const PROCESSABLE_STATUSES = [ExecutionStatus.Pending, ExecutionStatus.Queued, E
 export class ExecutionLeaseService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly identity: WorkerIdentityService
+    private readonly identity: WorkerIdentityService,
+    private readonly metrics?: WorkerMetricsService
   ) {}
 
   leaseDurationMs() {
@@ -39,7 +41,9 @@ export class ExecutionLeaseService {
         runAttempt: { increment: 1 }
       }
     });
-    return result.count === 1;
+    const acquired = result.count === 1;
+    this.metrics?.recordLease(acquired ? "acquired" : "conflict");
+    return acquired;
   }
 
   async heartbeat(executionId: string) {
@@ -52,6 +56,7 @@ export class ExecutionLeaseService {
       }
     });
     if (result.count !== 1) {
+      this.metrics?.recordLease("lost");
       throw new LeaseLostError();
     }
   }
@@ -62,6 +67,7 @@ export class ExecutionLeaseService {
       where: { id: executionId, lockedBy: this.identity.id, lockedUntil: { gt: now } }
     });
     if (count !== 1) {
+      this.metrics?.recordLease("lost");
       throw new LeaseLostError();
     }
   }
@@ -71,5 +77,6 @@ export class ExecutionLeaseService {
       where: { id: executionId, lockedBy: this.identity.id },
       data: { lockedBy: null, lockedUntil: null }
     });
+    this.metrics?.recordLease("released");
   }
 }

@@ -10,6 +10,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@automation/config": "workspace:*",
     "@automation/observability": "workspace:*",
     "@automation/shared-types": "workspace:*",
     "@nestjs/bullmq": "^10.2.3",
@@ -23,6 +24,7 @@
     "nestjs-pino": "^4.6.1",
     "nodemailer": "^6.9.16",
     "pino": "^10.3.1",
+    "prom-client": "^15.1.3",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1"
   },

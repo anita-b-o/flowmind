@@ -8,6 +8,7 @@ import { LoginDto } from "./dto/login.dto";
 import { RegisterDto } from "./dto/register.dto";
 import { accessTokenExpiresIn, refreshTokenExpiresIn, refreshTokenMaxAgeMs } from "./auth-config";
 import { StructuredLoggerService } from "../observability/structured-logger.service";
+import { ApiMetricsService } from "../metrics/metrics.service";
 
 type SessionMetadata = { userAgent?: string; ipHash?: string };
 
@@ -26,7 +27,8 @@ export class AuthService {
     private readonly prisma: PrismaService,
     private readonly jwtService: JwtService,
     private readonly organizationsService: OrganizationsService,
-    private readonly logger?: StructuredLoggerService
+    private readonly logger?: StructuredLoggerService,
+    private readonly metrics?: ApiMetricsService
   ) {}
 
   async register(dto: RegisterDto, metadata: SessionMetadata) {
@@ -48,6 +50,7 @@ export class AuthService {
   async login(dto: LoginDto, metadata: SessionMetadata) {
     const user = await this.prisma.user.findUnique({ where: { email: dto.email.toLowerCase() } });
     if (!user || !(await argon2.verify(user.passwordHash, dto.password))) {
+      this.metrics?.recordAuthLogin("invalid_credentials");
       throw new UnauthorizedException("Invalid credentials");
     }
 
@@ -57,32 +60,44 @@ export class AuthService {
     });
 
     const response = await this.createSessionResponse(user.id, user.email, user.name, membership?.organizationId, metadata);
+    this.metrics?.recordAuthLogin("success");
     this.logger?.info("api.auth.login_succeeded", { userId: user.id });
     return response;
   }
 
   async refresh(refreshToken: string | undefined, metadata: SessionMetadata) {
     if (!refreshToken) {
+      this.metrics?.recordAuthRefresh("revoked");
       throw new UnauthorizedException("Missing refresh token");
     }
-    const payload = await this.verifyRefreshToken(refreshToken);
+    let payload: RefreshPayload;
+    try {
+      payload = await this.verifyRefreshToken(refreshToken);
+    } catch (error) {
+      this.metrics?.recordAuthRefresh("expired");
+      throw error;
+    }
     const session = await this.prisma.refreshTokenSession.findUnique({ where: { id: payload.sessionId }, include: { user: true } });
     if (!session || session.userId !== payload.sub || session.tokenFamily !== payload.tokenFamily) {
+      this.metrics?.recordAuthRefresh("revoked");
       throw new UnauthorizedException("Invalid refresh session");
     }
 
     const tokenMatches = await argon2.verify(session.tokenHash, refreshToken);
     if (!tokenMatches) {
+      this.metrics?.recordAuthRefresh("revoked");
       throw new UnauthorizedException("Invalid refresh session");
     }
 
     if (session.revokedAt || session.replacedBySessionId) {
       await this.revokeFamily(session.tokenFamily);
+      this.metrics?.recordAuthRefresh("reuse_detected");
       this.logger?.warn("api.auth.refresh_reuse_detected", { sessionId: session.id, userId: session.userId });
       throw new UnauthorizedException("Refresh token reuse detected");
     }
     if (session.expiresAt <= new Date()) {
       await this.prisma.refreshTokenSession.update({ where: { id: session.id }, data: { revokedAt: new Date(), lastUsedAt: new Date() } });
+      this.metrics?.recordAuthRefresh("expired");
       throw new UnauthorizedException("Refresh token expired");
     }
 
@@ -118,10 +133,12 @@ export class AuthService {
         throw error;
       }
       await this.revokeFamily(session.tokenFamily);
+      this.metrics?.recordAuthRefresh("reuse_detected");
       this.logger?.warn("api.auth.refresh_reuse_detected", { sessionId: session.id, userId: session.userId, concurrent: true });
       throw new UnauthorizedException("Refresh token reuse detected");
     }
 
+    this.metrics?.recordAuthRefresh("success");
     this.logger?.info("api.auth.refresh_succeeded", { userId: session.user.id, sessionId: nextSessionId });
     return {
       refreshToken: nextRefreshToken,

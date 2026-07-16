@@ -6,6 +6,7 @@ import { ExecutionsModule } from "./executions/executions.module";
 import { DeadLetterExecutionsModule } from "./dead-letter/dead-letter-executions.module";
 import { HealthModule } from "./health/health.module";
 import { ObservabilityModule } from "./observability/observability.module";
+import { MetricsModule } from "./metrics/metrics.module";
 import { OrganizationsModule } from "./organizations/organizations.module";
 import { PrismaModule } from "./prisma/prisma.module";
 import { QueuesModule } from "./queues/queues.module";
@@ -25,6 +26,7 @@ const redisUrl = new URL(process.env.REDIS_URL ?? "redis://localhost:6379");
       }
     }),
     ObservabilityModule,
+    MetricsModule,
     PrismaModule,
     HealthModule,
     AuthModule,

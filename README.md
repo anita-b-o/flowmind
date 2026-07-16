@@ -28,6 +28,18 @@ Servicios locales:
 - AI Service: `http://localhost:8000`
 - Mailpit: `http://localhost:8025`
 
+## Metrics
+
+Prometheus-compatible metrics are disabled by default. Enable them with `METRICS_ENABLED=true`, bind them internally with `METRICS_HOST=127.0.0.1`, and protect them with `Authorization: Bearer <METRICS_API_KEY>`.
+
+Default ports:
+
+- API metrics: `127.0.0.1:9464`
+- Worker metrics: `127.0.0.1:9465`
+- AI metrics: protected `/metrics` on the FastAPI service
+
+See `docs/observability.md` for the metric catalog, labels policy, and scrape example.
+
 ## Webhooks
 
 Create a webhook trigger with:

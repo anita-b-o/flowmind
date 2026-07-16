@@ -3,9 +3,11 @@ import { NestFactory } from "@nestjs/core";
 import { DocumentBuilder, SwaggerModule } from "@nestjs/swagger";
 import { Logger } from "nestjs-pino";
 import helmet from "helmet";
+import { parseBaseEnv } from "@automation/config";
 import { AppModule } from "./app.module";
 
 async function bootstrap() {
+  parseBaseEnv(process.env);
   const app = await NestFactory.create(AppModule, { bufferLogs: true });
   app.useLogger(app.get(Logger));
   app.enableShutdownHooks();

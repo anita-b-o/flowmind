@@ -8,6 +8,7 @@ import { ExecutionLeaseService } from "./execution-lease.service";
 import { LeaseLostError } from "./lease-lost.error";
 import { DeadLetterService } from "../dlq/dead-letter.service";
 import { WorkerLoggerService } from "../observability/worker-logger.service";
+import { WorkerMetricsService } from "../metrics/worker-metrics.service";
 
 export type WorkflowRunResult = { status: "completed" | "skipped" | "lost_lease" } | { status: "waiting"; nextRetryAt: Date };
 
@@ -19,7 +20,8 @@ export class WorkflowRunner {
     private readonly contextReconstructor: ContextReconstructor,
     private readonly leaseService: ExecutionLeaseService,
     private readonly deadLetterService: DeadLetterService,
-    private readonly logger?: WorkerLoggerService
+    private readonly logger?: WorkerLoggerService,
+    private readonly metrics?: WorkerMetricsService
   ) {}
 
   async run(payload: ExecutionJobPayload): Promise<WorkflowRunResult> {
@@ -143,6 +145,7 @@ export class WorkflowRunner {
       if (heartbeat) clearInterval(heartbeat);
       await this.leaseService.release(execution.id);
       this.logger?.info("worker.execution.completed", { durationMs: execution.startedAt ? Date.now() - execution.startedAt.getTime() : undefined });
+      this.metrics?.executionsCompleted.inc();
       return { status: "completed" };
     } catch (error) {
       if (heartbeat) clearInterval(heartbeat);
@@ -186,6 +189,7 @@ export class WorkflowRunner {
         stepExecutionId: failedStep?.id,
         reason: failedStep?.effectStatus === "ambiguous" ? "ambiguous" : "failed"
       });
+      this.metrics?.executionsFailed.inc({ error_category: (failedStep?.errorJson as any)?.classification ?? "unknown" });
       await this.leaseService.release(execution.id);
       throw error;
     }

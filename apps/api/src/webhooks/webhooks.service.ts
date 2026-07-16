@@ -9,6 +9,8 @@ import { WebhookTokenService } from "../triggers/webhook-token.service";
 import { WebhookRateLimitService } from "./webhook-rate-limit.service";
 import { RequestContextService } from "../observability/request-context.service";
 import { StructuredLoggerService } from "../observability/structured-logger.service";
+import { ApiMetricsService } from "../metrics/metrics.service";
+import { classifyError } from "../metrics/metrics-catalog";
 
 interface ReceiveWebhookInput {
   workflowId: string;
@@ -26,25 +28,38 @@ export class WebhooksService {
     private readonly tokenService: WebhookTokenService,
     private readonly rateLimitService: WebhookRateLimitService,
     private readonly requestContext: RequestContextService,
-    private readonly logger: StructuredLoggerService
+    private readonly logger: StructuredLoggerService,
+    private readonly metrics: ApiMetricsService
   ) {}
 
   async receive(input: ReceiveWebhookInput) {
     const requestId = this.requestContext.getRequestId();
     const correlationId = this.requestContext.getCorrelationId();
-    await this.rateLimitService.assertAllowed(`pre:${input.workflowId}:${input.sourceIp}`, this.rateLimitService.burstMax());
+    try {
+      await this.rateLimitService.assertAllowed(`pre:${input.workflowId}:${input.sourceIp}`, this.rateLimitService.burstMax());
+    } catch (error) {
+      this.metrics.recordWebhook("rejected", "rate_limited");
+      throw error;
+    }
     const workflow = await this.loadWorkflow(input.workflowId);
     if (!workflow || !workflow.activeVersion) {
+      this.metrics.recordWebhook("rejected", "inactive_workflow");
       this.logger.warn("api.webhook.rejected", { workflowId: input.workflowId, reason: "active_workflow_not_found" });
       throw new NotFoundException("Active workflow not found");
     }
 
     const trigger = workflow.triggers.find((candidate) => this.tokenService.verifyToken(input.token, candidate.tokenHash));
     if (!trigger) {
+      this.metrics.recordWebhook("rejected", "invalid_token");
       this.logger.warn("api.webhook.rejected", { workflowId: workflow.id, organizationId: workflow.organizationId, reason: "invalid_token" });
       throw new UnauthorizedException("Invalid webhook token");
     }
-    await this.rateLimitService.assertAllowed(`trigger:${workflow.organizationId}:${workflow.id}:${trigger.id}:${input.sourceIp}`);
+    try {
+      await this.rateLimitService.assertAllowed(`trigger:${workflow.organizationId}:${workflow.id}:${trigger.id}:${input.sourceIp}`);
+    } catch (error) {
+      this.metrics.recordWebhook("rejected", "rate_limited");
+      throw error;
+    }
 
     const payloadHash = sha256(JSON.stringify(input.body));
     const headerKey = headerValue(input.headers["idempotency-key"]);
@@ -53,9 +68,11 @@ export class WebhooksService {
 
     const existing = await this.waitForExisting(workflow.organizationId, scope, idempotencyKey);
     if (existing?.responseJson && ["PROCESSING", "ENQUEUED"].includes(existing.status)) {
+      this.metrics.recordWebhook("accepted", "duplicate");
       return this.authoritativeResponse(workflow.organizationId, existing.responseJson);
     }
     if (existing?.status === "FAILED" && existing.responseJson) {
+      this.metrics.recordWebhook("accepted", "duplicate");
       return this.retryFailedEnqueue(workflow.organizationId, scope, idempotencyKey, existing.responseJson);
     }
 
@@ -85,6 +102,7 @@ export class WebhooksService {
         workflowVersionId: workflow.activeVersion.id,
         executionId: result.execution.id
       });
+      this.metrics.recordWebhook("accepted", "accepted");
       return response;
     } catch (error) {
       await this.prisma.$transaction([
@@ -106,6 +124,8 @@ export class WebhooksService {
         workflowId: workflow.id,
         executionId: result.execution.id
       });
+      this.metrics.recordWebhook("rejected", "enqueue_failed");
+      this.metrics.recordEnqueueFailure("webhook", classifyError(error));
       throw new ServiceUnavailableException("Execution could not be queued");
     }
   }

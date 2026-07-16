@@ -7,6 +7,7 @@ import { PrismaService } from "../prisma/prisma.service";
 import { EXECUTION_RUN_JOB, WORKFLOW_EXECUTIONS_QUEUE } from "../queues/queue.constants";
 import { ShutdownStateService } from "../runtime/shutdown-state.service";
 import { WorkerLoggerService } from "../observability/worker-logger.service";
+import { WorkerMetricsService, type ReconcilerReason } from "../metrics/worker-metrics.service";
 
 @Injectable()
 export class ExecutionReconcilerService implements OnModuleInit, OnModuleDestroy {
@@ -17,7 +18,8 @@ export class ExecutionReconcilerService implements OnModuleInit, OnModuleDestroy
     private readonly prisma: PrismaService,
     private readonly shutdown: ShutdownStateService,
     @InjectQueue(WORKFLOW_EXECUTIONS_QUEUE) private readonly queue: Queue,
-    private readonly logger?: WorkerLoggerService
+    private readonly logger?: WorkerLoggerService,
+    private readonly metrics?: WorkerMetricsService
   ) {}
 
   onModuleInit() {
@@ -38,10 +40,17 @@ export class ExecutionReconcilerService implements OnModuleInit, OnModuleDestroy
   async reconcile() {
     if (this.running || this.shutdown.isShuttingDown()) return;
     this.running = true;
+    const started = process.hrtime.bigint();
     try {
       await this.recoverExpiredRunning();
       await this.requeueDueRetries();
       await this.requeueQueuedExecutions();
+      this.metrics?.reconcilerRuns.inc({ outcome: "completed" });
+      this.metrics?.reconcilerDuration.observe(Number(process.hrtime.bigint() - started) / 1_000_000_000);
+    } catch (error) {
+      this.metrics?.reconcilerRuns.inc({ outcome: "failed" });
+      this.metrics?.reconcilerDuration.observe(Number(process.hrtime.bigint() - started) / 1_000_000_000);
+      throw error;
     } finally {
       this.running = false;
     }
@@ -71,7 +80,7 @@ export class ExecutionReconcilerService implements OnModuleInit, OnModuleDestroy
           }
         });
       }
-      await this.enqueue(execution.id, execution.organizationId, execution.workflowId, execution.workflowVersionId, execution.correlationId);
+      await this.enqueue(execution.id, execution.organizationId, execution.workflowId, execution.workflowVersionId, execution.correlationId, "expired_lease_recovered");
     }
   }
 
@@ -93,7 +102,7 @@ export class ExecutionReconcilerService implements OnModuleInit, OnModuleDestroy
         where: { id: execution.id, status: { in: [ExecutionStatus.Retrying, ExecutionStatus.Queued] } },
         data: { status: ExecutionStatus.Queued }
       });
-      await this.enqueue(execution.id, execution.organizationId, execution.workflowId, execution.workflowVersionId, execution.correlationId);
+      await this.enqueue(execution.id, execution.organizationId, execution.workflowId, execution.workflowVersionId, execution.correlationId, "retry_recovered");
     }
   }
 
@@ -110,17 +119,26 @@ export class ExecutionReconcilerService implements OnModuleInit, OnModuleDestroy
       take: 100
     });
     for (const execution of executions) {
-      await this.enqueue(execution.id, execution.organizationId, execution.workflowId, execution.workflowVersionId, execution.correlationId);
+      await this.enqueue(execution.id, execution.organizationId, execution.workflowId, execution.workflowVersionId, execution.correlationId, "queued_job_recovered");
     }
   }
 
-  private async enqueue(executionId: string, organizationId: string, workflowId: string, workflowVersionId: string, existingCorrelationId?: string | null) {
+  private async enqueue(
+    executionId: string,
+    organizationId: string,
+    workflowId: string,
+    workflowVersionId: string,
+    existingCorrelationId?: string | null,
+    reasonCode: ReconcilerReason = "execution_requeued"
+  ) {
     const correlationId = existingCorrelationId ?? (await this.ensureExecutionCorrelationId(executionId));
     const job = await this.queue.add(
       EXECUTION_RUN_JOB,
       { executionId, organizationId, workflowId, workflowVersionId, requestId: newTraceId(), correlationId, enqueuedAt: new Date().toISOString() },
       { jobId: `execution-${executionId}`, attempts: 1, removeOnComplete: 1000, removeOnFail: false }
     );
+    this.metrics?.executionsReconciled.inc({ reason_code: reasonCode });
+    this.metrics?.reconcilerReenqueued.inc({ reason_code: reasonCode });
     this.logger?.info("worker.reconciler.reenqueued", { executionId, organizationId, workflowId, workflowVersionId, correlationId, jobId: job.id });
     return job;
   }

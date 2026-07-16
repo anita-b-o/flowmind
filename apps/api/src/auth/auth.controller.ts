@@ -8,11 +8,15 @@ import { JwtAuthGuard } from "./jwt-auth.guard";
 import { CurrentUser, type CurrentUser as CurrentUserType } from "./current-user.decorator";
 import { assertAllowedOrigin, clearRefreshCookieOptions, readCookie, refreshCookieName, refreshCookieOptions } from "./auth-config";
 import { sessionMetadata } from "./session-metadata";
+import { ApiMetricsService } from "../metrics/metrics.service";
 
 @ApiTags("auth")
 @Controller("auth")
 export class AuthController {
-  constructor(private readonly authService: AuthService) {}
+  constructor(
+    private readonly authService: AuthService,
+    private readonly metrics: ApiMetricsService
+  ) {}
 
   @Post("register")
   async register(@Body() dto: RegisterDto, @Req() request: Request, @Res({ passthrough: true }) response: Response) {
@@ -104,6 +108,9 @@ export class AuthController {
 
   private assertOrigin(request: Request) {
     if (!assertAllowedOrigin(request)) {
+      if (request.path === "/auth/refresh") {
+        this.metrics.recordAuthRefresh("invalid_origin");
+      }
       throw new ForbiddenException("Origin is not allowed");
     }
   }
