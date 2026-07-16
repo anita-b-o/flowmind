@@ -50,6 +50,16 @@ POST /workflows/:workflowId/triggers
 
 The plaintext token is returned only on create or rotate. The API stores only a SHA-256 hash with `WEBHOOK_TOKEN_PEPPER`.
 
+## Connections
+
+Organizations can manage encrypted HTTP API key and SMTP connections at `/connections`. Generate a local connection encryption key with:
+
+```bash
+openssl rand -base64 32
+```
+
+Set it as `CONNECTION_ENCRYPTION_KEY=base64:<value>`. Connection secrets are encrypted with AES-256-GCM, are never returned after saving, and workflow steps reference them by `connectionId`.
+
 ## Authentication
 
 The web app keeps access tokens only in memory. `POST /auth/register` and `POST /auth/login` return a short-lived Bearer access token and set a rotating refresh token in an HttpOnly cookie named `refresh_token` by default. The refresh token is never returned in JSON and is stored only as an Argon2 hash in PostgreSQL.
@@ -75,6 +85,8 @@ Webhook intake accepts JSON only, applies `WEBHOOK_PAYLOAD_MAX_BYTES`, and rate-
 The web app includes a form-based workflow builder at `/workflows`. Users can create a workflow, edit a local draft, add linear steps, configure each step with type-specific fields, validate immediately, create a new version, and explicitly activate a selected version. Draft edits stay in the browser until `Create version`; no workflow version is activated automatically.
 
 Supported step forms map to the existing engine types: HTTP request, AI classification, AI structured extraction, AI summary, email notification, database record, and conditional. The builder uses the existing webhook trigger definition when creating versions.
+
+HTTP and email steps can select organization-scoped connections. New workflow versions store only `connectionId`; the worker decrypts the active secret only while executing the step. Legacy versions without connections remain readable during the transition.
 
 ## Conditional Step
 

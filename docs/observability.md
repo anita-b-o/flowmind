@@ -108,3 +108,5 @@ Logs carry sanitized context for debugging and may include request/correlation I
 Metrics servers close during graceful shutdown. Metrics availability is not part of API or worker readiness.
 
 AuditLog is used for critical user-visible actions such as manual retry, DLQ resolution, trigger changes, workflow activation, logout-all, and refresh-session reuse detection. Technical events such as heartbeats, step completion, metrics increments, automatic retry, and reconciler passes stay in logs/metrics rather than AuditLog.
+
+Connection create, update, rotate, revoke, delete, and test actions are AuditLog events. Audit metadata must contain only safe fields such as connection id, type, status, and test outcome; encrypted payload fields and plaintext credentials are redacted by the shared sanitizer.

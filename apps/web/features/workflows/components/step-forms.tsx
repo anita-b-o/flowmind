@@ -1,6 +1,8 @@
 "use client";
 
+import Link from "next/link";
 import type { FieldErrors, UseFormRegister } from "react-hook-form";
+import { useConnections } from "../../connections/hooks";
 import type { WorkflowEditorFormValue } from "../workflow-builder";
 
 type StepFormProps = {
@@ -27,9 +29,22 @@ export function StepForm({ index, type, register, errors, disabled }: StepFormPr
 }
 
 export function HttpStepForm({ index, register, errors, disabled }: StepFormProps) {
+  const connections = useConnections({ type: "HTTP_API_KEY", status: "ACTIVE" });
   return (
     <div className="stack">
       <div className="workflow-form-grid">
+        <label>
+          Connection
+          <select disabled={disabled || connections.isLoading} {...register(`steps.${index}.config.connectionId`)}>
+            <option value="">Select a connection</option>
+            {connections.data?.map((connection) => (
+              <option key={connection.id} value={connection.id}>
+                {connection.name} ({connection.credential})
+              </option>
+            ))}
+          </select>
+          <FieldError message={configError(errors, index, "connectionId")} />
+        </label>
         <label>
           Method
           <select disabled={disabled} {...register(`steps.${index}.config.method`)}>
@@ -47,6 +62,9 @@ export function HttpStepForm({ index, register, errors, disabled }: StepFormProp
           <FieldError message={configError(errors, index, "url")} />
         </label>
       </div>
+      <p className="muted">
+        <Link href="/connections">Create a HTTP API key connection</Link>
+      </p>
       <label>
         Headers
         <textarea rows={4} disabled={disabled} {...register(`steps.${index}.config.headers`)} />
@@ -99,9 +117,22 @@ export function AiStepForm({ index, type, register, errors, disabled }: StepForm
 }
 
 export function EmailStepForm({ index, register, errors, disabled }: StepFormProps) {
+  const connections = useConnections({ type: "SMTP", status: "ACTIVE" });
   return (
     <div className="stack">
       <div className="workflow-form-grid">
+        <label>
+          Connection
+          <select disabled={disabled || connections.isLoading} {...register(`steps.${index}.config.connectionId`)}>
+            <option value="">Select a connection</option>
+            {connections.data?.map((connection) => (
+              <option key={connection.id} value={connection.id}>
+                {connection.name} ({connection.credential})
+              </option>
+            ))}
+          </select>
+          <FieldError message={configError(errors, index, "connectionId")} />
+        </label>
         <label>
           Recipient
           <input disabled={disabled} placeholder="sales@example.com" {...register(`steps.${index}.config.to`)} />
@@ -113,6 +144,9 @@ export function EmailStepForm({ index, register, errors, disabled }: StepFormPro
           <FieldError message={configError(errors, index, "subject")} />
         </label>
       </div>
+      <p className="muted">
+        <Link href="/connections">Create a SMTP connection</Link>
+      </p>
       <label>
         Body
         <textarea rows={5} disabled={disabled} {...register(`steps.${index}.config.text`)} />

@@ -15,6 +15,9 @@ const baseEnvSchema = z.object({
   CORS_ORIGIN: z.string().default("http://localhost:3000"),
   AUTH_ORIGIN_REQUIRED: z.coerce.boolean().optional(),
   SECRET_ENCRYPTION_KEY: z.string().min(16),
+  CONNECTION_ENCRYPTION_KEY: z.string().optional(),
+  CONNECTION_ENCRYPTION_VERSION: z.coerce.number().int().positive().default(1),
+  CONNECTION_TEST_TIMEOUT_MS: z.coerce.number().int().positive().default(5000),
   AI_SERVICE_URL: z.string().url(),
   AI_SERVICE_API_KEY: z.string().min(8),
   PUBLIC_API_URL: z.string().url().default("http://localhost:3001"),
@@ -58,6 +61,7 @@ export type MailEnv = z.infer<typeof mailEnvSchema>;
 export function parseBaseEnv(env: NodeJS.ProcessEnv): BaseEnv {
   const parsed = baseEnvSchema.parse(env);
   validateMetricsConfig(parsed);
+  validateConnectionEncryptionConfig(parsed);
   return parsed;
 }
 
@@ -81,4 +85,23 @@ function validateMetricsConfig(env: BaseEnv) {
 function isNonTrivialMetricsKey(value: string) {
   const trimmed = value.trim();
   return trimmed.length >= 16 && !["change-me", "changeme", "dev", "test", "password", "metrics"].includes(trimmed.toLowerCase());
+}
+
+function validateConnectionEncryptionConfig(env: BaseEnv) {
+  if (!env.CONNECTION_ENCRYPTION_KEY) {
+    if (env.NODE_ENV === "production") {
+      throw new Error("CONNECTION_ENCRYPTION_KEY must be configured in production");
+    }
+    return;
+  }
+  decodeConnectionKey(env.CONNECTION_ENCRYPTION_KEY);
+}
+
+function decodeConnectionKey(value: string) {
+  const [prefix, encoded] = value.includes(":") ? value.split(":", 2) : ["base64", value];
+  const buffer = prefix === "hex" ? Buffer.from(encoded, "hex") : prefix === "base64" ? Buffer.from(encoded, "base64") : undefined;
+  if (!buffer || buffer.length !== 32) {
+    throw new Error("CONNECTION_ENCRYPTION_KEY must be base64:<32 bytes> or hex:<32 bytes>");
+  }
+  return buffer;
 }

@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { WorkflowStatus, WorkflowVersionStatus } from "@automation/shared-types";
 import { PrismaService } from "../prisma/prisma.service";
@@ -75,6 +75,7 @@ export class WorkflowsService {
       where: { workflowId, organizationId },
       orderBy: { versionNumber: "desc" }
     });
+    await this.validateConnectionReferences(organizationId, [...dto.steps, dto.trigger]);
     const versionNumber = (latest?.versionNumber ?? 0) + 1;
     const definition = toPrismaJson({ trigger: dto.trigger, steps: dto.steps });
 
@@ -153,6 +154,38 @@ export class WorkflowsService {
       return workflow;
     });
   }
+
+  private async validateConnectionReferences(organizationId: string, steps: Array<{ type: string; config: Record<string, unknown> }>) {
+    for (const step of steps) {
+      if (step.type === "http_request") {
+        const connectionId = stringValue(step.config.connectionId);
+        if (!connectionId) {
+          assertNoSensitiveHttpHeaders(step.config);
+          continue;
+        }
+        await this.assertConnection(organizationId, connectionId, "http_api_key");
+      }
+      if (step.type === "email_notification") {
+        const connectionId = stringValue(step.config.connectionId);
+        if (!connectionId) {
+          if ("password" in step.config || "smtpPassword" in step.config || "host" in step.config || "username" in step.config) {
+            throw new BadRequestException("email_notification credentials must use connectionId");
+          }
+          continue;
+        }
+        await this.assertConnection(organizationId, connectionId, "smtp");
+      }
+    }
+  }
+
+  private async assertConnection(organizationId: string, connectionId: string, type: "http_api_key" | "smtp") {
+    const connection = await this.prisma.connection.findFirst({
+      where: { id: connectionId, organizationId, type, status: "ACTIVE", deletedAt: null }
+    });
+    if (!connection) {
+      throw new BadRequestException("Workflow step references an invalid connection");
+    }
+  }
 }
 
 function normalizeRetryPolicy(raw: Record<string, unknown>) {
@@ -186,4 +219,22 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function toPrismaJson(value: unknown): Prisma.InputJsonValue {
   return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
+}
+
+function stringValue(value: unknown) {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function assertNoSensitiveHttpHeaders(config: Record<string, unknown>) {
+  const headers = config.headers;
+  if (!headers || typeof headers !== "object" || Array.isArray(headers)) {
+    return;
+  }
+  const sensitive = new Set(["authorization", "cookie", "proxy-authorization", "x-api-key", "api-key"]);
+  for (const key of Object.keys(headers)) {
+    const lower = key.toLowerCase();
+    if (sensitive.has(lower) || lower.startsWith("proxy-")) {
+      throw new BadRequestException("http_request credentials must use connectionId");
+    }
+  }
 }

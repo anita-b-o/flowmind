@@ -9,12 +9,20 @@ const SENSITIVE_KEYS = new Set([
   "apikey",
   "xapikey",
   "secret",
+  "secretvalue",
+  "connectionsecret",
   "password",
+  "smtppassword",
   "token",
   "tokenhash",
   "passwordhash",
   "ipaddress",
-  "iphash"
+  "iphash",
+  "encryptedvalue",
+  "ciphertext",
+  "authtag",
+  "iv",
+  "encryptionkey"
 ]);
 
 export function sanitizePublic(value: unknown): unknown {

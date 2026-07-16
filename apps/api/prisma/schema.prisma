@@ -74,6 +74,13 @@ enum ConnectionType {
 enum ConnectionStatus {
   ACTIVE
   DISABLED
+  REVOKED
+  DELETED
+}
+
+enum SecretStatus {
+  ACTIVE
+  REVOKED
 }
 
 model User {
@@ -375,32 +382,41 @@ model Connection {
   id              String           @id @default(uuid())
   organizationId  String           @map("organization_id")
   name            String
+  description     String?
   type            ConnectionType
   configJson      Json             @map("config_json")
   status          ConnectionStatus @default(ACTIVE)
   createdByUserId String           @map("created_by_user_id")
   createdAt       DateTime         @default(now()) @map("created_at")
   updatedAt       DateTime         @updatedAt @map("updated_at")
+  rotatedAt       DateTime?        @map("rotated_at")
+  revokedAt       DateTime?        @map("revoked_at")
+  deletedAt       DateTime?        @map("deleted_at")
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   secrets      Secret[]
 
   @@index([organizationId, type])
+  @@index([organizationId, type, status])
+  @@index([organizationId, deletedAt])
   @@map("connections")
 }
 
 model Secret {
   id                   String    @id @default(uuid())
   organizationId       String    @map("organization_id")
-  connectionId         String?   @map("connection_id")
+  connectionId         String    @map("connection_id")
   name                 String
   encryptedValue       String    @map("encrypted_value")
-  encryptionKeyVersion String    @map("encryption_key_version")
+  encryptionVersion    Int       @default(1) @map("encryption_version")
+  keyId                String?   @map("key_id")
+  status               SecretStatus @default(ACTIVE)
   createdAt            DateTime  @default(now()) @map("created_at")
   rotatedAt            DateTime? @map("rotated_at")
+  revokedAt            DateTime? @map("revoked_at")
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  connection   Connection?  @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  connection   Connection  @relation(fields: [connectionId], references: [id], onDelete: Cascade)
 
   @@index([organizationId, connectionId])
   @@map("secrets")

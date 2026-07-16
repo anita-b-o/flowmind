@@ -31,6 +31,16 @@ vi.mock("../hooks", () => ({
   useActivateWorkflowVersion: () => activateVersion
 }));
 
+vi.mock("../../connections/hooks", () => ({
+  useConnections: ({ type }: { type: string }) => ({
+    data:
+      type === "SMTP"
+        ? [{ id: "smtp-1", name: "SMTP primary", credential: "te****@example.com", type: "SMTP", status: "ACTIVE" }]
+        : [{ id: "http-1", name: "API primary", credential: "Authorization: ****", type: "HTTP_API_KEY", status: "ACTIVE" }],
+    isLoading: false
+  })
+}));
+
 describe("WorkflowEditor", () => {
   beforeEach(() => {
     replace.mockReset();
@@ -54,6 +64,7 @@ describe("WorkflowEditor", () => {
     expect(createVersion.mutateAsync).not.toHaveBeenCalled();
 
     await userEvent.type(screen.getByPlaceholderText("sales@example.com"), "sales@example.com");
+    await userEvent.selectOptions(screen.getByLabelText(/connection/i), "smtp-1");
     await userEvent.type(screen.getByRole("textbox", { name: /subject/i }), "Lead");
     await userEvent.type(screen.getByRole("textbox", { name: /body/i }), "Hello");
 

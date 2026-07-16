@@ -48,6 +48,23 @@ export enum StepType {
   DatabaseRecord = "database_record"
 }
 
+export enum ConnectionType {
+  HttpApiKey = "HTTP_API_KEY",
+  Smtp = "SMTP"
+}
+
+export enum ConnectionStatus {
+  Active = "ACTIVE",
+  Disabled = "DISABLED",
+  Revoked = "REVOKED",
+  Deleted = "DELETED"
+}
+
+export enum HttpAuthLocation {
+  Header = "HEADER",
+  Query = "QUERY"
+}
+
 export type JsonObject = Record<string, unknown>;
 
 export interface RetryPolicyDefinition {

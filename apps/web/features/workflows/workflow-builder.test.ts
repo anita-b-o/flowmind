@@ -9,7 +9,7 @@ describe("workflow builder model", () => {
       steps: [
         {
           ...emptyStep(0, "http_request"),
-          config: { method: "TRACE", url: "", headers: "{}", body: "" },
+          config: { connectionId: "", method: "TRACE", url: "", headers: "{}", body: "" },
           retryPolicy: { maxAttempts: 6, backoffMs: 50, strategy: "fixed" },
           timeoutSeconds: 121
         }
@@ -56,6 +56,7 @@ describe("workflow builder model", () => {
 
   it("drops incompatible config when type changes", () => {
     expect(keepCompatibleConfig("email_notification", { url: "https://example.com", subject: "Hello" })).toEqual({
+      connectionId: "",
       to: "",
       subject: "Hello",
       text: ""

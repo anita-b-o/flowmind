@@ -14,6 +14,14 @@ Core endpoints:
 - `DELETE /auth/sessions/:sessionId`
 - `GET /organizations`
 - `POST /organizations`
+- `GET /connections`
+- `POST /connections`
+- `GET /connections/:connectionId`
+- `PATCH /connections/:connectionId`
+- `POST /connections/:connectionId/rotate`
+- `POST /connections/:connectionId/revoke`
+- `DELETE /connections/:connectionId`
+- `POST /connections/:connectionId/test`
 - `GET /workflows`
 - `GET /workflows/:workflowId`
 - `POST /workflows`
@@ -92,6 +100,28 @@ x-organization-id: <organization-id>
 ```
 
 Retry and timeout values are normalized by existing bounds on version creation. `PATCH /workflows/:workflowId/versions/:versionId/activate` explicitly activates an existing version and archives the previous active version; creation never activates automatically.
+
+HTTP and email step configs should reference connections:
+
+```json
+{ "connectionId": "connection-id", "method": "POST", "url": "/leads", "headers": {}, "body": {} }
+```
+
+```json
+{ "connectionId": "connection-id", "to": "ops@example.com", "subject": "Lead", "text": "Hello" }
+```
+
+The API validates that referenced connections belong to the organization, are active, and match the step type. Plaintext secrets are never accepted in public responses.
+
+## Connections
+
+`GET /connections` requires editor role or higher and returns metadata only: id, type, name, description, status, masked credential, created/updated/rotated timestamps.
+
+`POST /connections` requires admin or owner. Supported types are `HTTP_API_KEY` and `SMTP`. The secret field is used only during the request, encrypted, and never returned.
+
+`POST /connections/:connectionId/rotate` replaces the active encrypted secret and revokes the previous one. `POST /connections/:connectionId/revoke` blocks future executions. `DELETE /connections/:connectionId` is owner-only and returns `409 CONNECTION_IN_USE` if an active workflow version references the connection.
+
+`POST /connections/:connectionId/test` verifies HTTP credentials with outbound request safety checks or SMTP credentials with Nodemailer `verify()`. Responses include success, duration, and optional HTTP status only.
 # API Trace Headers
 
 All API responses include:

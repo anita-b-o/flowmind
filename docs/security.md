@@ -22,13 +22,15 @@ Current controls:
 - Metrics endpoints are disabled by default and, when enabled, require `Authorization: Bearer <METRICS_API_KEY>` or the operational `x-metrics-api-key` header. Metrics keys are never accepted in query strings.
 - Sensitive headers are stripped from persisted webhook metadata.
 - Dead-letter and audit-log APIs are tenant-scoped by `x-organization-id`. DLQ viewing requires viewer or higher; manual retry requires editor or higher; AuditLog requires owner or admin.
+- Connection APIs are tenant-scoped by `x-organization-id`. Editors can list and use connection metadata, admins can manage and rotate, and only owners can delete.
+- Connection secrets are encrypted at rest with AES-256-GCM using `CONNECTION_ENCRYPTION_KEY`. The key is loaded from environment, must decode to 32 bytes, and is not stored in the database.
+- Connection plaintext is accepted only during create/rotate/test and is never returned after saving. Workflow versions store `connectionId`, not credentials.
 
 CSRF strategy: the current browser contract assumes same-site web and API deployment with `SameSite=Lax`, Bearer access tokens in memory for normal mutations, and explicit Origin validation for cookie-backed auth mutations. If `REFRESH_COOKIE_SAME_SITE=none` is used for cross-site production, add a CSRF token mechanism before launch; CORS alone is not CSRF protection.
 
 Planned controls:
 
 - Advanced session management UI.
-- AES-GCM secret encryption helper.
 - OpenTelemetry traces.
 - Sentry sanitization rules.
 - Production KMS or Secrets Manager integration.
@@ -36,7 +38,7 @@ Planned controls:
 
 Trace IDs are diagnostic metadata only. They are not authentication or authorization controls.
 
-Structured logs redact sensitive fields case-insensitively, including `authorization`, `cookie`, `set-cookie`, `password`, `token`, `accessToken`, `refreshToken`, `apiKey`, `x-api-key`, `secret`, `clientSecret`, `smtpPassword`, and `privateKey`. URL usernames/passwords and sensitive query parameters such as `token`, `key`, `secret`, and `signature` are redacted before logging.
+Structured logs redact sensitive fields case-insensitively, including `authorization`, `cookie`, `set-cookie`, `password`, `token`, `accessToken`, `refreshToken`, `apiKey`, `x-api-key`, `secret`, `secretValue`, `connectionSecret`, `clientSecret`, `smtpPassword`, `privateKey`, `encryptedValue`, `ciphertext`, `authTag`, `iv`, and `encryptionKey`. URL usernames/passwords and sensitive query parameters such as `token`, `key`, `secret`, and `signature` are redacted before logging.
 
 Logs must not include full webhook bodies, prompts, provider inputs, provider outputs, cookies, bearer tokens, refresh tokens, webhook tokens, internal API keys, or secrets. Persisted execution errors remain operational data, but log events should include only sanitized summaries and categories.
 

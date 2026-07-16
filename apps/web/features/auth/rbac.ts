@@ -14,6 +14,18 @@ export function canViewAuditLog(role: OrganizationRole) {
   return roleRank(role) >= rank.admin;
 }
 
+export function canListConnections(role: OrganizationRole) {
+  return roleRank(role) >= rank.editor;
+}
+
+export function canManageConnections(role: OrganizationRole) {
+  return roleRank(role) >= rank.admin;
+}
+
+export function canDeleteConnections(role: OrganizationRole) {
+  return roleRank(role) >= rank.owner;
+}
+
 function roleRank(role: OrganizationRole) {
   return role ? rank[role] ?? 0 : 0;
 }

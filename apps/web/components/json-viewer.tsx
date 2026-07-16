@@ -1,4 +1,23 @@
-const REDACTED_KEYS = new Set(["authorization", "cookie", "setcookie", "xapikey", "apikey", "accesstoken", "refreshtoken", "token", "secret", "password"]);
+const REDACTED_KEYS = new Set([
+  "authorization",
+  "cookie",
+  "setcookie",
+  "xapikey",
+  "apikey",
+  "accesstoken",
+  "refreshtoken",
+  "token",
+  "secret",
+  "secretvalue",
+  "connectionsecret",
+  "password",
+  "smtppassword",
+  "encryptedvalue",
+  "ciphertext",
+  "authtag",
+  "iv",
+  "encryptionkey"
+]);
 const MAX_JSON_CHARS = 100_000;
 
 export function JsonViewer({ value }: { value: unknown }) {

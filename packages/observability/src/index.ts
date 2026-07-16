@@ -17,9 +17,16 @@ const SENSITIVE_KEYS = new Set([
   "apikey",
   "x-api-key",
   "secret",
+  "secretvalue",
+  "connectionsecret",
   "clientsecret",
   "smtppassword",
-  "privatekey"
+  "privatekey",
+  "encryptedvalue",
+  "ciphertext",
+  "authtag",
+  "iv",
+  "encryptionkey"
 ]);
 
 const SENSITIVE_QUERY_KEYS = new Set(["token", "key", "apikey", "api_key", "secret", "signature", "access_token", "refresh_token"]);
@@ -101,11 +108,27 @@ export function pinoRedactPaths() {
     "accessToken",
     "refreshToken",
     "apiKey",
+    "secretValue",
+    "connectionSecret",
+    "smtpPassword",
+    "encryptedValue",
+    "ciphertext",
+    "authTag",
+    "iv",
+    "encryptionKey",
     "secret",
     "*.password",
     "*.accessToken",
     "*.refreshToken",
     "*.apiKey",
+    "*.secretValue",
+    "*.connectionSecret",
+    "*.smtpPassword",
+    "*.encryptedValue",
+    "*.ciphertext",
+    "*.authTag",
+    "*.iv",
+    "*.encryptionKey",
     "*.secret"
   ];
 }

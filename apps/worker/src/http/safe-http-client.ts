@@ -14,6 +14,7 @@ export interface SafeHttpRequest {
   body?: unknown;
   timeoutMs?: number;
   maxResponseBytes?: number;
+  allowedRestrictedHeaders?: string[];
 }
 
 export interface SafeHttpResponse {
@@ -37,7 +38,7 @@ export class SafeHttpClient {
   }
 
   async request(input: SafeHttpRequest): Promise<SafeHttpResponse> {
-    return this.requestWithRedirects(input, 0, new URL(input.url), sanitizeHeaders(input.headers ?? {}));
+    return this.requestWithRedirects(input, 0, new URL(input.url), sanitizeHeaders(input.headers ?? {}, input.allowedRestrictedHeaders ?? []));
   }
 
   private async requestWithRedirects(
@@ -113,14 +114,15 @@ async function defaultResolve(hostname: string) {
   return addresses.map((address) => address.address);
 }
 
-function sanitizeHeaders(headers: Record<string, string>) {
+function sanitizeHeaders(headers: Record<string, string>, allowedRestrictedHeaders: string[]) {
   const entries = Object.entries(headers);
   if (entries.length > 32) {
     throw new Error("Too many headers");
   }
+  const allowed = new Set(allowedRestrictedHeaders.map((header) => header.toLowerCase()));
   return Object.fromEntries(
     entries.map(([key, value]) => {
-      if (BLOCKED_HEADER_NAMES.some((pattern) => pattern.test(key))) {
+      if (!allowed.has(key.toLowerCase()) && BLOCKED_HEADER_NAMES.some((pattern) => pattern.test(key))) {
         throw new Error(`Header ${key} is not allowed`);
       }
       if (value.length > 4096) {

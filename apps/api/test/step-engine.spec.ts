@@ -126,12 +126,16 @@ describe("step recovery engine", () => {
 
   it("adds a stable idempotency key to retried HTTP mutations", async () => {
     const requests: Array<{ headers?: Record<string, string> }> = [];
-    const handler = new HttpRequestHandler(new ExpressionResolver(), {
-      request: async (input: any) => {
-        requests.push({ headers: input.headers });
-        return { status: 503, ok: false, body: {}, headers: {} };
-      }
-    } as any);
+    const handler = new HttpRequestHandler(
+      new ExpressionResolver(),
+      {
+        request: async (input: any) => {
+          requests.push({ headers: input.headers });
+          return { status: 503, ok: false, body: {}, headers: {} };
+        }
+      } as any,
+      {} as any
+    );
     const context = runtimeContext({ organizationId: "org", workflowId: "wf", workflowVersionId: "wv", executionId: "ex" }, "step", "se", "flowmind:ex:post");
 
     await expect(

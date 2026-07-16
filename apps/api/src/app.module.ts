@@ -14,6 +14,7 @@ import { QueuesModule } from "./queues/queues.module";
 import { TriggersModule } from "./triggers/triggers.module";
 import { WebhooksModule } from "./webhooks/webhooks.module";
 import { WorkflowsModule } from "./workflows/workflows.module";
+import { ConnectionsModule } from "./connections/connections.module";
 
 const redisUrl = new URL(process.env.REDIS_URL ?? "redis://localhost:6379");
 
@@ -33,6 +34,7 @@ const redisUrl = new URL(process.env.REDIS_URL ?? "redis://localhost:6379");
     AuditLogsModule,
     AuthModule,
     OrganizationsModule,
+    ConnectionsModule,
     WorkflowsModule,
     TriggersModule,
     ExecutionsModule,

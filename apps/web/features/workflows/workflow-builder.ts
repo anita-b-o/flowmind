@@ -75,6 +75,9 @@ export const workflowEditorSchema: z.ZodType<WorkflowEditorFormValue> = z
 function validateStepConfig(step: StepFormValue, index: number, ctx: z.RefinementCtx) {
   const config = step.config;
   if (step.type === "http_request") {
+    if (config.legacyConnectionMode !== true) {
+      requiredString(config.connectionId, ctx, index, "connectionId", "Connection is required.");
+    }
     requiredString(config.url, ctx, index, "url", "URL is required.");
     if (!["GET", "POST", "PUT", "PATCH", "DELETE"].includes(String(config.method ?? ""))) {
       ctx.addIssue({ code: "custom", path: ["steps", index, "config", "method"], message: "Method is invalid." });
@@ -89,6 +92,9 @@ function validateStepConfig(step: StepFormValue, index: number, ctx: z.Refinemen
     }
   }
   if (step.type === "email_notification") {
+    if (config.legacyConnectionMode !== true) {
+      requiredString(config.connectionId, ctx, index, "connectionId", "Connection is required.");
+    }
     requiredString(config.to, ctx, index, "to", "Recipient is required.");
     requiredString(config.subject, ctx, index, "subject", "Subject is required.");
     requiredString(config.text, ctx, index, "text", "Body is required.");
@@ -167,7 +173,7 @@ export function defaultTimeout(type: StepType) {
 export function defaultConfig(type: StepType): Record<string, unknown> {
   switch (type) {
     case "http_request":
-      return { method: "GET", url: "", headers: "{}", body: "" };
+      return { connectionId: "", method: "GET", url: "", headers: "{}", body: "" };
     case "ai_classification":
       return { text: "", labels: "high, normal, low", provider: "fake" };
     case "ai_structured_extraction":
@@ -175,7 +181,7 @@ export function defaultConfig(type: StepType): Record<string, unknown> {
     case "ai_summary":
       return { text: "", max_words: 80, provider: "fake" };
     case "email_notification":
-      return { to: "", subject: "", text: "" };
+      return { connectionId: "", to: "", subject: "", text: "" };
     case "database_record":
       return { collection: "", data: "{}" };
     case "conditional":
@@ -219,6 +225,7 @@ function configToForm(type: StepType, config: Record<string, unknown>) {
     return {
       ...defaults,
       ...config,
+      legacyConnectionMode: !config.connectionId,
       headers: JSON.stringify(config.headers ?? {}, null, 2),
       body: config.body === undefined ? "" : JSON.stringify(config.body, null, 2)
     };
@@ -231,6 +238,9 @@ function configToForm(type: StepType, config: Record<string, unknown>) {
   }
   if (type === "ai_classification") {
     return { ...defaults, ...config, labels: Array.isArray(config.labels) ? config.labels.join(", ") : defaults.labels };
+  }
+  if (type === "email_notification") {
+    return { ...defaults, ...config, legacyConnectionMode: !config.connectionId };
   }
   return { ...defaults, ...config };
 }
@@ -272,6 +282,7 @@ function serializeConfig(step: StepFormValue) {
     case "http_request":
       return {
         method: String(config.method ?? "GET"),
+        ...(config.connectionId ? { connectionId: String(config.connectionId) } : {}),
         url: String(config.url ?? "").trim(),
         headers: parseJsonObject(config.headers, {}),
         ...(config.body ? { body: JSON.parse(String(config.body)) } : {})
@@ -290,7 +301,12 @@ function serializeConfig(step: StepFormValue) {
     case "ai_summary":
       return { text: String(config.text ?? ""), max_words: Number(config.max_words ?? 80), provider: String(config.provider ?? "fake") };
     case "email_notification":
-      return { to: String(config.to ?? ""), subject: String(config.subject ?? ""), text: String(config.text ?? "") };
+      return {
+        ...(config.connectionId ? { connectionId: String(config.connectionId) } : {}),
+        to: String(config.to ?? ""),
+        subject: String(config.subject ?? ""),
+        text: String(config.text ?? "")
+      };
     case "database_record":
       return { collection: String(config.collection ?? ""), data: parseJsonObject(config.data, {}) };
     case "conditional":

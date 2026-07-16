@@ -19,6 +19,8 @@ Workflow editing is currently form-based rather than node-based. The frontend bu
 
 The workflow detail API exposes all versions and ordered steps so the UI can show history, open older versions read-only, and keep only the latest version editable. Activating a version remains an explicit API call and records the existing workflow activation audit event.
 
+Connections are organization-scoped metadata records with encrypted `Secret` rows. Workflow versions store `connectionId` for HTTP and email steps rather than credentials. The worker resolves and decrypts the active secret immediately before executing a step, then persists only sanitized operational output.
+
 ## Step Recovery Engine
 
 PostgreSQL is the source of truth for workflow recovery. BullMQ delivers execution jobs at least once, but step retry is controlled by `StepExecution`, not by job attempts. Each logical workflow step has one row keyed by `(execution_id, workflow_step_id)`, with `attemptCount`, `maxAttempts`, `nextRetryAt`, `effectKey`, `effectStatus`, and `workerId`.
@@ -37,7 +39,7 @@ Manual retry creates a new `Execution` linked through `retryOfExecutionId`. It p
 
 ## Audit Log
 
-`AuditLog` is the business audit trail for critical user-visible actions. It is distinct from structured technical logs and metrics. Current audited actions include manual retry requested, DLQ resolved, trigger created/rotated, workflow activated, logout-all, and refresh-session reuse detection.
+`AuditLog` is the business audit trail for critical user-visible actions. It is distinct from structured technical logs and metrics. Current audited actions include manual retry requested, DLQ resolved, trigger created/rotated, workflow activated, logout-all, refresh-session reuse detection, and connection create/update/rotate/revoke/delete/test.
 
 ## Trace Context
 
