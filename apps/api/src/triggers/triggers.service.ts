@@ -3,15 +3,17 @@ import { Prisma } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import { CreateWebhookTriggerDto } from "./dto/create-webhook-trigger.dto";
 import { WebhookTokenService } from "./webhook-token.service";
+import { AuditLogsService } from "../audit-logs/audit-logs.service";
 
 @Injectable()
 export class TriggersService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly tokenService: WebhookTokenService
+    private readonly tokenService: WebhookTokenService,
+    private readonly auditLogs?: AuditLogsService
   ) {}
 
-  async createWebhookTrigger(organizationId: string, workflowId: string, dto: CreateWebhookTriggerDto) {
+  async createWebhookTrigger(organizationId: string, userId: string, workflowId: string, dto: CreateWebhookTriggerDto) {
     await this.assertWorkflow(organizationId, workflowId);
     const existing = await this.prisma.trigger.findFirst({
       where: { organizationId, workflowId, type: "webhook", enabled: true }
@@ -30,6 +32,14 @@ export class TriggersService {
         configJson: toJson({ name: dto.name ?? "Webhook" }),
         enabled: true
       }
+    });
+    await this.auditLogs?.record({
+      organizationId,
+      actorUserId: userId,
+      action: "trigger.created",
+      resourceType: "Trigger",
+      resourceId: trigger.id,
+      metadata: { workflowId, type: "webhook" }
     });
 
     return this.withOneTimeToken(trigger, workflowId, token);
@@ -52,7 +62,7 @@ export class TriggersService {
     }));
   }
 
-  async rotate(organizationId: string, workflowId: string, triggerId: string) {
+  async rotate(organizationId: string, userId: string, workflowId: string, triggerId: string) {
     await this.assertWorkflow(organizationId, workflowId);
     const token = this.tokenService.generateToken();
     const trigger = await this.prisma.trigger.updateMany({
@@ -66,6 +76,14 @@ export class TriggersService {
       throw new NotFoundException("Trigger not found");
     }
     const updated = await this.prisma.trigger.findFirstOrThrow({ where: { id: triggerId, organizationId, workflowId } });
+    await this.auditLogs?.record({
+      organizationId,
+      actorUserId: userId,
+      action: "trigger.rotated",
+      resourceType: "Trigger",
+      resourceId: triggerId,
+      metadata: { workflowId, type: "webhook" }
+    });
     return this.withOneTimeToken(updated, workflowId, token);
   }
 

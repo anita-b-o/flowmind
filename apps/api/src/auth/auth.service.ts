@@ -9,6 +9,7 @@ import { RegisterDto } from "./dto/register.dto";
 import { accessTokenExpiresIn, refreshTokenExpiresIn, refreshTokenMaxAgeMs } from "./auth-config";
 import { StructuredLoggerService } from "../observability/structured-logger.service";
 import { ApiMetricsService } from "../metrics/metrics.service";
+import { AuditLogsService } from "../audit-logs/audit-logs.service";
 
 type SessionMetadata = { userAgent?: string; ipHash?: string };
 
@@ -28,7 +29,8 @@ export class AuthService {
     private readonly jwtService: JwtService,
     private readonly organizationsService: OrganizationsService,
     private readonly logger?: StructuredLoggerService,
-    private readonly metrics?: ApiMetricsService
+    private readonly metrics?: ApiMetricsService,
+    private readonly auditLogs?: AuditLogsService
   ) {}
 
   async register(dto: RegisterDto, metadata: SessionMetadata) {
@@ -92,6 +94,13 @@ export class AuthService {
     if (session.revokedAt || session.replacedBySessionId) {
       await this.revokeFamily(session.tokenFamily);
       this.metrics?.recordAuthRefresh("reuse_detected");
+      await this.auditLogs?.recordForUserOrganizations({
+        actorUserId: session.userId,
+        action: "auth.session.reuse_detected",
+        resourceType: "RefreshTokenSession",
+        resourceId: session.id,
+        metadata: { concurrent: false }
+      });
       this.logger?.warn("api.auth.refresh_reuse_detected", { sessionId: session.id, userId: session.userId });
       throw new UnauthorizedException("Refresh token reuse detected");
     }
@@ -134,6 +143,13 @@ export class AuthService {
       }
       await this.revokeFamily(session.tokenFamily);
       this.metrics?.recordAuthRefresh("reuse_detected");
+      await this.auditLogs?.recordForUserOrganizations({
+        actorUserId: session.userId,
+        action: "auth.session.reuse_detected",
+        resourceType: "RefreshTokenSession",
+        resourceId: session.id,
+        metadata: { concurrent: true }
+      });
       this.logger?.warn("api.auth.refresh_reuse_detected", { sessionId: session.id, userId: session.userId, concurrent: true });
       throw new UnauthorizedException("Refresh token reuse detected");
     }
@@ -169,6 +185,13 @@ export class AuthService {
     await this.prisma.refreshTokenSession.updateMany({
       where: { userId, revokedAt: null },
       data: { revokedAt: new Date(), lastUsedAt: new Date() }
+    });
+    await this.auditLogs?.recordForUserOrganizations({
+      actorUserId: userId,
+      action: "auth.logout_all",
+      resourceType: "User",
+      resourceId: userId,
+      metadata: {}
     });
   }
 

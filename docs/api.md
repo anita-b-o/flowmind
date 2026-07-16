@@ -24,6 +24,10 @@ Core endpoints:
 - `POST /webhooks/:workflowId/:token`
 - `GET /executions`
 - `GET /executions/:executionId`
+- `POST /executions/:executionId/retry`
+- `GET /dead-letter-executions`
+- `GET /dead-letter-executions/:deadLetterId`
+- `GET /audit-logs`
 - `GET /health`
 
 ## Auth Contract
@@ -75,3 +79,29 @@ Clients may send valid values for these headers. Invalid values are replaced wit
 Webhook responses include the authoritative `correlationId` in the body. If an idempotent webhook request is replayed with a different correlation header, Flowmind returns the original execution and original correlation ID.
 
 `GET /executions/:id` includes `correlationId`. Dead-letter execution list/detail responses include the correlation ID via the related execution.
+
+## Dead Letter Executions
+
+`GET /dead-letter-executions` requires viewer role or higher and always scopes results to `x-organization-id`. Filters: `status=active|resolved`, `workflowId`, `reason`, `from`, `to`, `page`, and `pageSize`.
+
+`GET /dead-letter-executions/:deadLetterId` returns 404 when the row does not exist or belongs to another organization. Responses include workflow, workflow version, original execution, public failure category/code/message, resolution state, retry execution, and correlation ID. Raw provider errors, payloads, headers, queue job IDs, worker IDs, locks, tokens, cookies, and secrets are not returned.
+
+Public reason catalog: `non_retryable`, `attempts_exhausted`, `ambiguous_effect`, `inconsistent_state`, `execution_limit`, `unknown`.
+
+## Manual Retry
+
+`POST /executions/:executionId/retry` requires editor role or higher:
+
+```json
+{ "reason": "optional human-readable reason" }
+```
+
+It creates a new queued execution using the same workflow version, original input, and correlation ID. The original execution remains immutable. Any active DLQ rows are resolved as `RETRIED`. A concurrent active retry returns 409. If queue publish fails after commit, the API returns 503 with `recoverable: true` and the created retry execution so clients do not blindly resubmit.
+
+Manual retry can repeat ambiguous external effects and is not exactly-once.
+
+## Audit Logs
+
+`GET /audit-logs` requires owner or admin role and scopes to `x-organization-id`. Filters: `action`, `resourceType`, `resourceId`, `userId`, `correlationId`, `from`, `to`, `page`, and `pageSize`.
+
+Metadata is sanitized and excludes tokens, cookies, hashes, API keys, passwords, secrets, and real IP data.

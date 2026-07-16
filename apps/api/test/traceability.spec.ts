@@ -144,8 +144,8 @@ describe("traceability", () => {
       .send({ reason: "again" })
       .expect(201);
 
-    const retry = await prisma.execution.findUniqueOrThrow({ where: { id: response.body.executionId } });
-    const audit = await prisma.auditLog.findFirstOrThrow({ where: { resourceId: execution.id, action: "execution.retry" } });
+    const retry = await prisma.execution.findUniqueOrThrow({ where: { id: response.body.execution.id } });
+    const audit = await prisma.auditLog.findFirstOrThrow({ where: { resourceId: execution.id, action: "execution.retry_requested" } });
     expect(retry.retryOfExecutionId).toBe(execution.id);
     expect(retry.correlationId).toBe("retry-correlation-1");
     expect(audit.correlationId).toBe("retry-correlation-1");

@@ -1,0 +1,19 @@
+export type OrganizationRole = "owner" | "admin" | "editor" | "viewer" | string | undefined;
+
+const rank: Record<string, number> = { owner: 4, admin: 3, editor: 2, viewer: 1 };
+
+export function canViewDeadLetters(role: OrganizationRole) {
+  return roleRank(role) >= rank.viewer;
+}
+
+export function canRetryExecution(role: OrganizationRole) {
+  return roleRank(role) >= rank.editor;
+}
+
+export function canViewAuditLog(role: OrganizationRole) {
+  return roleRank(role) >= rank.admin;
+}
+
+function roleRank(role: OrganizationRole) {
+  return role ? rank[role] ?? 0 : 0;
+}

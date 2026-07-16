@@ -4,6 +4,7 @@ import { WorkflowStatus, WorkflowVersionStatus } from "@automation/shared-types"
 import { PrismaService } from "../prisma/prisma.service";
 import { CreateWorkflowDto } from "./dto/create-workflow.dto";
 import { CreateWorkflowVersionDto } from "./dto/create-workflow-version.dto";
+import { AuditLogsService } from "../audit-logs/audit-logs.service";
 
 const MAX_ATTEMPTS_MIN = 1;
 const MAX_ATTEMPTS_MAX = 5;
@@ -14,7 +15,10 @@ const TIMEOUT_MAX_SECONDS = 120;
 
 @Injectable()
 export class WorkflowsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly auditLogs?: AuditLogsService
+  ) {}
 
   list(organizationId: string) {
     return this.prisma.workflow.findMany({
@@ -90,7 +94,7 @@ export class WorkflowsService {
     });
   }
 
-  async activateVersion(organizationId: string, workflowId: string, versionId: string) {
+  async activateVersion(organizationId: string, userId: string, workflowId: string, versionId: string) {
     const version = await this.prisma.workflowVersion.findFirst({
       where: { id: versionId, workflowId, organizationId }
     });
@@ -107,7 +111,7 @@ export class WorkflowsService {
         where: { id: versionId },
         data: { status: WorkflowVersionStatus.Active, activatedAt: new Date() }
       });
-      return tx.workflow.update({
+      const workflow = await tx.workflow.update({
         where: { id: workflowId },
         data: {
           status: WorkflowStatus.Active,
@@ -115,6 +119,18 @@ export class WorkflowsService {
         },
         include: { activeVersion: true }
       });
+      await this.auditLogs?.record(
+        {
+          organizationId,
+          actorUserId: userId,
+          action: "workflow.activated",
+          resourceType: "Workflow",
+          resourceId: workflowId,
+          metadata: { workflowVersionId: versionId, versionNumber: version.versionNumber }
+        },
+        tx
+      );
+      return workflow;
     });
   }
 }

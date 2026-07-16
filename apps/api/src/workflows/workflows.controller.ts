@@ -48,9 +48,10 @@ export class WorkflowsController {
   @Roles(OrganizationRole.Editor)
   activateVersion(
     @OrganizationContext() org: OrganizationContext,
+    @CurrentUser() user: CurrentUser,
     @Param("workflowId") workflowId: string,
     @Param("versionId") versionId: string
   ) {
-    return this.workflowsService.activateVersion(org.organizationId, workflowId, versionId);
+    return this.workflowsService.activateVersion(org.organizationId, user.userId, workflowId, versionId);
   }
 }

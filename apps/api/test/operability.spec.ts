@@ -7,6 +7,7 @@ import { ExecutionReconcilerService } from "../../worker/src/recovery/execution-
 import { ShutdownStateService as WorkerShutdownState } from "../../worker/src/runtime/shutdown-state.service";
 import { DeadLetterService } from "../../worker/src/dlq/dead-letter.service";
 import { ExecutionsService } from "../src/executions/executions.service";
+import { AuditLogsService } from "../src/audit-logs/audit-logs.service";
 
 const prisma = new PrismaClient();
 
@@ -95,17 +96,24 @@ describe("operability controls", () => {
       }
     });
     const queue = fakeQueue();
-    const service = new ExecutionsService(prisma as any, { enqueueExecution: (payload: any) => queue.add("execution.run", payload, {}) } as any);
+    const service = new ExecutionsService(
+      prisma as any,
+      { enqueueExecution: (payload: any) => queue.add("execution.run", payload, {}) } as any,
+      undefined,
+      undefined,
+      undefined,
+      new AuditLogsService(prisma as any)
+    );
 
     const retry = await service.retry(seed.organizationId, seed.userId, seed.executionId, "try again");
     const original = await prisma.execution.findUniqueOrThrow({ where: { id: seed.executionId } });
-    const next = await prisma.execution.findUniqueOrThrow({ where: { id: retry.executionId } });
+    const next = await prisma.execution.findUniqueOrThrow({ where: { id: retry.execution.id } });
 
     expect(original.status).toBe(ExecutionStatus.Failed);
     expect(next.retryOfExecutionId).toBe(original.id);
     expect(next.workflowVersionId).toBe(original.workflowVersionId);
     expect(next.inputJson).toEqual(original.inputJson);
-    expect(await prisma.auditLog.count({ where: { action: "execution.retry", resourceId: original.id } })).toBe(1);
+    expect(await prisma.auditLog.count({ where: { action: "execution.retry_requested", resourceId: original.id } })).toBe(1);
     expect(await prisma.deadLetterExecution.count({ where: { executionId: original.id, resolution: "RETRIED" } })).toBe(1);
     await expect(service.retry(seed.organizationId, seed.userId, seed.executionId, "again")).rejects.toBeInstanceOf(ConflictException);
   });

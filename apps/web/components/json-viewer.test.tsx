@@ -4,11 +4,13 @@ import { JsonViewer } from "./json-viewer";
 
 describe("JsonViewer", () => {
   it("redacts sensitive keys", () => {
-    render(<JsonViewer value={{ authorization: "secret", nested: { token: "abc", ok: true } }} />);
+    render(<JsonViewer value={{ authorization: "secret", accessToken: "access-secret", nested: { token: "abc", apiKey: "key", ok: true } }} />);
 
     expect(screen.getByText((content) => content.includes("[redacted]"))).toBeInTheDocument();
     expect(screen.queryByText("secret")).not.toBeInTheDocument();
+    expect(screen.queryByText("access-secret")).not.toBeInTheDocument();
     expect(screen.queryByText("abc")).not.toBeInTheDocument();
+    expect(screen.queryByText("key")).not.toBeInTheDocument();
   });
 
   it("truncates very large content", () => {

@@ -21,6 +21,7 @@ Current controls:
 - AI service endpoints require `x-service-api-key`.
 - Metrics endpoints are disabled by default and, when enabled, require `Authorization: Bearer <METRICS_API_KEY>` or the operational `x-metrics-api-key` header. Metrics keys are never accepted in query strings.
 - Sensitive headers are stripped from persisted webhook metadata.
+- Dead-letter and audit-log APIs are tenant-scoped by `x-organization-id`. DLQ viewing requires viewer or higher; manual retry requires editor or higher; AuditLog requires owner or admin.
 
 CSRF strategy: the current browser contract assumes same-site web and API deployment with `SameSite=Lax`, Bearer access tokens in memory for normal mutations, and explicit Origin validation for cookie-backed auth mutations. If `REFRESH_COOKIE_SAME_SITE=none` is used for cross-site production, add a CSRF token mechanism before launch; CORS alone is not CSRF protection.
 
@@ -40,3 +41,9 @@ Structured logs redact sensitive fields case-insensitively, including `authoriza
 Logs must not include full webhook bodies, prompts, provider inputs, provider outputs, cookies, bearer tokens, refresh tokens, webhook tokens, internal API keys, or secrets. Persisted execution errors remain operational data, but log events should include only sanitized summaries and categories.
 
 Metrics are separate from logs and AuditLog. They use bounded labels only and must not contain `requestId`, `correlationId`, organization/user/workflow/execution IDs, emails, hostnames, IPs, full URLs, cookies, tokens, or free-form error messages. See `docs/observability.md`.
+
+# DLQ and AuditLog Sanitization
+
+Dead-letter detail exposes a public error category/code/message rather than raw provider errors. Public metadata is sanitized with the central observability sanitizer and redacts sensitive keys including `authorization`, `cookie`, `set-cookie`, `accessToken`, `refreshToken`, `apiKey`, `secret`, `password`, and `token`.
+
+AuditLog metadata is sanitized before storage through the audit service. It must not contain tokens, hashes, cookies, API keys, passwords, secrets, or real IP addresses.

@@ -23,6 +23,16 @@ Retry policies are normalized on version creation to `maxAttempts` 1..5, `backof
 
 Effect idempotency is handled per step type: database records use a dedupe key, HTTP mutations receive a stable `Idempotency-Key`, and completed AI/email outputs are not re-executed during resume.
 
+## Dead Letters and Manual Retry
+
+Executions that fail definitively are preserved as `DeadLetterExecution` rows. DLQ rows remain available after resolution so incidents can be reviewed later. Public APIs expose only sanitized error category/code/message and bounded metadata; worker IDs, locks, queue job IDs, headers, secrets, and raw provider objects stay internal.
+
+Manual retry creates a new `Execution` linked through `retryOfExecutionId`. It preserves the original workflow version, input, and correlation ID, resolves active DLQ rows as `RETRIED`, and records audit events. The original execution is immutable. Ambiguous external effects may repeat, so manual retry is an operational recovery tool rather than an exactly-once guarantee.
+
+## Audit Log
+
+`AuditLog` is the business audit trail for critical user-visible actions. It is distinct from structured technical logs and metrics. Current audited actions include manual retry requested, DLQ resolved, trigger created/rotated, workflow activated, logout-all, and refresh-session reuse detection.
+
 ## Trace Context
 
 Every API HTTP request receives a boundary-local `requestId` and a flow-level `correlationId`. Clients may provide `x-request-id` and `x-correlation-id` when they match `^[A-Za-z0-9._:-]{8,128}$`; invalid values are ignored and replaced. Both IDs are returned as response headers.

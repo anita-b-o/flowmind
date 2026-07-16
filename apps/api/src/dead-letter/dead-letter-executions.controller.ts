@@ -7,6 +7,7 @@ import { OrganizationGuard } from "../organizations/organization.guard";
 import { Roles } from "../rbac/roles.decorator";
 import { RolesGuard } from "../rbac/roles.guard";
 import { DeadLetterExecutionsService } from "./dead-letter-executions.service";
+import { ListDeadLetterExecutionsQueryDto } from "./dto/list-dead-letter-executions-query.dto";
 
 @ApiTags("dead-letter-executions")
 @ApiBearerAuth()
@@ -17,13 +18,13 @@ export class DeadLetterExecutionsController {
 
   @Get()
   @Roles(OrganizationRole.Viewer)
-  list(@OrganizationContext() org: OrganizationContext, @Query() query: { page?: number; pageSize?: number }) {
+  list(@OrganizationContext() org: OrganizationContext, @Query() query: ListDeadLetterExecutionsQueryDto) {
     return this.service.list(org.organizationId, query);
   }
 
   @Get(":id")
   @Roles(OrganizationRole.Viewer)
-  get(@OrganizationContext() org: OrganizationContext, @Param("id") id: string) {
-    return this.service.get(org.organizationId, id);
+  get(@OrganizationContext() org: OrganizationContext, @Param("id") deadLetterId: string) {
+    return this.service.get(org.organizationId, deadLetterId);
   }
 }

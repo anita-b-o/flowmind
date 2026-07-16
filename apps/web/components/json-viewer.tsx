@@ -1,4 +1,4 @@
-const REDACTED_KEYS = new Set(["authorization", "cookie", "set-cookie", "x-api-key", "token", "secret", "password"]);
+const REDACTED_KEYS = new Set(["authorization", "cookie", "setcookie", "xapikey", "apikey", "accesstoken", "refreshtoken", "token", "secret", "password"]);
 const MAX_JSON_CHARS = 100_000;
 
 export function JsonViewer({ value }: { value: unknown }) {
@@ -20,7 +20,7 @@ function redact(value: unknown): unknown {
   }
   if (value && typeof value === "object") {
     return Object.fromEntries(
-      Object.entries(value).map(([key, entry]) => [key, REDACTED_KEYS.has(key.toLowerCase()) ? "[redacted]" : redact(entry)])
+      Object.entries(value).map(([key, entry]) => [key, REDACTED_KEYS.has(key.toLowerCase().replace(/[-_]/g, "")) ? "[redacted]" : redact(entry)])
     );
   }
   return value;

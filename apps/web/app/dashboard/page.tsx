@@ -1,20 +1,31 @@
+"use client";
+
 import Link from "next/link";
+import { canViewAuditLog, canViewDeadLetters } from "../../features/auth/rbac";
+import { useAuth } from "../../features/auth/use-auth";
 
 const nav = [
   ["Workflows", "/workflows"],
   ["Executions", "/executions"],
   ["Connections", "/connections"],
   ["Members", "/members"],
-  ["Audit Log", "/audit-log"],
   ["Settings", "/settings"]
 ];
 
 export default function DashboardPage() {
+  const { organizations, activeOrganizationId } = useAuth();
+  const role = organizations.find((organization) => organization.id === activeOrganizationId)?.role;
+  const visibleNav = [
+    ...nav,
+    ...(canViewDeadLetters(role) ? [["Dead letters", "/dead-letter-executions"]] : []),
+    ...(canViewAuditLog(role) ? [["Audit log", "/audit-log"]] : [])
+  ];
+
   return (
     <main className="shell">
       <aside className="sidebar stack">
         <strong>Flowmind</strong>
-        {nav.map(([label, href]) => (
+        {visibleNav.map(([label, href]) => (
           <Link key={href} href={href}>
             {label}
           </Link>

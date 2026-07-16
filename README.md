@@ -96,6 +96,14 @@ GET /executions/:executionId
 
 Both endpoints require JWT plus `x-organization-id` and never return executions from another organization.
 
+## Dead letters and audit log
+
+Failed executions that exhaust retries are persisted as dead letters. Users with viewer role or higher can open `/dead-letter-executions`, inspect sanitized failure details, and follow the original execution. Editors and above can request a manual retry, which creates a new queued execution with the same workflow version, original input, and correlation ID. The original execution remains unchanged.
+
+Manual retry can repeat ambiguous external effects and does not guarantee exactly-once delivery.
+
+Owners and admins can view `/audit-log` for critical business actions such as manual retries, DLQ resolution, trigger changes, workflow activation, logout-all, and refresh-session reuse detection.
+
 ## Principios
 
 - PostgreSQL es la fuente de verdad.

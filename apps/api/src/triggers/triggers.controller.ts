@@ -4,6 +4,7 @@ import { OrganizationRole } from "@automation/shared-types";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
 import { OrganizationContext } from "../organizations/organization-context.decorator";
 import { OrganizationGuard } from "../organizations/organization.guard";
+import { CurrentUser, type CurrentUser as CurrentUserType } from "../auth/current-user.decorator";
 import { Roles } from "../rbac/roles.decorator";
 import { RolesGuard } from "../rbac/roles.guard";
 import { CreateWebhookTriggerDto } from "./dto/create-webhook-trigger.dto";
@@ -20,10 +21,11 @@ export class TriggersController {
   @Roles(OrganizationRole.Editor)
   createWebhookTrigger(
     @OrganizationContext() org: OrganizationContext,
+    @CurrentUser() user: CurrentUserType,
     @Param("workflowId") workflowId: string,
     @Body() dto: CreateWebhookTriggerDto
   ) {
-    return this.triggersService.createWebhookTrigger(org.organizationId, workflowId, dto);
+    return this.triggersService.createWebhookTrigger(org.organizationId, user.userId, workflowId, dto);
   }
 
   @Get()
@@ -35,9 +37,10 @@ export class TriggersController {
   @Roles(OrganizationRole.Editor)
   rotate(
     @OrganizationContext() org: OrganizationContext,
+    @CurrentUser() user: CurrentUserType,
     @Param("workflowId") workflowId: string,
     @Param("triggerId") triggerId: string
   ) {
-    return this.triggersService.rotate(org.organizationId, workflowId, triggerId);
+    return this.triggersService.rotate(org.organizationId, user.userId, workflowId, triggerId);
   }
 }

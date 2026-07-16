@@ -2,6 +2,7 @@ import { BullModule } from "@nestjs/bullmq";
 import { Module } from "@nestjs/common";
 import { ConfigModule } from "@nestjs/config";
 import { AuthModule } from "./auth/auth.module";
+import { AuditLogsModule } from "./audit-logs/audit-logs.module";
 import { ExecutionsModule } from "./executions/executions.module";
 import { DeadLetterExecutionsModule } from "./dead-letter/dead-letter-executions.module";
 import { HealthModule } from "./health/health.module";
@@ -29,6 +30,7 @@ const redisUrl = new URL(process.env.REDIS_URL ?? "redis://localhost:6379");
     MetricsModule,
     PrismaModule,
     HealthModule,
+    AuditLogsModule,
     AuthModule,
     OrganizationsModule,
     WorkflowsModule,
