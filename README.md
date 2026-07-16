@@ -70,6 +70,12 @@ Webhook idempotency is scoped per organization and workflow. The API creates the
 
 Webhook intake accepts JSON only, applies `WEBHOOK_PAYLOAD_MAX_BYTES`, and rate-limits by workflow/IP before token validation plus organization/workflow/trigger/IP after validation.
 
+## Workflow Builder
+
+The web app includes a form-based workflow builder at `/workflows`. Users can create a workflow, edit a local draft, add linear steps, configure each step with type-specific fields, validate immediately, create a new version, and explicitly activate a selected version. Draft edits stay in the browser until `Create version`; no workflow version is activated automatically.
+
+Supported step forms map to the existing engine types: HTTP request, AI classification, AI structured extraction, AI summary, email notification, database record, and conditional. The builder uses the existing webhook trigger definition when creating versions.
+
 ## Conditional Step
 
 The MVP conditional is linear and supports `skipNextOnFalse`:

@@ -8,6 +8,7 @@ import { StatusBadge } from "../../../components/status-badge";
 import { RequireAuth } from "../../../features/auth/require-auth";
 import { useCreateWebhookTrigger, useRotateWebhookTrigger, useTriggers } from "../../../features/triggers/hooks";
 import { useWorkflow } from "../../../features/workflows/hooks";
+import { WorkflowEditor } from "../../../features/workflows/components/workflow-editor";
 
 export default function WorkflowDetailPage({ params }: { params: Promise<{ workflowId: string }> }) {
   const { workflowId } = use(params);
@@ -53,6 +54,8 @@ export default function WorkflowDetailPage({ params }: { params: Promise<{ workf
           {workflow.data && <StatusBadge status={workflow.data.status} />}
           {workflow.error && <ErrorMessage error={workflow.error} onRetry={() => workflow.refetch()} />}
         </section>
+
+        {workflow.data && <WorkflowEditor workflow={workflow.data} onRefresh={() => workflow.refetch()} />}
 
         <section className="panel stack">
           <div style={{ display: "flex", justifyContent: "space-between", gap: 16 }}>

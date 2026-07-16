@@ -113,3 +113,124 @@ button {
   white-space: pre-wrap;
   word-break: break-word;
 }
+
+.workflow-layout {
+  display: grid;
+  grid-template-columns: minmax(220px, 280px) 1fr;
+  gap: 16px;
+  align-items: start;
+}
+
+.workflow-history {
+  position: sticky;
+  top: 20px;
+}
+
+.version-item {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #ffffff;
+  padding: 10px;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.version-item.active {
+  border-color: var(--accent);
+  background: #f0fdfa;
+}
+
+.workflow-title-row,
+.step-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.workflow-badges,
+.workflow-actions,
+.step-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.status-badge {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 3px 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.workflow-form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  align-items: start;
+}
+
+.step-header-fields {
+  flex: 1;
+}
+
+.step-card {
+  cursor: grab;
+}
+
+.step-card:active {
+  cursor: grabbing;
+}
+
+.icon-button {
+  width: 34px;
+  height: 34px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #ffffff;
+  cursor: pointer;
+}
+
+.field-error,
+.form-warning {
+  color: #b42318;
+}
+
+.field-error {
+  display: block;
+  margin-top: 4px;
+  font-size: 13px;
+}
+
+.workflow-checkbox {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.workflow-checkbox input {
+  width: auto;
+}
+
+@media (max-width: 900px) {
+  .shell,
+  .workflow-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .workflow-history {
+    position: static;
+  }
+
+  .workflow-title-row,
+  .step-header {
+    display: grid;
+  }
+}

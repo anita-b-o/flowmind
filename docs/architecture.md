@@ -13,6 +13,12 @@ PostgreSQL is the source of truth. Redis powers BullMQ queues and operational lo
 
 The first workflow engine supports ordered linear workflows. More advanced DAG semantics are deferred until the persisted workflow definition stabilizes.
 
+## Workflow Builder
+
+Workflow editing is currently form-based rather than node-based. The frontend builds local drafts with React Hook Form, renders each step as an expandable card, validates type-specific config immediately, and serializes the result to the existing `POST /workflows/:workflowId/versions` DTO. Drafts are local browser state only; the backend persists immutable workflow versions.
+
+The workflow detail API exposes all versions and ordered steps so the UI can show history, open older versions read-only, and keep only the latest version editable. Activating a version remains an explicit API call and records the existing workflow activation audit event.
+
 ## Step Recovery Engine
 
 PostgreSQL is the source of truth for workflow recovery. BullMQ delivers execution jobs at least once, but step retry is controlled by `StepExecution`, not by job attempts. Each logical workflow step has one row keyed by `(execution_id, workflow_step_id)`, with `attemptCount`, `maxAttempts`, `nextRetryAt`, `effectKey`, `effectStatus`, and `workerId`.

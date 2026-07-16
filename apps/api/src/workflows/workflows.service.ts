@@ -28,6 +28,26 @@ export class WorkflowsService {
     });
   }
 
+  async detail(organizationId: string, workflowId: string) {
+    const workflow = await this.prisma.workflow.findFirst({
+      where: { id: workflowId, organizationId },
+      include: {
+        activeVersion: true,
+        versions: {
+          include: {
+            createdBy: { select: { id: true, email: true, name: true } },
+            steps: { orderBy: { position: "asc" } }
+          },
+          orderBy: { versionNumber: "asc" }
+        }
+      }
+    });
+    if (!workflow) {
+      throw new NotFoundException("Workflow not found");
+    }
+    return workflow;
+  }
+
   create(organizationId: string, createdByUserId: string, dto: CreateWorkflowDto) {
     return this.prisma.workflow.create({
       data: {

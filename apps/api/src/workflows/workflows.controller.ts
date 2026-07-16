@@ -23,6 +23,11 @@ export class WorkflowsController {
     return this.workflowsService.list(org.organizationId);
   }
 
+  @Get(":workflowId")
+  detail(@OrganizationContext() org: OrganizationContext, @Param("workflowId") workflowId: string) {
+    return this.workflowsService.detail(org.organizationId, workflowId);
+  }
+
   @Post()
   @Roles(OrganizationRole.Editor)
   create(

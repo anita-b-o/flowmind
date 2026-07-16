@@ -44,6 +44,10 @@ describe("workflow webhook execution e2e", () => {
     const user = await register("owner@example.com", "Acme");
     const workflow = await createWorkflow(user, "Lead workflow");
     const version = await createVersion(user, workflow.id);
+    const workflowDetail = await request(app.getHttpServer()).get(`/workflows/${workflow.id}`).set(authHeaders(user)).expect(200);
+    expect(workflowDetail.body.versions).toHaveLength(1);
+    expect(workflowDetail.body.versions[0].steps.map((step: any) => step.key)).toEqual(["webhook", "check_priority", "notify_sales", "save_lead"]);
+    expect(workflowDetail.body.versions[0].createdBy.email).toBe("owner@example.com");
     const trigger = await createTrigger(user, workflow.id);
     await request(app.getHttpServer())
       .patch(`/workflows/${workflow.id}/versions/${version.id}/activate`)

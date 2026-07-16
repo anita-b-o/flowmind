@@ -15,6 +15,7 @@ Core endpoints:
 - `GET /organizations`
 - `POST /organizations`
 - `GET /workflows`
+- `GET /workflows/:workflowId`
 - `POST /workflows`
 - `POST /workflows/:workflowId/versions`
 - `PATCH /workflows/:workflowId/versions/:versionId/activate`
@@ -65,6 +66,32 @@ x-organization-id: <organization-id>
 ```
 
 `GET /auth/sessions` returns safe session metadata only. Hashes, raw refresh tokens, token families, and IP addresses are never returned. `DELETE /auth/sessions/:sessionId` is scoped to the authenticated user and returns `404` for sessions owned by another user.
+
+## Workflow Versioning
+
+`GET /workflows` returns organization-scoped workflows with their active version summary.
+
+`GET /workflows/:workflowId` returns one workflow with `activeVersion`, all `versions`, ordered `steps`, and safe creator metadata for each version. It returns `404` when the workflow does not belong to the active organization.
+
+`POST /workflows/:workflowId/versions` creates the next draft version from the submitted definition:
+
+```json
+{
+  "trigger": { "key": "webhook", "name": "Webhook", "type": "webhook_trigger", "config": {} },
+  "steps": [
+    {
+      "key": "save_lead",
+      "name": "Save lead",
+      "type": "database_record",
+      "config": { "collection": "leads", "data": { "email": "{{trigger.body.email}}" } },
+      "retryPolicy": { "maxAttempts": 1, "backoffMs": 1000, "strategy": "fixed" },
+      "timeoutSeconds": 30
+    }
+  ]
+}
+```
+
+Retry and timeout values are normalized by existing bounds on version creation. `PATCH /workflows/:workflowId/versions/:versionId/activate` explicitly activates an existing version and archives the previous active version; creation never activates automatically.
 # API Trace Headers
 
 All API responses include:
