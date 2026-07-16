@@ -73,6 +73,7 @@ export interface WorkflowDefinitionDto {
   steps: WorkflowStepDto[];
   workflowDefinitionSchemaVersion?: 1 | 2;
   graph?: WorkflowGraphDto;
+  ui?: WorkflowDefinitionUiDto;
   expressionMode?: "legacy" | "strict";
   workflowVariables?: Record<string, unknown>;
 }
@@ -81,6 +82,11 @@ export interface WorkflowGraphDto {
   entryStepKey: string;
   edges: Array<{ from: string; to: string; kind: "next" | "if_true" | "if_false" | "switch_case" | "switch_default"; label?: string; caseKey?: string }>;
   terminalStepKeys?: string[];
+}
+
+export interface WorkflowDefinitionUiDto {
+  nodes?: Record<string, { x: number; y: number; collapsed?: boolean }>;
+  viewport?: { x: number; y: number; zoom: number };
 }
 
 export interface CreateWorkflowDto {

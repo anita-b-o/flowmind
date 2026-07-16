@@ -1,4 +1,5 @@
 import "./globals.css";
+import "@xyflow/react/dist/style.css";
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import { AuthProvider } from "../features/auth/auth-provider";

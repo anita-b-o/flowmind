@@ -45,5 +45,9 @@ export class CreateWorkflowVersionDto {
 
   @IsOptional()
   @IsObject()
+  ui?: Record<string, unknown>;
+
+  @IsOptional()
+  @IsObject()
   workflowVariables?: Record<string, unknown>;
 }

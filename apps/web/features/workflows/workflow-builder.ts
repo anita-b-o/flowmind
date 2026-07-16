@@ -159,9 +159,6 @@ function validateRouting(steps: StepFormValue[], step: StepFormValue, index: num
       ctx.addIssue({ code: "custom", path: ["steps", index, "config", field], message: "Target step does not exist." });
       return;
     }
-    if (targetIndex <= index) {
-      ctx.addIssue({ code: "custom", path: ["steps", index, "config", field], message: "Target must be a later step to avoid cycles." });
-    }
   };
   assertForward(step.config.nextStepKey, "nextStepKey");
   if (step.type === "if") {
@@ -331,16 +328,16 @@ export function toWorkflowDefinition(values: WorkflowEditorFormValue): WorkflowD
     ...(graph ? { graph } : {}),
     workflowVariables: {},
     trigger: { key: "webhook", name: "Webhook", type: "webhook_trigger", config: {} },
-    steps: values.steps.map((step, index) => toStepDto(step, index))
+    steps: values.steps.map((step, index) => stepFormToDto(step, index))
   };
 }
 
-function toStepDto(step: StepFormValue, index: number): WorkflowStepDto {
+export function stepFormToDto(step: StepFormValue, index: number): WorkflowStepDto {
   return {
     key: step.key.trim() || `step_${index + 1}`,
     name: step.name.trim(),
     type: step.type,
-    config: serializeConfig(step),
+    config: serializeStepConfig(step),
     retryPolicy: {
       maxAttempts: Number(step.retryPolicy.maxAttempts),
       backoffMs: Number(step.retryPolicy.backoffMs),
@@ -350,7 +347,7 @@ function toStepDto(step: StepFormValue, index: number): WorkflowStepDto {
   };
 }
 
-function serializeConfig(step: StepFormValue) {
+export function serializeStepConfig(step: StepFormValue) {
   const config = step.config;
   switch (step.type) {
     case "http_request":

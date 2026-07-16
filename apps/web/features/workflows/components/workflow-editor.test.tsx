@@ -54,6 +54,7 @@ describe("WorkflowEditor", () => {
     createVersion.mutateAsync.mockResolvedValue(version("version-2", 2, "DRAFT", []));
     render(<WorkflowEditor workflow={workflow()} onRefresh={vi.fn()} />);
 
+    await userEvent.click(screen.getByRole("button", { name: "Form" }));
     await userEvent.selectOptions(screen.getByLabelText("Step type to add"), "email_notification");
     await userEvent.click(screen.getByRole("button", { name: /add step/i }));
     expect(screen.getAllByDisplayValue("Email").length).toBeGreaterThan(0);
@@ -84,6 +85,7 @@ describe("WorkflowEditor", () => {
   it("changes type with a warning and discards local draft changes", async () => {
     render(<WorkflowEditor workflow={workflow()} onRefresh={vi.fn()} />);
 
+    await userEvent.click(screen.getByRole("button", { name: "Form" }));
     await userEvent.selectOptions(screen.getAllByLabelText("Type")[0], "http_request");
     expect(window.alert).toHaveBeenCalledWith("Step type changed. Incompatible configuration fields were removed.");
     expect(screen.getByText(/incompatible configuration fields were removed/i)).toBeInTheDocument();

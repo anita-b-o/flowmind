@@ -92,6 +92,7 @@ export class WorkflowsService {
       expressionMode,
       workflowDefinitionSchemaVersion: schemaVersion,
       ...(schemaVersion === 2 ? { graph: dto.graph } : {}),
+      ...(dto.ui ? { ui: dto.ui } : {}),
       workflowVariables: dto.workflowVariables ?? {}
     });
 

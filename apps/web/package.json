@@ -12,8 +12,10 @@
   "dependencies": {
     "@automation/expression-engine": "workspace:*",
     "@automation/ui": "workspace:*",
+    "@dagrejs/dagre": "^3.0.0",
     "@hookform/resolvers": "^3.9.1",
     "@tanstack/react-query": "^5.62.8",
+    "@xyflow/react": "^12.11.2",
     "next": "^15.1.2",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",

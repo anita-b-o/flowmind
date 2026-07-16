@@ -14,6 +14,19 @@ Flowmind supports graph-backed workflow versions with `workflowDefinitionSchemaV
 }
 ```
 
+Visual workflow editor metadata is stored separately in `definitionJson.ui`. Positions, viewport and collapsed state are presentation-only and must not affect runner semantics:
+
+```json
+{
+  "ui": {
+    "nodes": {
+      "route": { "x": 260, "y": 40 }
+    },
+    "viewport": { "x": 0, "y": 0, "zoom": 1 }
+  }
+}
+```
+
 Supported control steps:
 
 - `if`: evaluates `left/operator/right` and routes to `trueStepKey` or `falseStepKey`.
@@ -25,4 +38,4 @@ The runner validates the graph is acyclic, persists one `StepExecution` per work
 
 Intentional waits use the existing durable resume path: the step is stored as `RETRYING` with `nextRetryAt`, the execution lease is released, BullMQ receives a delayed job, and the reconciler can recover missed delayed jobs. When the wait is due, the runner completes the existing wait step instead of recalculating it.
 
-Postponed capabilities remain out of scope: loops, foreach, parallel execution, joins, subworkflows, cron, visual builder, JavaScript, plugins, branch-local variables, and human approval waits.
+Postponed capabilities remain out of scope: loops, foreach, parallel execution, explicit join nodes, subworkflows, cron, JavaScript, plugins, branch-local variables, collaborative editing, AI-generated workflows, partial node execution, interactive debugging, and human approval waits.

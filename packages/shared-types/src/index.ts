@@ -93,6 +93,7 @@ export interface WorkflowDefinition {
   steps: WorkflowStepDefinition[];
   workflowDefinitionSchemaVersion?: 1 | 2;
   graph?: WorkflowGraphDefinition;
+  ui?: WorkflowDefinitionUi;
 }
 
 export type WorkflowGraphEdgeKind = "next" | "if_true" | "if_false" | "switch_case" | "switch_default";
@@ -109,6 +110,11 @@ export interface WorkflowGraphDefinition {
   entryStepKey: string;
   edges: WorkflowGraphEdgeDefinition[];
   terminalStepKeys?: string[];
+}
+
+export interface WorkflowDefinitionUi {
+  nodes?: Record<string, { x: number; y: number; collapsed?: boolean }>;
+  viewport?: { x: number; y: number; zoom: number };
 }
 
 export interface ExecutionContext {
@@ -128,6 +134,7 @@ export interface WorkflowDefinitionMetadata {
   expressionMode?: ExpressionMode;
   workflowVariables?: JsonObject;
   graph?: WorkflowGraphDefinition;
+  ui?: WorkflowDefinitionUi;
 }
 
 export interface StepResult {
