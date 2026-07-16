@@ -30,3 +30,10 @@ Planned controls:
 - OpenTelemetry traces.
 - Sentry sanitization rules.
 - Production KMS or Secrets Manager integration.
+# Observability Redaction
+
+Trace IDs are diagnostic metadata only. They are not authentication or authorization controls.
+
+Structured logs redact sensitive fields case-insensitively, including `authorization`, `cookie`, `set-cookie`, `password`, `token`, `accessToken`, `refreshToken`, `apiKey`, `x-api-key`, `secret`, `clientSecret`, `smtpPassword`, and `privateKey`. URL usernames/passwords and sensitive query parameters such as `token`, `key`, `secret`, and `signature` are redacted before logging.
+
+Logs must not include full webhook bodies, prompts, provider inputs, provider outputs, cookies, bearer tokens, refresh tokens, webhook tokens, internal API keys, or secrets. Persisted execution errors remain operational data, but log events should include only sanitized summaries and categories.

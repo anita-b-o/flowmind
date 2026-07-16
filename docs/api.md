@@ -61,3 +61,17 @@ x-organization-id: <organization-id>
 ```
 
 `GET /auth/sessions` returns safe session metadata only. Hashes, raw refresh tokens, token families, and IP addresses are never returned. `DELETE /auth/sessions/:sessionId` is scoped to the authenticated user and returns `404` for sessions owned by another user.
+# API Trace Headers
+
+All API responses include:
+
+```text
+x-request-id
+x-correlation-id
+```
+
+Clients may send valid values for these headers. Invalid values are replaced without failing the request. A valid value is 8 to 128 characters and may contain letters, numbers, `.`, `_`, `:`, and `-`.
+
+Webhook responses include the authoritative `correlationId` in the body. If an idempotent webhook request is replayed with a different correlation header, Flowmind returns the original execution and original correlation ID.
+
+`GET /executions/:id` includes `correlationId`. Dead-letter execution list/detail responses include the correlation ID via the related execution.

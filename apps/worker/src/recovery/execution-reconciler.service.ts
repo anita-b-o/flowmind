@@ -2,9 +2,11 @@ import { InjectQueue } from "@nestjs/bullmq";
 import { Injectable, OnModuleDestroy, OnModuleInit } from "@nestjs/common";
 import { Queue } from "bullmq";
 import { ExecutionStatus, StepExecutionStatus } from "@automation/shared-types";
+import { newTraceId } from "@automation/observability";
 import { PrismaService } from "../prisma/prisma.service";
 import { EXECUTION_RUN_JOB, WORKFLOW_EXECUTIONS_QUEUE } from "../queues/queue.constants";
 import { ShutdownStateService } from "../runtime/shutdown-state.service";
+import { WorkerLoggerService } from "../observability/worker-logger.service";
 
 @Injectable()
 export class ExecutionReconcilerService implements OnModuleInit, OnModuleDestroy {
@@ -14,7 +16,8 @@ export class ExecutionReconcilerService implements OnModuleInit, OnModuleDestroy
   constructor(
     private readonly prisma: PrismaService,
     private readonly shutdown: ShutdownStateService,
-    @InjectQueue(WORKFLOW_EXECUTIONS_QUEUE) private readonly queue: Queue
+    @InjectQueue(WORKFLOW_EXECUTIONS_QUEUE) private readonly queue: Queue,
+    private readonly logger?: WorkerLoggerService
   ) {}
 
   onModuleInit() {
@@ -68,7 +71,7 @@ export class ExecutionReconcilerService implements OnModuleInit, OnModuleDestroy
           }
         });
       }
-      await this.enqueue(execution.id, execution.organizationId, execution.workflowId, execution.workflowVersionId);
+      await this.enqueue(execution.id, execution.organizationId, execution.workflowId, execution.workflowVersionId, execution.correlationId);
     }
   }
 
@@ -90,7 +93,7 @@ export class ExecutionReconcilerService implements OnModuleInit, OnModuleDestroy
         where: { id: execution.id, status: { in: [ExecutionStatus.Retrying, ExecutionStatus.Queued] } },
         data: { status: ExecutionStatus.Queued }
       });
-      await this.enqueue(execution.id, execution.organizationId, execution.workflowId, execution.workflowVersionId);
+      await this.enqueue(execution.id, execution.organizationId, execution.workflowId, execution.workflowVersionId, execution.correlationId);
     }
   }
 
@@ -107,16 +110,26 @@ export class ExecutionReconcilerService implements OnModuleInit, OnModuleDestroy
       take: 100
     });
     for (const execution of executions) {
-      await this.enqueue(execution.id, execution.organizationId, execution.workflowId, execution.workflowVersionId);
+      await this.enqueue(execution.id, execution.organizationId, execution.workflowId, execution.workflowVersionId, execution.correlationId);
     }
   }
 
-  private enqueue(executionId: string, organizationId: string, workflowId: string, workflowVersionId: string) {
-    return this.queue.add(
+  private async enqueue(executionId: string, organizationId: string, workflowId: string, workflowVersionId: string, existingCorrelationId?: string | null) {
+    const correlationId = existingCorrelationId ?? (await this.ensureExecutionCorrelationId(executionId));
+    const job = await this.queue.add(
       EXECUTION_RUN_JOB,
-      { executionId, organizationId, workflowId, workflowVersionId, requestId: "reconciler" },
+      { executionId, organizationId, workflowId, workflowVersionId, requestId: newTraceId(), correlationId, enqueuedAt: new Date().toISOString() },
       { jobId: `execution-${executionId}`, attempts: 1, removeOnComplete: 1000, removeOnFail: false }
     );
+    this.logger?.info("worker.reconciler.reenqueued", { executionId, organizationId, workflowId, workflowVersionId, correlationId, jobId: job.id });
+    return job;
+  }
+
+  private async ensureExecutionCorrelationId(executionId: string) {
+    const candidate = newTraceId();
+    await this.prisma.execution.updateMany({ where: { id: executionId, correlationId: null }, data: { correlationId: candidate } });
+    const execution = await this.prisma.execution.findUniqueOrThrow({ where: { id: executionId }, select: { correlationId: true } });
+    return execution.correlationId ?? candidate;
   }
 }
 

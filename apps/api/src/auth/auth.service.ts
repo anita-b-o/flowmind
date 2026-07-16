@@ -7,6 +7,7 @@ import { OrganizationsService } from "../organizations/organizations.service";
 import { LoginDto } from "./dto/login.dto";
 import { RegisterDto } from "./dto/register.dto";
 import { accessTokenExpiresIn, refreshTokenExpiresIn, refreshTokenMaxAgeMs } from "./auth-config";
+import { StructuredLoggerService } from "../observability/structured-logger.service";
 
 type SessionMetadata = { userAgent?: string; ipHash?: string };
 
@@ -24,7 +25,8 @@ export class AuthService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly jwtService: JwtService,
-    private readonly organizationsService: OrganizationsService
+    private readonly organizationsService: OrganizationsService,
+    private readonly logger?: StructuredLoggerService
   ) {}
 
   async register(dto: RegisterDto, metadata: SessionMetadata) {
@@ -54,7 +56,9 @@ export class AuthService {
       orderBy: { createdAt: "asc" }
     });
 
-    return this.createSessionResponse(user.id, user.email, user.name, membership?.organizationId, metadata);
+    const response = await this.createSessionResponse(user.id, user.email, user.name, membership?.organizationId, metadata);
+    this.logger?.info("api.auth.login_succeeded", { userId: user.id });
+    return response;
   }
 
   async refresh(refreshToken: string | undefined, metadata: SessionMetadata) {
@@ -74,7 +78,7 @@ export class AuthService {
 
     if (session.revokedAt || session.replacedBySessionId) {
       await this.revokeFamily(session.tokenFamily);
-      console.warn("Refresh token reuse detected", { sessionId: session.id, userId: session.userId });
+      this.logger?.warn("api.auth.refresh_reuse_detected", { sessionId: session.id, userId: session.userId });
       throw new UnauthorizedException("Refresh token reuse detected");
     }
     if (session.expiresAt <= new Date()) {
@@ -114,10 +118,11 @@ export class AuthService {
         throw error;
       }
       await this.revokeFamily(session.tokenFamily);
-      console.warn("Concurrent refresh token reuse detected", { sessionId: session.id, userId: session.userId });
+      this.logger?.warn("api.auth.refresh_reuse_detected", { sessionId: session.id, userId: session.userId, concurrent: true });
       throw new UnauthorizedException("Refresh token reuse detected");
     }
 
+    this.logger?.info("api.auth.refresh_succeeded", { userId: session.user.id, sessionId: nextSessionId });
     return {
       refreshToken: nextRefreshToken,
       body: {

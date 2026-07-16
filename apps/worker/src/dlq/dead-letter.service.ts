@@ -4,6 +4,7 @@ import { Prisma } from "@prisma/client";
 import { Queue } from "bullmq";
 import { PrismaService } from "../prisma/prisma.service";
 import { WORKFLOW_EXECUTIONS_DLQ } from "../queues/queue.constants";
+import { WorkerLoggerService } from "../observability/worker-logger.service";
 
 export type DeadLetterInput = {
   organizationId: string;
@@ -22,7 +23,8 @@ export type DeadLetterInput = {
 export class DeadLetterService implements OnModuleDestroy {
   constructor(
     private readonly prisma: PrismaService,
-    @InjectQueue(WORKFLOW_EXECUTIONS_DLQ) private readonly dlq: Queue
+    @InjectQueue(WORKFLOW_EXECUTIONS_DLQ) private readonly dlq: Queue,
+    private readonly logger?: WorkerLoggerService
   ) {}
 
   async create(input: DeadLetterInput) {
@@ -51,7 +53,13 @@ export class DeadLetterService implements OnModuleDestroy {
       throw new Error("Failed to create dead letter execution");
     }));
 
-    await this.publish(row.id).catch(() => undefined);
+    await this.publish(row.id).catch((error) => {
+      this.logger?.warn("worker.execution.dead_letter_publish_failed", {
+        deadLetterId: row.id,
+        executionId: row.executionId,
+        error: error instanceof Error ? error.message : String(error)
+      });
+    });
     return row;
   }
 

@@ -5,6 +5,8 @@ import { PrismaService } from "../prisma/prisma.service";
 import { StepRegistry } from "./step-registry";
 import { ErrorClassifier } from "./error-classifier";
 import { RetryPolicyResolver, type RetryPolicy } from "./retry-policy-resolver";
+import { JobContextService } from "../observability/job-context.service";
+import { WorkerLoggerService } from "../observability/worker-logger.service";
 
 export type StepExecutionRecord = {
   id: string;
@@ -21,7 +23,9 @@ export class StepExecutor {
     private readonly prisma: PrismaService,
     private readonly registry: StepRegistry,
     private readonly errorClassifier: ErrorClassifier,
-    private readonly retryPolicyResolver: RetryPolicyResolver
+    private readonly retryPolicyResolver: RetryPolicyResolver,
+    private readonly jobContext?: JobContextService,
+    private readonly logger?: WorkerLoggerService
   ) {}
 
   async ensure(input: {
@@ -76,8 +80,16 @@ export class StepExecutor {
         inputJson: toJson(input.context)
       }
     });
+    this.logger?.info("worker.step.started", {
+      stepExecutionId: input.stepExecution.id,
+      stepKey: input.step.key,
+      stepType: input.step.type,
+      attemptCount: nextAttempt,
+      maxAttempts: policy.maxAttempts
+    });
 
     try {
+      const trace = this.jobContext?.getContext();
       input.context.metadata = {
         ...(input.context.metadata ?? {}),
         runtime: {
@@ -85,7 +97,9 @@ export class StepExecutor {
           executionId: input.executionId,
           workflowStepId: input.workflowStepId,
           stepExecutionId: input.stepExecution.id,
-          effectKey: input.stepExecution.effectKey ?? `flowmind:${input.executionId}:${input.step.key}`
+          effectKey: input.stepExecution.effectKey ?? `flowmind:${input.executionId}:${input.step.key}`,
+          requestId: trace?.requestId,
+          correlationId: trace?.correlationId
         }
       };
       const handler = this.registry.get(input.step.type);
@@ -101,6 +115,12 @@ export class StepExecutor {
           durationMs: completedAt.getTime() - startedAt.getTime(),
           effectStatus: "succeeded"
         }
+      });
+      this.logger?.info("worker.step.completed", {
+        stepExecutionId: input.stepExecution.id,
+        stepKey: input.step.key,
+        stepType: input.step.type,
+        durationMs: completedAt.getTime() - startedAt.getTime()
       });
       return { result, outcome: "completed" as const };
     } catch (error) {
@@ -118,6 +138,14 @@ export class StepExecutor {
           nextRetryAt,
           effectStatus: classification === "ambiguous" ? "ambiguous" : "failed"
         }
+      });
+      this.logger?.warn(classification === "ambiguous" ? "worker.effect.ambiguous" : "worker.step.failed", {
+        stepExecutionId: input.stepExecution.id,
+        stepKey: input.step.key,
+        stepType: input.step.type,
+        durationMs: completedAt.getTime() - startedAt.getTime(),
+        errorCategory: classification,
+        retrying: canRetry
       });
       if (canRetry) {
         return { outcome: "retrying" as const, nextRetryAt: nextRetryAt as Date };

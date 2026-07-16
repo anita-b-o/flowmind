@@ -92,4 +92,6 @@ export interface ExecutionJobPayload {
   workflowId: string;
   workflowVersionId: string;
   requestId: string;
+  correlationId: string;
+  enqueuedAt: string;
 }

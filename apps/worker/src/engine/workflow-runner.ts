@@ -7,6 +7,7 @@ import { ContextReconstructor } from "./context-reconstructor";
 import { ExecutionLeaseService } from "./execution-lease.service";
 import { LeaseLostError } from "./lease-lost.error";
 import { DeadLetterService } from "../dlq/dead-letter.service";
+import { WorkerLoggerService } from "../observability/worker-logger.service";
 
 export type WorkflowRunResult = { status: "completed" | "skipped" | "lost_lease" } | { status: "waiting"; nextRetryAt: Date };
 
@@ -17,14 +18,17 @@ export class WorkflowRunner {
     private readonly stepExecutor: StepExecutor,
     private readonly contextReconstructor: ContextReconstructor,
     private readonly leaseService: ExecutionLeaseService,
-    private readonly deadLetterService: DeadLetterService
+    private readonly deadLetterService: DeadLetterService,
+    private readonly logger?: WorkerLoggerService
   ) {}
 
   async run(payload: ExecutionJobPayload): Promise<WorkflowRunResult> {
     const acquired = await this.leaseService.acquire(payload.executionId, payload.organizationId);
     if (!acquired) {
+      this.logger?.info("worker.lease.rejected");
       return { status: "skipped" };
     }
+    this.logger?.info("worker.lease.acquired");
     let heartbeat: NodeJS.Timeout | undefined;
     const startHeartbeat = () => {
       heartbeat = setInterval(() => {
@@ -41,7 +45,7 @@ export class WorkflowRunner {
       if (heartbeat) clearInterval(heartbeat);
       return { status: "completed" };
     }
-    await this.prisma.execution.update({ where: { id: execution.id }, data: { startedAt: execution.startedAt ?? new Date(), completedAt: null } });
+      await this.prisma.execution.update({ where: { id: execution.id }, data: { startedAt: execution.startedAt ?? new Date(), completedAt: null } });
 
     try {
       let skipNext = false;
@@ -76,6 +80,12 @@ export class WorkflowRunner {
           await this.markWaiting(current.id);
           if (heartbeat) clearInterval(heartbeat);
           await this.leaseService.release(current.id);
+          this.logger?.info("worker.step.retry_scheduled", {
+            stepExecutionId: stepExecution.id,
+            stepKey: step.key,
+            stepType: step.type,
+            nextRetryAt: stepExecution.nextRetryAt
+          });
           return { status: "waiting", nextRetryAt: stepExecution.nextRetryAt };
         }
         if (stepExecution.status === StepExecutionStatus.Failed && stepExecution.attemptCount >= stepExecution.maxAttempts) {
@@ -113,6 +123,12 @@ export class WorkflowRunner {
           await this.markWaiting(current.id);
           if (heartbeat) clearInterval(heartbeat);
           await this.leaseService.release(current.id);
+          this.logger?.info("worker.step.retry_scheduled", {
+            stepExecutionId: stepExecution.id,
+            stepKey: step.key,
+            stepType: step.type,
+            nextRetryAt: outcome.nextRetryAt
+          });
           return { status: "waiting", nextRetryAt: outcome.nextRetryAt };
         }
         skipNext = Boolean(outcome.result.control?.skipNext);
@@ -126,10 +142,12 @@ export class WorkflowRunner {
       });
       if (heartbeat) clearInterval(heartbeat);
       await this.leaseService.release(execution.id);
+      this.logger?.info("worker.execution.completed", { durationMs: execution.startedAt ? Date.now() - execution.startedAt.getTime() : undefined });
       return { status: "completed" };
     } catch (error) {
       if (heartbeat) clearInterval(heartbeat);
       if (error instanceof LeaseLostError) {
+        this.logger?.warn("worker.lease.lost");
         return { status: "lost_lease" };
       }
       const context = await this.reconstructContextForExecution(execution.id);
@@ -157,6 +175,16 @@ export class WorkflowRunner {
         attempts: failedStep?.attemptCount,
         lastErrorJson: failedStep?.errorJson ?? { message: error instanceof Error ? error.message : String(error) },
         jobId: `execution-${execution.id}`
+      });
+      this.logger?.error("worker.execution.failed", {
+        failedStepKey: failedStep?.stepKey,
+        stepExecutionId: failedStep?.id,
+        errorCategory: (failedStep?.errorJson as any)?.classification
+      });
+      this.logger?.warn("worker.execution.dead_lettered", {
+        failedStepKey: failedStep?.stepKey,
+        stepExecutionId: failedStep?.id,
+        reason: failedStep?.effectStatus === "ambiguous" ? "ambiguous" : "failed"
       });
       await this.leaseService.release(execution.id);
       throw error;

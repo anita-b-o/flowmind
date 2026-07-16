@@ -22,3 +22,13 @@ The runner reloads `Execution`, `WorkflowVersion`, `WorkflowStep`, and `StepExec
 Retry policies are normalized on version creation to `maxAttempts` 1..5, `backoffMs` 100..60000, `strategy` fixed/exponential, and `timeoutSeconds` 1..120. Values outside the allowed range are clamped rather than rejected so clients can submit conservative defaults without breaking version creation.
 
 Effect idempotency is handled per step type: database records use a dedupe key, HTTP mutations receive a stable `Idempotency-Key`, and completed AI/email outputs are not re-executed during resume.
+
+## Trace Context
+
+Every API HTTP request receives a boundary-local `requestId` and a flow-level `correlationId`. Clients may provide `x-request-id` and `x-correlation-id` when they match `^[A-Za-z0-9._:-]{8,128}$`; invalid values are ignored and replaced. Both IDs are returned as response headers.
+
+`requestId` identifies one operation inside one boundary. `correlationId` follows the business flow across webhook intake, `Execution`, BullMQ jobs, worker processing, step execution, and AI service calls. These IDs are for diagnostics only and are never used for authorization.
+
+Webhook intake stores `requestId` and `correlationId` on `WebhookEvent`, stores `correlationId` on `Execution`, and includes `correlationId` plus enqueue metadata in the BullMQ payload. Idempotent webhook repeats keep the original execution correlation ID. Manual retries inherit the original execution correlation ID so the incident and retry remain linked.
+
+Logs in API, worker, and AI service are structured. Production uses JSON, development can use pretty output. Logs use centralized redaction for credentials and sensitive fields, and do not include webhook bodies, prompts, cookies, bearer tokens, refresh tokens, API keys, or full step outputs by default.

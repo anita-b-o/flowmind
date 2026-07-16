@@ -27,7 +27,13 @@ const baseEnvSchema = z.object({
   EXECUTION_HEARTBEAT_INTERVAL_MS: z.coerce.number().int().positive().default(15_000),
   EXECUTION_RECONCILIATION_INTERVAL_MS: z.coerce.number().int().positive().default(10_000),
   WORKER_SHUTDOWN_TIMEOUT_MS: z.coerce.number().int().positive().default(30_000),
-  WORKER_HEALTH_PORT: z.coerce.number().int().positive().default(3002)
+  WORKER_HEALTH_PORT: z.coerce.number().int().positive().default(3002),
+  LOG_LEVEL: z.enum(["trace", "debug", "info", "warn", "error", "fatal", "silent"]).default("info"),
+  LOG_FORMAT: z.enum(["json", "pretty"]).optional(),
+  LOG_REDACT_ENABLED: z.coerce.boolean().default(true),
+  MAX_LOG_PAYLOAD_BYTES: z.coerce.number().int().positive().default(16_384),
+  REQUEST_ID_HEADER: z.string().default("x-request-id"),
+  CORRELATION_ID_HEADER: z.string().default("x-correlation-id")
 });
 
 const webEnvSchema = z.object({

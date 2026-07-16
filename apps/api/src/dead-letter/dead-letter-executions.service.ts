@@ -12,6 +12,7 @@ export class DeadLetterExecutionsService {
     const [items, total] = await this.prisma.$transaction([
       this.prisma.deadLetterExecution.findMany({
         where,
+        include: { execution: { select: { correlationId: true } } },
         orderBy: { createdAt: "desc" },
         skip: (page - 1) * pageSize,
         take: pageSize
@@ -22,7 +23,7 @@ export class DeadLetterExecutionsService {
   }
 
   async get(organizationId: string, id: string) {
-    const item = await this.prisma.deadLetterExecution.findFirst({ where: { id, organizationId } });
+    const item = await this.prisma.deadLetterExecution.findFirst({ where: { id, organizationId }, include: { execution: { select: { correlationId: true } } } });
     if (!item) throw new NotFoundException("Dead letter execution not found");
     return sanitize(item);
   }
@@ -33,6 +34,7 @@ function sanitize(item: any) {
     id: item.id,
     organizationId: item.organizationId,
     executionId: item.executionId,
+    correlationId: item.execution?.correlationId ?? null,
     workflowId: item.workflowId,
     workflowVersionId: item.workflowVersionId,
     sourceQueue: item.sourceQueue,

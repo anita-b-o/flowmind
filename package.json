@@ -7,7 +7,7 @@
     "build": "corepack pnpm -r --if-present build",
     "lint": "corepack pnpm -r --if-present lint",
     "test": "corepack pnpm -r --if-present test",
-    "typecheck": "corepack pnpm --filter @automation/shared-types build && corepack pnpm --filter @automation/config build && corepack pnpm --filter @automation/ui build && corepack pnpm -r --if-present typecheck",
+    "typecheck": "corepack pnpm --filter @automation/shared-types build && corepack pnpm --filter @automation/config build && corepack pnpm --filter @automation/observability build && corepack pnpm --filter @automation/ui build && corepack pnpm -r --if-present typecheck",
     "format": "prettier --write \"**/*.{ts,tsx,js,json,md,yml,yaml,py}\"",
     "db:generate": "corepack pnpm --filter @automation/api prisma:generate",
     "db:migrate": "corepack pnpm --filter @automation/api prisma:migrate"

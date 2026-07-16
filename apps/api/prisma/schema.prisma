@@ -256,6 +256,7 @@ model Execution {
   workflowId             String          @map("workflow_id")
   workflowVersionId      String          @map("workflow_version_id")
   webhookEventId         String?         @map("webhook_event_id")
+  correlationId          String?         @map("correlation_id")
   retryOfExecutionId     String?         @map("retry_of_execution_id")
   retryRequestedByUserId String?         @map("retry_requested_by_user_id")
   retryRequestedAt       DateTime?       @map("retry_requested_at")
@@ -286,6 +287,7 @@ model Execution {
   retryDeadLetters DeadLetterExecution[] @relation("DeadLetterRetryExecution")
 
   @@index([organizationId, workflowId, status])
+  @@index([organizationId, correlationId])
   @@index([status, lockedUntil])
   @@index([retryOfExecutionId, status])
   @@map("executions")
@@ -332,6 +334,8 @@ model WebhookEvent {
   workflowId         String   @map("workflow_id")
   triggerId          String   @map("trigger_id")
   idempotencyKey     String?  @map("idempotency_key")
+  requestId          String?  @map("request_id")
+  correlationId      String?  @map("correlation_id")
   requestHeadersJson Json     @map("request_headers_json")
   payloadJson        Json     @map("payload_json")
   payloadHash        String   @map("payload_hash")
@@ -343,6 +347,7 @@ model WebhookEvent {
   executions   Execution[]
 
   @@index([organizationId, workflowId, receivedAt])
+  @@index([organizationId, correlationId])
   @@map("webhook_events")
 }
 
@@ -408,6 +413,7 @@ model AuditLog {
   action         String
   resourceType   String   @map("resource_type")
   resourceId     String   @map("resource_id")
+  correlationId  String?  @map("correlation_id")
   metadataJson   Json     @map("metadata_json")
   ipAddress      String?  @map("ip_address")
   userAgent      String?  @map("user_agent")
@@ -416,6 +422,7 @@ model AuditLog {
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
   @@index([organizationId, createdAt])
+  @@index([organizationId, correlationId])
   @@map("audit_logs")
 }
 

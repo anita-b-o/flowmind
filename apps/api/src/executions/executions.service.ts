@@ -1,15 +1,20 @@
 import { ConflictException, Injectable, NotFoundException } from "@nestjs/common";
 import { ExecutionStatus } from "@automation/shared-types";
+import { newTraceId } from "@automation/observability";
 import { Prisma } from "@prisma/client";
 import { ListExecutionsQueryDto } from "./dto/list-executions-query.dto";
 import { PrismaService } from "../prisma/prisma.service";
 import { QueueService } from "../queues/queue.service";
+import { RequestContextService } from "../observability/request-context.service";
+import { StructuredLoggerService } from "../observability/structured-logger.service";
 
 @Injectable()
 export class ExecutionsService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly queueService: QueueService
+    private readonly queueService: QueueService,
+    private readonly requestContext?: RequestContextService,
+    private readonly logger?: StructuredLoggerService
   ) {}
 
   async list(organizationId: string, query: ListExecutionsQueryDto) {
@@ -30,6 +35,7 @@ export class ExecutionsService {
           id: true,
           workflowId: true,
           workflowVersionId: true,
+          correlationId: true,
           status: true,
           startedAt: true,
         completedAt: true,
@@ -61,6 +67,7 @@ export class ExecutionsService {
       workflow: execution.workflow,
       workflowVersion: execution.workflowVersion,
       status: execution.status,
+      correlationId: execution.correlationId,
       input: sanitizePayload(execution.inputJson),
       context: sanitizePayload(execution.contextJson),
       error: execution.errorJson,
@@ -79,7 +86,6 @@ export class ExecutionsService {
         maxAttempts: step.maxAttempts,
         nextRetryAt: step.nextRetryAt,
         effectStatus: step.effectStatus,
-        workerId: step.workerId,
         output: step.outputJson,
         error: step.errorJson,
         startedAt: step.startedAt,
@@ -118,6 +124,7 @@ export class ExecutionsService {
     });
     if (activeRetry) throw new ConflictException("A retry is already active for this execution");
 
+    const correlationId = original.correlationId ?? this.requestContext?.getCorrelationId() ?? newTraceId();
     const next = await this.prisma.$transaction(async (tx) => {
       const created = await tx.execution.create({
         data: {
@@ -129,6 +136,7 @@ export class ExecutionsService {
           retryRequestedByUserId: userId,
           retryRequestedAt: new Date(),
           retryReason: reason,
+          correlationId,
           status: ExecutionStatus.Queued,
           inputJson: original.inputJson as Prisma.InputJsonValue,
           contextJson: { trigger: (original.inputJson as any)?.trigger ?? {}, steps: {}, metadata: {} }
@@ -145,6 +153,7 @@ export class ExecutionsService {
           action: "execution.retry",
           resourceType: "execution",
           resourceId: original.id,
+          correlationId,
           metadataJson: {
             originalExecutionId: original.id,
             retryExecutionId: created.id,
@@ -160,7 +169,17 @@ export class ExecutionsService {
       executionId: next.id,
       workflowId: next.workflowId,
       workflowVersionId: next.workflowVersionId,
-      requestId: `manual-retry-${next.id}`
+      requestId: this.requestContext?.getRequestId() ?? `manual-retry-${next.id}`,
+      correlationId: next.correlationId ?? correlationId,
+      enqueuedAt: new Date().toISOString()
+    });
+    this.logger?.info("api.execution.retry_requested", {
+      organizationId,
+      userId,
+      executionId: original.id,
+      retryExecutionId: next.id,
+      workflowId: next.workflowId,
+      workflowVersionId: next.workflowVersionId
     });
     return { executionId: next.id, retryOfExecutionId: original.id };
   }

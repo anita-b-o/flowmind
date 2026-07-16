@@ -23,6 +23,8 @@ import { ExecutionLeaseService } from "./engine/execution-lease.service";
 import { DeadLetterService } from "./dlq/dead-letter.service";
 import { ExecutionReconcilerService } from "./recovery/execution-reconciler.service";
 import { WorkerHealthService } from "./health/worker-health.service";
+import { JobContextService } from "./observability/job-context.service";
+import { WorkerLoggerService } from "./observability/worker-logger.service";
 
 const redisUrl = new URL(process.env.REDIS_URL ?? "redis://localhost:6379");
 
@@ -52,6 +54,8 @@ const redisUrl = new URL(process.env.REDIS_URL ?? "redis://localhost:6379");
     DeadLetterService,
     ExecutionReconcilerService,
     WorkerHealthService,
+    JobContextService,
+    WorkerLoggerService,
     SafeHttpClient,
     HttpRequestHandler,
     ConditionalHandler,

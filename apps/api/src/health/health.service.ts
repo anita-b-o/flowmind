@@ -2,12 +2,14 @@ import { Injectable } from "@nestjs/common";
 import Redis from "ioredis";
 import { PrismaService } from "../prisma/prisma.service";
 import { ShutdownStateService } from "../runtime/shutdown-state.service";
+import { StructuredLoggerService } from "../observability/structured-logger.service";
 
 @Injectable()
 export class HealthService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly shutdown: ShutdownStateService
+    private readonly shutdown: ShutdownStateService,
+    private readonly logger?: StructuredLoggerService
   ) {}
 
   async ready() {
@@ -17,6 +19,9 @@ export class HealthService {
     checks.database = await this.checkDatabase();
     checks.redis = await this.checkRedis();
     const ready = Object.values(checks).every((value) => ["up", "valid", "ok"].includes(value));
+    if (!ready) {
+      this.logger?.warn("api.health.readiness_failed", { checks });
+    }
     return { status: ready ? "ready" : "not_ready", checks };
   }
 

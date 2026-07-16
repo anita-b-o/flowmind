@@ -1,11 +1,14 @@
-import { createHash, randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
 import { Injectable, NotFoundException, ServiceUnavailableException, UnauthorizedException } from "@nestjs/common";
+import { newTraceId } from "@automation/observability";
 import { Prisma } from "@prisma/client";
 import { ExecutionStatus } from "@automation/shared-types";
 import { PrismaService } from "../prisma/prisma.service";
 import { QueueService } from "../queues/queue.service";
 import { WebhookTokenService } from "../triggers/webhook-token.service";
 import { WebhookRateLimitService } from "./webhook-rate-limit.service";
+import { RequestContextService } from "../observability/request-context.service";
+import { StructuredLoggerService } from "../observability/structured-logger.service";
 
 interface ReceiveWebhookInput {
   workflowId: string;
@@ -21,18 +24,24 @@ export class WebhooksService {
     private readonly prisma: PrismaService,
     private readonly queueService: QueueService,
     private readonly tokenService: WebhookTokenService,
-    private readonly rateLimitService: WebhookRateLimitService
+    private readonly rateLimitService: WebhookRateLimitService,
+    private readonly requestContext: RequestContextService,
+    private readonly logger: StructuredLoggerService
   ) {}
 
   async receive(input: ReceiveWebhookInput) {
+    const requestId = this.requestContext.getRequestId();
+    const correlationId = this.requestContext.getCorrelationId();
     await this.rateLimitService.assertAllowed(`pre:${input.workflowId}:${input.sourceIp}`, this.rateLimitService.burstMax());
     const workflow = await this.loadWorkflow(input.workflowId);
     if (!workflow || !workflow.activeVersion) {
+      this.logger.warn("api.webhook.rejected", { workflowId: input.workflowId, reason: "active_workflow_not_found" });
       throw new NotFoundException("Active workflow not found");
     }
 
     const trigger = workflow.triggers.find((candidate) => this.tokenService.verifyToken(input.token, candidate.tokenHash));
     if (!trigger) {
+      this.logger.warn("api.webhook.rejected", { workflowId: workflow.id, organizationId: workflow.organizationId, reason: "invalid_token" });
       throw new UnauthorizedException("Invalid webhook token");
     }
     await this.rateLimitService.assertAllowed(`trigger:${workflow.organizationId}:${workflow.id}:${trigger.id}:${input.sourceIp}`);
@@ -44,7 +53,7 @@ export class WebhooksService {
 
     const existing = await this.waitForExisting(workflow.organizationId, scope, idempotencyKey);
     if (existing?.responseJson && ["PROCESSING", "ENQUEUED"].includes(existing.status)) {
-      return existing.responseJson;
+      return this.authoritativeResponse(workflow.organizationId, existing.responseJson);
     }
     if (existing?.status === "FAILED" && existing.responseJson) {
       return this.retryFailedEnqueue(workflow.organizationId, scope, idempotencyKey, existing.responseJson);
@@ -58,9 +67,11 @@ export class WebhooksService {
         executionId: result.execution.id,
         workflowId: workflow.id,
         workflowVersionId: workflow.activeVersion.id,
-        requestId: randomUUID()
+        requestId,
+        correlationId: result.execution.correlationId ?? correlationId,
+        enqueuedAt: new Date().toISOString()
       });
-      const response = { accepted: true, executionId: result.execution.id };
+      const response = { accepted: true, executionId: result.execution.id, correlationId: result.execution.correlationId ?? correlationId };
       await this.prisma.$transaction([
         this.prisma.execution.update({ where: { id: result.execution.id }, data: { status: ExecutionStatus.Queued } }),
         this.prisma.idempotencyKey.update({
@@ -68,6 +79,12 @@ export class WebhooksService {
           data: { status: "ENQUEUED", responseJson: toPrismaJson(response), lockedUntil: null }
         })
       ]);
+      this.logger.info("api.webhook.accepted", {
+        organizationId: workflow.organizationId,
+        workflowId: workflow.id,
+        workflowVersionId: workflow.activeVersion.id,
+        executionId: result.execution.id
+      });
       return response;
     } catch (error) {
       await this.prisma.$transaction([
@@ -84,6 +101,11 @@ export class WebhooksService {
           }
         })
       ]);
+      this.logger.error("api.execution.enqueue_failed", {
+        organizationId: workflow.organizationId,
+        workflowId: workflow.id,
+        executionId: result.execution.id
+      });
       throw new ServiceUnavailableException("Execution could not be queued");
     }
   }
@@ -110,48 +132,52 @@ export class WebhooksService {
           }
         });
 
-      const webhookEvent = await tx.webhookEvent.create({
-        data: {
-          organizationId: workflow.organizationId,
-          workflowId: workflow.id,
-          triggerId,
-          idempotencyKey,
-          requestHeadersJson: toPrismaJson(sanitizeHeaders(input.headers)),
-          payloadJson: toPrismaJson(input.body),
-          payloadHash,
-          sourceIp: input.sourceIp
-        }
-      });
-
-      const execution = await tx.execution.create({
-        data: {
-          organizationId: workflow.organizationId,
-          workflowId: workflow.id,
-          workflowVersionId: workflow.activeVersion!.id,
-          webhookEventId: webhookEvent.id,
-          status: ExecutionStatus.Pending,
-          inputJson: toPrismaJson({ trigger: { body: input.body, headers: sanitizeHeaders(input.headers) } }),
-          contextJson: toPrismaJson({ trigger: { body: input.body }, steps: {}, metadata: {} })
-        }
-      });
-
-      await tx.idempotencyKey.update({
-        where: {
-          organizationId_scope_key: {
+        const webhookEvent = await tx.webhookEvent.create({
+          data: {
             organizationId: workflow.organizationId,
-            scope,
-            key: idempotencyKey
+            workflowId: workflow.id,
+            triggerId,
+            idempotencyKey,
+            requestId: this.requestContext.getRequestId(),
+            correlationId: this.requestContext.getCorrelationId(),
+            requestHeadersJson: toPrismaJson(sanitizeHeaders(input.headers)),
+            payloadJson: toPrismaJson(input.body),
+            payloadHash,
+            sourceIp: input.sourceIp
           }
-        },
-        data: { responseJson: toPrismaJson({ accepted: true, executionId: execution.id }) }
+        });
+
+        const execution = await tx.execution.create({
+          data: {
+            organizationId: workflow.organizationId,
+            workflowId: workflow.id,
+            workflowVersionId: workflow.activeVersion!.id,
+            webhookEventId: webhookEvent.id,
+            correlationId: this.requestContext.getCorrelationId(),
+            status: ExecutionStatus.Pending,
+            inputJson: toPrismaJson({ trigger: { body: input.body, headers: sanitizeHeaders(input.headers) } }),
+            contextJson: toPrismaJson({ trigger: { body: input.body }, steps: {}, metadata: {} })
+          }
+        });
+
+        await tx.idempotencyKey.update({
+          where: {
+            organizationId_scope_key: {
+              organizationId: workflow.organizationId,
+              scope,
+              key: idempotencyKey
+            }
+          },
+          data: { responseJson: toPrismaJson({ accepted: true, executionId: execution.id, correlationId: execution.correlationId }) }
+        });
+        return { execution };
       });
-      return { execution };
-    });
     } catch (error: any) {
       if (error?.code === "P2002") {
         const existing = await this.waitForExisting(workflow.organizationId, scope, idempotencyKey);
         if (existing?.responseJson) {
-          return { execution: { id: (existing.responseJson as any).executionId } };
+          const response = await this.authoritativeResponse(workflow.organizationId, existing.responseJson);
+          return { execution: { id: response.executionId, correlationId: response.correlationId } };
         }
       }
       throw error;
@@ -172,9 +198,11 @@ export class WebhooksService {
       executionId,
       workflowId: execution.workflowId,
       workflowVersionId: execution.workflowVersionId,
-      requestId: randomUUID()
+      requestId: this.requestContext.getRequestId(),
+      correlationId: execution.correlationId ?? (await this.ensureExecutionCorrelationId(execution.id)),
+      enqueuedAt: new Date().toISOString()
     });
-    const accepted = { accepted: true, executionId };
+    const accepted = { accepted: true, executionId, correlationId: execution.correlationId ?? (await this.ensureExecutionCorrelationId(execution.id)) };
     await this.prisma.$transaction([
       this.prisma.execution.update({ where: { id: executionId }, data: { status: ExecutionStatus.Queued, errorJson: Prisma.JsonNull } }),
       this.prisma.idempotencyKey.update({
@@ -183,6 +211,25 @@ export class WebhooksService {
       })
     ]);
     return accepted;
+  }
+
+  private async authoritativeResponse(organizationId: string, response: Prisma.JsonValue) {
+    const executionId = (response as any).executionId as string | undefined;
+    const fallbackCorrelationId = (response as any).correlationId as string | undefined;
+    if (!executionId) {
+      return response as any;
+    }
+    const execution = await this.prisma.execution.findFirst({ where: { id: executionId, organizationId } });
+    const correlationId = execution?.correlationId ?? fallbackCorrelationId ?? (execution ? await this.ensureExecutionCorrelationId(execution.id) : this.requestContext.getCorrelationId());
+    this.requestContext.setCorrelationId(correlationId);
+    return { ...(response as any), executionId, correlationId };
+  }
+
+  private async ensureExecutionCorrelationId(executionId: string) {
+    const candidate = newTraceId();
+    await this.prisma.execution.updateMany({ where: { id: executionId, correlationId: null }, data: { correlationId: candidate } });
+    const execution = await this.prisma.execution.findUniqueOrThrow({ where: { id: executionId }, select: { correlationId: true } });
+    return execution.correlationId ?? candidate;
   }
 
   private async waitForExisting(organizationId: string, scope: string, key: string) {

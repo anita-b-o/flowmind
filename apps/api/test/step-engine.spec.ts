@@ -263,7 +263,9 @@ async function seedExecution(steps: Array<{ key: string; name: string; type: Ste
       workflowId: workflow.id,
       workflowVersionId: version.id,
       executionId: execution.id,
-      requestId: "test"
+      requestId: "test-request",
+      correlationId: "test-correlation",
+      enqueuedAt: new Date().toISOString()
     }
   };
 }
