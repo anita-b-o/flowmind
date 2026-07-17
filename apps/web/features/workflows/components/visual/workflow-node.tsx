@@ -11,12 +11,14 @@ export function WorkflowNode({ id, data, selected }: NodeProps<WorkflowFlowNode>
   const isIf = data.type === "if";
   const isSwitch = data.type === "switch";
   const isTerminalCapable = !isIf && !isSwitch;
+  const debugClass = data.debugStatus ? `debug-${data.debugStatus}` : "";
 
   return (
-    <div className={`workflow-flow-node ${selected ? "selected" : ""} ${hasErrors ? "invalid" : hasWarnings ? "warning" : ""}`}>
+    <div className={`workflow-flow-node ${selected ? "selected" : ""} ${hasErrors ? "invalid" : hasWarnings ? "warning" : ""} ${debugClass}`}>
       {!isTrigger && <Handle id="in" type="target" position={Position.Left} isConnectable={!data.readOnly} />}
       <div className="workflow-flow-node-header">
         <span className="workflow-flow-node-kind">{nodeKind(data.type)}</span>
+        {data.debugStatus && <span className="workflow-flow-node-status">{data.debugStatus}</span>}
         {(hasErrors || hasWarnings) && <span className="workflow-flow-node-status">{hasErrors ? "Error" : "Warning"}</span>}
       </div>
       <strong>{data.label}</strong>

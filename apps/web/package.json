@@ -7,6 +7,9 @@
     "build": "next build",
     "lint": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
+    "test:unit": "vitest run",
+    "test:integration": "vitest run '**/*.integration.test.{ts,tsx}' --passWithNoTests",
+    "test:e2e": "vitest run '**/*.e2e.test.{ts,tsx}' --passWithNoTests",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {

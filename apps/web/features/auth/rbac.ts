@@ -22,6 +22,10 @@ export function canManageConnections(role: OrganizationRole) {
   return roleRank(role) >= rank.admin;
 }
 
+export function canRunRealWorkflowTest(role: OrganizationRole) {
+  return roleRank(role) >= rank.admin;
+}
+
 export function canDeleteConnections(role: OrganizationRole) {
   return roleRank(role) >= rank.owner;
 }

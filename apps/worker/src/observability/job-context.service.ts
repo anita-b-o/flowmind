@@ -11,7 +11,7 @@ export type JobContext = {
   jobId?: string;
   organizationId: string;
   workflowId: string;
-  workflowVersionId: string;
+  workflowVersionId?: string;
   executionId: string;
   workerId: string;
 };

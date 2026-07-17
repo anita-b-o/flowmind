@@ -28,6 +28,7 @@ Current controls:
 - Expressions use an allowlisted namespace model and never expose connection plaintext, encrypted secrets, API keys, SMTP passwords, webhook tokens, cookies, raw sensitive headers, worker locks, queue internals, or raw provider errors.
 - Expression path resolution blocks `constructor`, `prototype`, `__proto__`, `eval`, unsupported syntax, and inherited object properties.
 - Graph-backed workflows reject branch cycles, self-targets, missing If/Switch branches, invalid timestamps, and non-positive waits before version persistence. Runtime wait expressions are revalidated after resolution.
+- Workflow test runs are tenant-scoped and RBAC-protected. Viewers can inspect history, editors can create/cancel/rerun/skip test waits, and real mode requires explicit confirmation. Mock mode blocks HTTP, AI, email, and database effects; database remains dry-run in real mode v1.
 
 CSRF strategy: the current browser contract assumes same-site web and API deployment with `SameSite=Lax`, Bearer access tokens in memory for normal mutations, and explicit Origin validation for cookie-backed auth mutations. If `REFRESH_COOKIE_SAME_SITE=none` is used for cross-site production, add a CSRF token mechanism before launch; CORS alone is not CSRF protection.
 
@@ -52,3 +53,7 @@ Metrics are separate from logs and AuditLog. They use bounded labels only and mu
 Dead-letter detail exposes a public error category/code/message rather than raw provider errors. Public metadata is sanitized with the central observability sanitizer and redacts sensitive keys including `authorization`, `cookie`, `set-cookie`, `accessToken`, `refreshToken`, `apiKey`, `secret`, `password`, and `token`.
 
 AuditLog metadata is sanitized before storage through the audit service. It must not contain tokens, hashes, cookies, API keys, passwords, secrets, or real IP addresses.
+
+# Debugger Sanitization
+
+Workflow debugger responses may include user-provided test payloads, resolved configs, prompts, outputs, and errors for authorized organization members. They must pass through public sanitization and never include decrypted connection values, authorization headers, cookies, tokens, encrypted secrets, webhook tokens, or raw provider credential objects.

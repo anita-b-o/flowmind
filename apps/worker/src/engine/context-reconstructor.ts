@@ -5,7 +5,7 @@ type ExecutionLike = {
   id: string;
   organizationId: string;
   workflowId: string;
-  workflowVersionId: string;
+  workflowVersionId?: string | null;
   correlationId?: string | null;
   retryOfExecutionId?: string | null;
   startedAt?: Date | null;
@@ -32,7 +32,7 @@ export class ContextReconstructor {
       steps: {},
       workflow: {
         id: execution.workflowId,
-        versionId: execution.workflowVersionId,
+        versionId: execution.workflowVersionId ?? null,
         name: workflow?.name,
         variables: asRecord(definition.workflowVariables)
       },
@@ -52,7 +52,7 @@ export class ContextReconstructor {
         ...asRecord(input.metadata),
         organizationId: execution.organizationId,
         workflowId: execution.workflowId,
-        workflowVersionId: execution.workflowVersionId,
+        workflowVersionId: execution.workflowVersionId ?? null,
         executionId: execution.id,
         expressionMode: definition.expressionMode === "strict" ? "strict" : "legacy"
       }

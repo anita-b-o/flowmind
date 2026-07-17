@@ -50,6 +50,7 @@ export type WorkflowNodeData = {
   summary: string;
   issues: DraftValidationIssue[];
   readOnly: boolean;
+  debugStatus?: "active" | "completed" | "pending" | "skipped" | "failed" | "retrying" | "waiting" | "dlq";
   cases?: Array<{ key: string; label: string }>;
 };
 

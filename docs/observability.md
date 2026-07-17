@@ -115,4 +115,6 @@ AuditLog is used for critical user-visible actions such as manual retry, DLQ res
 
 Flow-control runtime decisions such as branch selection, skipped branches, scheduled waits, and resumed waits are logs/metrics, not AuditLog events. Creating or activating graph-backed workflow versions remains a business audit event.
 
+Workflow test runs record business AuditLog entries for creation, cancellation, real-mode enablement, and test wait skipping. Debug payloads, prompts, outputs, resolved values, mock bodies, and comparison details must not be logged or used as metric labels.
+
 Connection create, update, rotate, revoke, delete, and test actions are AuditLog events. Audit metadata must contain only safe fields such as connection id, type, status, and test outcome; encrypted payload fields and plaintext credentials are redacted by the shared sanitizer.

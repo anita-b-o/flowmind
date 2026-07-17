@@ -1,5 +1,5 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException, ServiceUnavailableException } from "@nestjs/common";
-import { ExecutionStatus } from "@automation/shared-types";
+import { ExecutionMode, ExecutionStatus } from "@automation/shared-types";
 import { newTraceId } from "@automation/observability";
 import { Prisma } from "@prisma/client";
 import { ListExecutionsQueryDto } from "./dto/list-executions-query.dto";
@@ -29,6 +29,7 @@ export class ExecutionsService {
     const pageSize = Math.min(query.pageSize ?? 20, 100);
     const where: Prisma.ExecutionWhereInput = {
       organizationId,
+      executionMode: ExecutionMode.Real,
       ...(query.workflowId ? { workflowId: query.workflowId } : {}),
       ...(query.status ? { status: query.status } : {})
     };
@@ -57,7 +58,7 @@ export class ExecutionsService {
 
   async getDetail(organizationId: string, executionId: string) {
     const execution = await this.prisma.execution.findFirst({
-      where: { id: executionId, organizationId },
+      where: { id: executionId, organizationId, executionMode: ExecutionMode.Real },
       include: {
         workflow: { select: { id: true, name: true, status: true } },
         workflowVersion: { select: { id: true, versionNumber: true, status: true, createdAt: true } },
@@ -131,7 +132,7 @@ export class ExecutionsService {
 
   async retry(organizationId: string, userId: string, executionId: string, reason?: string) {
     const original = await this.prisma.execution.findFirst({
-      where: { id: executionId, organizationId },
+      where: { id: executionId, organizationId, executionMode: ExecutionMode.Real },
       include: { deadLetters: { where: { resolvedAt: null } } }
     });
     if (!original) {
@@ -227,7 +228,7 @@ export class ExecutionsService {
         organizationId,
         executionId: next.id,
         workflowId: next.workflowId,
-        workflowVersionId: next.workflowVersionId,
+        workflowVersionId: next.workflowVersionId ?? undefined,
         requestId: this.requestContext?.getRequestId() ?? `manual-retry-${next.id}`,
         correlationId: next.correlationId ?? correlationId,
         enqueuedAt: new Date().toISOString()

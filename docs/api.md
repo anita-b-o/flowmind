@@ -34,6 +34,13 @@ Core endpoints:
 - `GET /executions`
 - `GET /executions/:executionId`
 - `POST /executions/:executionId/retry`
+- `POST /workflows/:workflowId/test-runs`
+- `GET /workflows/:workflowId/test-runs`
+- `GET /workflows/:workflowId/test-runs/:testRunId`
+- `POST /workflows/:workflowId/test-runs/:testRunId/cancel`
+- `POST /workflows/:workflowId/test-runs/:testRunId/rerun`
+- `POST /workflows/:workflowId/test-runs/:testRunId/steps/:stepKey/skip-wait`
+- `GET /workflows/:workflowId/test-runs/:testRunId/compare-last-real`
 - `GET /dead-letter-executions`
 - `GET /dead-letter-executions/:deadLetterId`
 - `GET /audit-logs`
@@ -176,6 +183,26 @@ Public reason catalog: `non_retryable`, `attempts_exhausted`, `ambiguous_effect`
 It creates a new queued execution using the same workflow version, original input, and correlation ID. The original execution remains immutable. Any active DLQ rows are resolved as `RETRIED`. A concurrent active retry returns 409. If queue publish fails after commit, the API returns 503 with `recoverable: true` and the created retry execution so clients do not blindly resubmit.
 
 Manual retry can repeat ambiguous external effects and is not exactly-once.
+
+## Workflow Test Runs
+
+`POST /workflows/:workflowId/test-runs` requires editor role or higher for mock mode and admin or owner for real mode. It creates an isolated `TEST` execution:
+
+```json
+{
+  "workflowVersionId": "workflow-version-id",
+  "payload": { "trigger": { "body": { "email": "ada@example.com" } }, "metadata": {} },
+  "externalMode": "mock",
+  "stepMocks": {},
+  "compareWithLastReal": true
+}
+```
+
+Default `mock` mode blocks HTTP, AI, email, and database side effects. `real` mode requires `realModeConfirmed: true`; database steps remain dry-run in this iteration.
+
+When `draftDefinition` is provided, the backend validates the graph and stores an immutable snapshot on `WorkflowTestRun`. Later editor changes do not alter that run. Detail responses include `sideEffectNodes` so clients can display what may run for real before confirmation.
+
+Test runs are listed through `GET /workflows/:workflowId/test-runs` and never appear in the production `GET /executions` list. Detail responses include sanitized timeline, graph state, inspector data, safe connection metadata, and optional comparison with the latest real execution for the same workflow version.
 
 ## Audit Logs
 

@@ -37,6 +37,11 @@ export enum StepExecutionStatus {
   Retrying = "RETRYING"
 }
 
+export enum ExecutionMode {
+  Real = "REAL",
+  Test = "TEST"
+}
+
 export enum StepType {
   WebhookTrigger = "webhook_trigger",
   HttpRequest = "http_request",
@@ -152,8 +157,12 @@ export interface ExecutionJobPayload {
   organizationId: string;
   executionId: string;
   workflowId: string;
-  workflowVersionId: string;
+  workflowVersionId?: string;
   requestId: string;
   correlationId: string;
   enqueuedAt: string;
+  executionMode?: ExecutionMode | "REAL" | "TEST";
+  testRunId?: string;
 }
+
+export * from "./test-runs";

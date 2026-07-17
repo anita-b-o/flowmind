@@ -14,6 +14,17 @@ import { parseRuntimeGraph, validateRuntimeGraph, type RuntimeGraph } from "./gr
 
 export type WorkflowRunResult = { status: "completed" | "skipped" | "lost_lease" } | { status: "waiting"; nextRetryAt: Date };
 
+type RuntimeStepRow = {
+  id?: string | null;
+  key: string;
+  name: string;
+  type: string;
+  position: number;
+  configJson: unknown;
+  retryPolicyJson: unknown;
+  timeoutSeconds: number | null;
+};
+
 @Injectable()
 export class WorkflowRunner {
   constructor(
@@ -57,14 +68,15 @@ export class WorkflowRunner {
       if (!current) {
         throw new Error(`Execution ${payload.executionId} not found`);
       }
-      const graph = parseRuntimeGraph(current.workflowVersion.definitionJson);
+      const definition = runtimeDefinition(current);
+      const graph = parseRuntimeGraph(definition);
       if (graph) {
         return await this.runGraph(payload, execution, current, graph, () => {
           if (heartbeat) clearInterval(heartbeat);
         });
       }
 
-      for (const dbStep of current.workflowVersion.steps) {
+      for (const dbStep of runtimeStepRows(current)) {
         await this.leaseService.assertOwned(current.id);
         if (dbStep.position === 0) {
           continue;
@@ -145,6 +157,7 @@ export class WorkflowRunner {
         current = await this.reload(payload);
       }
 
+      await this.leaseService.assertOwned(execution.id);
       const context = await this.reconstructContextForExecution(execution.id);
       await this.prisma.execution.update({
         where: { id: execution.id },
@@ -153,7 +166,7 @@ export class WorkflowRunner {
       if (heartbeat) clearInterval(heartbeat);
       await this.leaseService.release(execution.id);
       this.logger?.info("worker.execution.completed", { durationMs: execution.startedAt ? Date.now() - execution.startedAt.getTime() : undefined });
-      this.metrics?.executionsCompleted.inc();
+      if ((execution as any).executionMode !== "TEST") this.metrics?.executionsCompleted.inc();
       return { status: "completed" };
     } catch (error) {
       if (heartbeat) clearInterval(heartbeat);
@@ -175,18 +188,23 @@ export class WorkflowRunner {
           errorJson: { message: error instanceof Error ? error.message : String(error) }
         }
       });
-      await this.deadLetterService.create({
-        organizationId: execution.organizationId,
-        executionId: execution.id,
-        workflowId: execution.workflowId,
-        workflowVersionId: execution.workflowVersionId,
-        reason: deadLetterReason(failedStep?.stepType, failedStep?.effectStatus, failedStep?.errorJson),
-        failedStepKey: failedStep?.stepKey,
-        failedStepExecutionId: failedStep?.id,
-        attempts: failedStep?.attemptCount,
-        lastErrorJson: failedStep?.errorJson ?? { message: error instanceof Error ? error.message : String(error) },
-        jobId: `execution-${execution.id}`
-      });
+      if ((execution as any).executionMode !== "TEST") {
+        if (!execution.workflowVersionId) {
+          throw new Error(`Execution ${execution.id} is missing workflowVersionId`);
+        }
+        await this.deadLetterService.create({
+          organizationId: execution.organizationId,
+          executionId: execution.id,
+          workflowId: execution.workflowId,
+          workflowVersionId: execution.workflowVersionId,
+          reason: deadLetterReason(failedStep?.stepType, failedStep?.effectStatus, failedStep?.errorJson),
+          failedStepKey: failedStep?.stepKey,
+          failedStepExecutionId: failedStep?.id,
+          attempts: failedStep?.attemptCount,
+          lastErrorJson: failedStep?.errorJson ?? { message: error instanceof Error ? error.message : String(error) },
+          jobId: `execution-${execution.id}`
+        });
+      }
       this.logger?.error("worker.execution.failed", {
         failedStepKey: failedStep?.stepKey,
         stepExecutionId: failedStep?.id,
@@ -197,7 +215,7 @@ export class WorkflowRunner {
         stepExecutionId: failedStep?.id,
         reason: failedStep?.effectStatus === "ambiguous" ? "ambiguous" : "failed"
       });
-      this.metrics?.executionsFailed.inc({ error_category: (failedStep?.errorJson as any)?.classification ?? "unknown" });
+      if ((execution as any).executionMode !== "TEST") this.metrics?.executionsFailed.inc({ error_category: (failedStep?.errorJson as any)?.classification ?? "unknown" });
       await this.leaseService.release(execution.id);
       throw error;
     }
@@ -207,6 +225,8 @@ export class WorkflowRunner {
     return this.prisma.execution.findFirst({
       where: { id: payload.executionId, organizationId: payload.organizationId },
       include: {
+        workflow: { include: { organization: true } },
+        testRun: { select: { snapshotDefinitionJson: true } },
         workflowVersion: { include: { workflow: { include: { organization: true } }, steps: { orderBy: { position: "asc" } } } },
         steps: { orderBy: { createdAt: "asc" } }
       }
@@ -228,7 +248,7 @@ export class WorkflowRunner {
     graph: RuntimeGraph,
     stopHeartbeat: () => void
   ): Promise<WorkflowRunResult> {
-    const stepRows = currentExecution.workflowVersion.steps.filter((step) => step.position > 0);
+    const stepRows = runtimeStepRows(currentExecution).filter((step) => step.position > 0);
     const stepRowsByKey = new Map(stepRows.map((step) => [step.key, step]));
     validateRuntimeGraph(graph, new Set(stepRowsByKey.keys()));
 
@@ -265,7 +285,7 @@ export class WorkflowRunner {
         await this.stepExecutor.completeWait({ step, stepExecution });
         await this.updateContextCache(current.id);
         current = await this.reload(payload);
-        stepExecution = current.steps.find((entry) => entry.workflowStepId === dbStep.id) as typeof stepExecution;
+          stepExecution = current.steps.find((entry) => entry.stepKey === step.key) as typeof stepExecution;
       }
 
       if (stepExecution.status === StepExecutionStatus.Failed && stepExecution.attemptCount >= stepExecution.maxAttempts) {
@@ -312,7 +332,7 @@ export class WorkflowRunner {
         current = await this.reload(payload);
       }
 
-      const latest = current.steps.find((entry) => entry.workflowStepId === dbStep.id);
+      const latest = current.steps.find((entry) => entry.stepKey === step.key);
       const selected = selectedNextStepKey(graph, step.key, latest?.outputJson);
       if (selected) {
         nextStepKey = selected;
@@ -325,6 +345,7 @@ export class WorkflowRunner {
       throw new Error(`Workflow graph cannot resolve next step after ${step.key}`);
     }
 
+    await this.leaseService.assertOwned(initialExecution.id);
     const context = await this.reconstructContextForExecution(initialExecution.id);
     await this.prisma.execution.update({
       where: { id: initialExecution.id },
@@ -333,7 +354,8 @@ export class WorkflowRunner {
     stopHeartbeat();
     await this.leaseService.release(initialExecution.id);
     this.logger?.info("worker.execution.completed", { durationMs: initialExecution.startedAt ? Date.now() - initialExecution.startedAt.getTime() : undefined });
-    this.metrics?.executionsCompleted.inc();
+    const fullExecution = await this.prisma.execution.findUnique({ where: { id: initialExecution.id }, select: { executionMode: true } });
+    if (fullExecution?.executionMode !== "TEST") this.metrics?.executionsCompleted.inc();
     return { status: "completed" };
   }
 
@@ -342,7 +364,7 @@ export class WorkflowRunner {
     graph: RuntimeGraph,
     controlStepKey: string,
     selectedStepKey: string,
-    stepRowsByKey: Map<string, { id: string; key: string; name: string; type: string; position: number; configJson: unknown; retryPolicyJson: unknown; timeoutSeconds: number | null }>
+    stepRowsByKey: Map<string, RuntimeStepRow>
   ) {
     for (const skipKey of branchSkipKeys(graph, controlStepKey, selectedStepKey)) {
       const dbStep = stepRowsByKey.get(skipKey);
@@ -370,7 +392,12 @@ export class WorkflowRunner {
   private async reconstructContextForExecution(executionId: string) {
     const execution = await this.prisma.execution.findUniqueOrThrow({
       where: { id: executionId },
-      include: { workflowVersion: { include: { workflow: { include: { organization: true } } } }, steps: { orderBy: { createdAt: "asc" } } }
+      include: {
+        workflow: { include: { organization: true } },
+        testRun: { select: { snapshotDefinitionJson: true } },
+        workflowVersion: { include: { workflow: { include: { organization: true } } } },
+        steps: { orderBy: { createdAt: "asc" } }
+      }
     });
     return this.reconstructContext(execution);
   }
@@ -379,15 +406,17 @@ export class WorkflowRunner {
     id: string;
     organizationId: string;
     workflowId: string;
-    workflowVersionId: string;
+    workflowVersionId?: string | null;
     correlationId?: string | null;
     retryOfExecutionId?: string | null;
     startedAt?: Date | null;
     inputJson: unknown;
+    workflow?: { name: string; organization?: { id: string; slug?: string | null } } | null;
+    testRun?: { snapshotDefinitionJson: unknown } | null;
     workflowVersion?: { definitionJson: unknown; workflow?: { name: string; organization?: { id: string; slug?: string | null } } | null } | null;
     steps: Array<{ stepKey: string; status: string; outputJson: unknown }>;
   }) {
-    const context = this.contextReconstructor.reconstruct(execution, execution.steps);
+    const context = this.contextReconstructor.reconstruct(withRuntimeDefinition(execution), execution.steps);
     const [organizationVariables, workflowVariables] = await Promise.all([
       this.loadOrganizationVariables(execution.organizationId),
       this.loadWorkflowVariables(execution.organizationId, execution.workflowId)
@@ -437,18 +466,9 @@ export class WorkflowRunner {
   }
 }
 
-function toStepDefinition(dbStep: {
-  id: string;
-  key: string;
-  name: string;
-  type: string;
-  position: number;
-  configJson: unknown;
-  retryPolicyJson: unknown;
-  timeoutSeconds: number | null;
-}): WorkflowStepDefinition {
+function toStepDefinition(dbStep: RuntimeStepRow): WorkflowStepDefinition {
   return {
-    id: dbStep.id,
+    id: dbStep.id ?? undefined,
     key: dbStep.key,
     name: dbStep.name,
     type: dbStep.type as any,
@@ -457,6 +477,57 @@ function toStepDefinition(dbStep: {
     retryPolicy: dbStep.retryPolicyJson as any,
     timeoutSeconds: dbStep.timeoutSeconds ?? undefined
   };
+}
+
+function runtimeDefinition(execution: {
+  executionMode?: string | null;
+  testRun?: { snapshotDefinitionJson: unknown } | null;
+  workflowVersion?: { definitionJson: unknown } | null;
+}) {
+  return execution.executionMode === "TEST" && execution.testRun?.snapshotDefinitionJson ? execution.testRun.snapshotDefinitionJson : execution.workflowVersion?.definitionJson;
+}
+
+function runtimeStepRows(execution: {
+  executionMode?: string | null;
+  testRun?: { snapshotDefinitionJson: unknown } | null;
+  workflowVersion?: { steps?: RuntimeStepRow[] | null } | null;
+}) {
+  if (execution.executionMode === "TEST" && execution.testRun?.snapshotDefinitionJson) {
+    const definition = execution.testRun.snapshotDefinitionJson as { trigger?: any; steps?: any[] };
+    return [
+      ...(definition.trigger ? [definition.trigger] : []),
+      ...(Array.isArray(definition.steps) ? definition.steps : [])
+    ].map((step, index) => ({
+      id: null,
+      key: String(step.key),
+      name: String(step.name ?? step.key),
+      type: String(step.type),
+      position: Number.isFinite(Number(step.position)) ? Number(step.position) : index,
+      configJson: step.config ?? {},
+      retryPolicyJson: step.retryPolicy ?? null,
+      timeoutSeconds: typeof step.timeoutSeconds === "number" ? step.timeoutSeconds : null
+    }));
+  }
+  return execution.workflowVersion?.steps ?? [];
+}
+
+function withRuntimeDefinition<T extends {
+  executionMode?: string | null;
+  testRun?: { snapshotDefinitionJson: unknown } | null;
+  workflow?: { name: string; organization?: { id: string; slug?: string | null } } | null;
+  workflowVersion?: { definitionJson: unknown; workflow?: { name: string; organization?: { id: string; slug?: string | null } | null } | null } | null;
+}>(execution: T) {
+  if (execution.executionMode === "TEST" && execution.testRun?.snapshotDefinitionJson) {
+    return {
+      ...execution,
+      workflowVersion: {
+        ...(execution.workflowVersion ?? {}),
+        definitionJson: execution.testRun.snapshotDefinitionJson,
+        workflow: execution.workflowVersion?.workflow ?? execution.workflow ?? null
+      }
+    };
+  }
+  return execution;
 }
 
 function shouldSkipNext(step: WorkflowStepDefinition, output: unknown) {

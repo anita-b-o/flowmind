@@ -7,6 +7,9 @@
     "build": "nest build",
     "lint": "tsc -p tsconfig.json --noEmit",
     "test": "jest --passWithNoTests --runInBand",
+    "test:unit": "jest --passWithNoTests --runInBand --testRegex 'src/.*\\.spec\\.ts$'",
+    "test:integration": "jest --passWithNoTests --runInBand --testRegex 'test/.*\\.spec\\.ts$'",
+    "test:e2e": "jest --passWithNoTests --runInBand --testRegex '.*\\.e2e-spec\\.ts$'",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "prisma:generate": "prisma generate --schema prisma/schema.prisma",
     "prisma:migrate": "prisma migrate dev --schema prisma/schema.prisma"

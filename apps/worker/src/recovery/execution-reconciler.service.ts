@@ -127,14 +127,14 @@ export class ExecutionReconcilerService implements OnModuleInit, OnModuleDestroy
     executionId: string,
     organizationId: string,
     workflowId: string,
-    workflowVersionId: string,
+    workflowVersionId: string | null,
     existingCorrelationId?: string | null,
     reasonCode: ReconcilerReason = "execution_requeued"
   ) {
     const correlationId = existingCorrelationId ?? (await this.ensureExecutionCorrelationId(executionId));
     const job = await this.queue.add(
       EXECUTION_RUN_JOB,
-      { executionId, organizationId, workflowId, workflowVersionId, requestId: newTraceId(), correlationId, enqueuedAt: new Date().toISOString() },
+      { executionId, organizationId, workflowId, workflowVersionId: workflowVersionId ?? undefined, requestId: newTraceId(), correlationId, enqueuedAt: new Date().toISOString() },
       { jobId: `execution-${executionId}`, attempts: 1, removeOnComplete: 1000, removeOnFail: false }
     );
     this.metrics?.executionsReconciled.inc({ reason_code: reasonCode });

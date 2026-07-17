@@ -217,7 +217,7 @@ export class WebhooksService {
       organizationId,
       executionId,
       workflowId: execution.workflowId,
-      workflowVersionId: execution.workflowVersionId,
+      workflowVersionId: execution.workflowVersionId ?? undefined,
       requestId: this.requestContext.getRequestId(),
       correlationId: execution.correlationId ?? (await this.ensureExecutionCorrelationId(execution.id)),
       enqueuedAt: new Date().toISOString()

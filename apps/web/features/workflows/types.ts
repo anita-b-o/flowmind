@@ -89,6 +89,96 @@ export interface WorkflowDefinitionUiDto {
   viewport?: { x: number; y: number; zoom: number };
 }
 
+export type TestExternalMode = "mock" | "real";
+export type WorkflowTestRunSource = "version" | "draft";
+export type TestMockBehavior = "manual" | "simulated_success" | "simulated_error" | "simulated_timeout";
+export type DebugNodeStatus = "active" | "completed" | "pending" | "skipped" | "failed" | "retrying" | "waiting" | "dlq";
+export type DebugTimelineStatus = "QUEUED" | "RUNNING" | "COMPLETED" | "RETRYING" | "WAITING" | "SKIPPED" | "FAILED" | "DLQ" | "CANCELLED";
+
+export interface TestStepMock {
+  behavior: TestMockBehavior;
+  output?: unknown;
+  error?: { message: string; code?: string };
+  timeoutMs?: number;
+  http?: { status: number; headers?: Record<string, string>; body?: unknown };
+  ai?: { response: unknown; inputTokens?: number; outputTokens?: number; costUsd?: number };
+}
+
+export interface CreateWorkflowTestRunDto {
+  workflowVersionId?: string;
+  draftDefinition?: WorkflowDefinitionDto;
+  payload: { trigger: Record<string, unknown>; metadata?: Record<string, unknown> };
+  externalMode: TestExternalMode;
+  stepMocks?: Record<string, TestStepMock>;
+  compareWithLastReal?: boolean;
+  realModeConfirmed?: boolean;
+}
+
+export interface DebugTimelineEvent {
+  id: string;
+  status: DebugTimelineStatus;
+  stepKey?: string;
+  timestamp: string;
+  durationMs?: number | null;
+  attempt?: number | null;
+  message: string;
+  nextRetryAt?: string | null;
+}
+
+export interface DebugStepInspector {
+  stepKey: string;
+  stepType: string;
+  status: string;
+  input: unknown;
+  resolvedVariables: Array<{ path: string; original?: unknown; resolved: unknown; origin: string }>;
+  expressions: Array<{ expression: string; result: unknown; type: string }>;
+  resolvedConfig: unknown;
+  output: unknown;
+  durationMs: number | null;
+  retry: { attempt: number; attemptCount: number; maxAttempts: number; nextRetryAt: string | null };
+  error: unknown;
+  connection: { id?: string; name?: string; type?: string; status?: string } | null;
+}
+
+export interface WorkflowTestRunSummary {
+  id: string;
+  workflowId: string;
+  workflowVersionId: string | null;
+  executionId: string;
+  status: string;
+  externalMode: TestExternalMode;
+  source: WorkflowTestRunSource;
+  createdAt: string;
+  updatedAt: string;
+  startedAt: string | null;
+  completedAt: string | null;
+  durationMs: number | null;
+  createdBy?: { id: string; email: string; name?: string | null };
+}
+
+export interface WorkflowTestRunDetail extends WorkflowTestRunSummary {
+  payload: unknown;
+  stepMocks: Record<string, TestStepMock>;
+  sideEffectNodes: Array<{ key: string; name: string; type: string; realModeAllowed: boolean }>;
+  timeline: DebugTimelineEvent[];
+  graph: Record<string, DebugNodeStatus>;
+  inspector: Record<string, DebugStepInspector>;
+  comparison?: WorkflowTestRunComparison | null;
+}
+
+export interface WorkflowTestRunListResponse {
+  items: WorkflowTestRunSummary[];
+  total: number;
+}
+
+export interface WorkflowTestRunComparison {
+  testRunId: string;
+  realExecutionId: string | null;
+  statusChanged: boolean;
+  durationDeltaMs: number | null;
+  steps: Array<{ stepKey: string; testStatus: string | null; realStatus: string | null; durationDeltaMs: number | null; outputShapeChanged: boolean }>;
+}
+
 export interface CreateWorkflowDto {
   name: string;
   description?: string;

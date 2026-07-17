@@ -14,8 +14,9 @@ import type { WorkflowDetail, WorkflowVersion } from "../types";
 import { emptyStep, STEP_TYPES, workflowEditorSchema, type StepFormValue, type WorkflowEditorFormValue } from "../workflow-builder";
 import { StepCard } from "./step-card";
 import { WorkflowVisualEditor } from "./visual/workflow-visual-editor";
+import { WorkflowDebugger } from "../debugger/workflow-debugger";
 
-type EditorMode = "visual" | "form";
+type EditorMode = "visual" | "form" | "debugger";
 
 export function WorkflowEditor({ workflow, onRefresh }: { workflow: WorkflowDetail; onRefresh: () => void }) {
   const router = useRouter();
@@ -204,11 +205,16 @@ export function WorkflowEditor({ workflow, onRefresh }: { workflow: WorkflowDeta
             <button type="button" className={mode === "form" ? "mode-tab active" : "mode-tab"} onClick={() => setMode("form")}>
               Form
             </button>
+            <button type="button" className={mode === "debugger" ? "mode-tab active" : "mode-tab"} onClick={() => setMode("debugger")}>
+              Debugger
+            </button>
           </div>
         </section>
 
         {mode === "visual" ? (
           <WorkflowVisualEditor draft={draft} applyDraft={applyDraft} register={register} errors={errors} setValue={setValue} getValues={getValues} />
+        ) : mode === "debugger" ? (
+          <WorkflowDebugger workflow={workflow} draft={draft} workflowVersionId={selectedVersion?.id ?? latestVersion?.id} />
         ) : (
           <section className="panel stack">
             <div className="workflow-title-row">

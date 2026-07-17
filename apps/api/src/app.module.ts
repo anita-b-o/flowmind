@@ -14,6 +14,7 @@ import { QueuesModule } from "./queues/queues.module";
 import { TriggersModule } from "./triggers/triggers.module";
 import { WebhooksModule } from "./webhooks/webhooks.module";
 import { WorkflowsModule } from "./workflows/workflows.module";
+import { WorkflowTestRunsModule } from "./workflow-test-runs/workflow-test-runs.module";
 import { ConnectionsModule } from "./connections/connections.module";
 import { ExpressionsModule } from "./expressions/expressions.module";
 import { VariablesModule } from "./variables/variables.module";
@@ -40,6 +41,7 @@ const redisUrl = new URL(process.env.REDIS_URL ?? "redis://localhost:6379");
     VariablesModule,
     ExpressionsModule,
     WorkflowsModule,
+    WorkflowTestRunsModule,
     TriggersModule,
     ExecutionsModule,
     DeadLetterExecutionsModule,

@@ -32,6 +32,8 @@ import { WorkerLoggerService } from "./observability/worker-logger.service";
 import { WorkerMetricsService } from "./metrics/worker-metrics.service";
 import { ConnectionResolver } from "./connections/connection-resolver";
 import { ConnectionCryptoService } from "./connections/connection-crypto.service";
+import { TestRuntimePolicy } from "./engine/test-runtime-policy";
+import { DebugArtifactRecorder } from "./engine/debug-artifact-recorder";
 
 const redisUrl = new URL(process.env.REDIS_URL ?? "redis://localhost:6379");
 
@@ -54,6 +56,8 @@ const redisUrl = new URL(process.env.REDIS_URL ?? "redis://localhost:6379");
     ExpressionResolver,
     ErrorClassifier,
     RetryPolicyResolver,
+    TestRuntimePolicy,
+    DebugArtifactRecorder,
     ContextReconstructor,
     WorkerIdentityService,
     ShutdownStateService,

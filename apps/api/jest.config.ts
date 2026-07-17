@@ -5,9 +5,11 @@ const config: Config = {
   rootDir: ".",
   testRegex: ".*\\.spec\\.ts$",
   transform: {
-    "^.+\\.(t|j)s$": "ts-jest"
+    "^.+\\.ts$": "ts-jest"
   },
   collectCoverageFrom: ["src/**/*.(t|j)s"],
+  testPathIgnorePatterns: ["/node_modules/", "/dist/", "/build/"],
+  modulePathIgnorePatterns: ["<rootDir>/dist", "<rootDir>/build"],
   testEnvironment: "node"
 };
 

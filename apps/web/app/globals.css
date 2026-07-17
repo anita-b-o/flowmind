@@ -102,6 +102,12 @@ button {
   width: min(680px, 100%);
 }
 
+.checkbox-row {
+  align-items: center;
+  display: flex;
+  gap: 0.55rem;
+}
+
 .json-viewer {
   max-height: 360px;
   overflow: auto;
@@ -343,6 +349,31 @@ button {
   border-color: #b7791f;
 }
 
+.workflow-flow-node.debug-active {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 4px rgb(37 99 235 / 18%), 0 8px 24px rgb(15 23 42 / 10%);
+}
+
+.workflow-flow-node.debug-completed {
+  border-color: #15803d;
+}
+
+.workflow-flow-node.debug-waiting,
+.workflow-flow-node.debug-retrying {
+  border-color: #b7791f;
+}
+
+.workflow-flow-node.debug-skipped,
+.workflow-flow-node.debug-pending {
+  opacity: 0.72;
+}
+
+.workflow-flow-node.debug-failed,
+.workflow-flow-node.debug-dlq {
+  border-color: #b42318;
+  background: #fff7f7;
+}
+
 .workflow-flow-node-header {
   display: flex;
   justify-content: space-between;
@@ -388,6 +419,89 @@ button {
   overflow: auto;
 }
 
+.workflow-debugger {
+  display: grid;
+  gap: 16px;
+}
+
+.debugger-toolbar {
+  display: grid;
+  grid-template-columns: minmax(320px, 1fr) auto;
+  gap: 16px;
+  align-items: end;
+}
+
+.debugger-toolbar textarea {
+  width: 100%;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.debugger-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: end;
+}
+
+.debugger-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(320px, 0.8fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.debugger-grid.lower {
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 420px);
+}
+
+.debugger-canvas .workflow-canvas {
+  min-height: 620px;
+}
+
+.debugger-inspector,
+.debugger-timeline,
+.debugger-history {
+  max-height: 720px;
+  overflow: auto;
+}
+
+.timeline-row {
+  display: grid;
+  grid-template-columns: 14px 1fr;
+  gap: 10px;
+  align-items: start;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.timeline-dot {
+  width: 10px;
+  height: 10px;
+  margin-top: 4px;
+  border-radius: 999px;
+  background: var(--muted);
+}
+
+.timeline-dot.completed {
+  background: #15803d;
+}
+
+.timeline-dot.running,
+.timeline-dot.queued {
+  background: #2563eb;
+}
+
+.timeline-dot.waiting,
+.timeline-dot.retrying {
+  background: #b7791f;
+}
+
+.timeline-dot.failed,
+.timeline-dot.dlq,
+.timeline-dot.cancelled {
+  background: #b42318;
+}
+
 @media (max-width: 1180px) {
   .workflow-visual-shell {
     grid-template-columns: 1fr;
@@ -411,5 +525,11 @@ button {
   .workflow-title-row,
   .step-header {
     display: grid;
+  }
+
+  .debugger-toolbar,
+  .debugger-grid,
+  .debugger-grid.lower {
+    grid-template-columns: 1fr;
   }
 }

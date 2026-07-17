@@ -11,11 +11,11 @@ The platform starts as a pragmatic modular monorepo:
 
 PostgreSQL is the source of truth. Redis powers BullMQ queues and operational locks.
 
-The first workflow engine supports ordered linear workflows. More advanced DAG semantics are deferred until the persisted workflow definition stabilizes.
+The workflow engine supports ordered workflows and persisted DAG routing through Graph v2 for If/Switch branches, skipped paths, Delay, and Wait Until.
 
 ## Workflow Builder
 
-Workflow editing is currently form-based rather than node-based. The frontend builds local drafts with React Hook Form, renders each step as an expandable card, validates type-specific config immediately, and serializes the result to the existing `POST /workflows/:workflowId/versions` DTO. Drafts are local browser state only; the backend persists immutable workflow versions.
+Workflow editing supports a visual React Flow builder plus a form fallback. The frontend builds local drafts, validates type-specific config immediately, and serializes the result to the existing `POST /workflows/:workflowId/versions` DTO. Drafts are local browser state until saved, except debugger test runs persist an immutable snapshot owned by `WorkflowTestRun`.
 
 The workflow detail API exposes all versions and ordered steps so the UI can show history, open older versions read-only, and keep only the latest version editable. Activating a version remains an explicit API call and records the existing workflow activation audit event.
 
@@ -25,7 +25,7 @@ Workflow step configs can use the shared expression engine to reference webhook 
 
 ## Step Recovery Engine
 
-PostgreSQL is the source of truth for workflow recovery. BullMQ delivers execution jobs at least once, but step retry is controlled by `StepExecution`, not by job attempts. Each logical workflow step has one row keyed by `(execution_id, workflow_step_id)`, with `attemptCount`, `maxAttempts`, `nextRetryAt`, `effectKey`, `effectStatus`, and `workerId`.
+PostgreSQL is the source of truth for workflow recovery. BullMQ delivers execution jobs at least once, but step retry is controlled by `StepExecution`, not by job attempts. Each logical workflow step has one row keyed by `(execution_id, step_key)`, with `attemptCount`, `maxAttempts`, `nextRetryAt`, `effectKey`, `effectStatus`, and `workerId`. Production rows also reference `WorkflowStep`; draft test-run snapshot rows may not.
 
 The runner reloads `Execution`, `WorkflowVersion`, `WorkflowStep`, and `StepExecution` before progressing. Completed and skipped steps are reused from persisted output; `contextJson` is only a cache rebuilt from step rows.
 
@@ -42,6 +42,12 @@ Effect idempotency is handled per step type: database records use a dedupe key, 
 Executions that fail definitively are preserved as `DeadLetterExecution` rows. DLQ rows remain available after resolution so incidents can be reviewed later. Public APIs expose only sanitized error category/code/message and bounded metadata; worker IDs, locks, queue job IDs, headers, secrets, and raw provider objects stay internal.
 
 Manual retry creates a new `Execution` linked through `retryOfExecutionId`. It preserves the original workflow version, input, and correlation ID, resolves active DLQ rows as `RETRIED`, and records audit events. The original execution is immutable. Ambiguous external effects may repeat, so manual retry is an operational recovery tool rather than an exactly-once guarantee.
+
+## Workflow Debugger
+
+Builder test runs create `Execution` rows with `executionMode=TEST` and companion `WorkflowTestRun` rows for payloads, mocks, immutable snapshot definition, actor, and debugger history. They reuse the same runner, Graph v2 planner, leases, retries, waits, and context reconstruction as production executions.
+
+The worker intercepts external-effect steps in test mock mode before HTTP, AI, email, or database handlers perform real work. Confirmed real-mode tests require admin/owner role; HTTP, AI, and email may run, while database steps remain dry-run. Test failures do not create operational DLQ incidents. Production execution APIs filter to `executionMode=REAL`, while debugger APIs read test history through workflow-scoped endpoints.
 
 ## Audit Log
 

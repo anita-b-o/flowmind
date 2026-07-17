@@ -57,6 +57,16 @@ enum StepExecutionStatus {
   RETRYING
 }
 
+enum ExecutionMode {
+  REAL
+  TEST
+}
+
+enum TestExternalMode {
+  mock
+  real
+}
+
 enum IdempotencyStatus {
   STARTED
   PROCESSING
@@ -97,6 +107,7 @@ model User {
   versions                  WorkflowVersion[]     @relation("WorkflowVersionCreatedBy")
   sessions                  RefreshTokenSession[]
   requestedExecutionRetries Execution[]           @relation("ExecutionRetryRequestedBy")
+  workflowTestRuns          WorkflowTestRun[]      @relation("WorkflowTestRunCreatedBy")
 
   @@map("users")
 }
@@ -143,6 +154,7 @@ model Organization {
   connections          Connection[]
   secrets              Secret[]
   webhookEvents        WebhookEvent[]
+  workflowTestRuns     WorkflowTestRun[]
   auditLogs            AuditLog[]
   idempotencyKeys      IdempotencyKey[]
   internalRecords      InternalRecord[]
@@ -185,6 +197,7 @@ model Workflow {
   activeVersion        WorkflowVersion?      @relation("ActiveWorkflowVersion", fields: [activeVersionId], references: [id])
   triggers             Trigger[]
   executions           Execution[]
+  testRuns             WorkflowTestRun[]
   internalRecords      InternalRecord[]
   deadLetterExecutions DeadLetterExecution[]
   variables            WorkflowVariable[]
@@ -210,6 +223,7 @@ model WorkflowVersion {
   createdBy            User                  @relation("WorkflowVersionCreatedBy", fields: [createdByUserId], references: [id])
   steps                WorkflowStep[]
   executions           Execution[]
+  testRuns             WorkflowTestRun[]
   internalRecords      InternalRecord[]
   deadLetterExecutions DeadLetterExecution[]
 
@@ -264,7 +278,7 @@ model Execution {
   id                     String          @id @default(uuid())
   organizationId         String          @map("organization_id")
   workflowId             String          @map("workflow_id")
-  workflowVersionId      String          @map("workflow_version_id")
+  workflowVersionId      String?         @map("workflow_version_id")
   webhookEventId         String?         @map("webhook_event_id")
   correlationId          String?         @map("correlation_id")
   retryOfExecutionId     String?         @map("retry_of_execution_id")
@@ -272,6 +286,7 @@ model Execution {
   retryRequestedAt       DateTime?       @map("retry_requested_at")
   retryReason            String?         @map("retry_reason")
   status                 ExecutionStatus @default(PENDING)
+  executionMode          ExecutionMode   @default(REAL) @map("execution_mode")
   inputJson              Json            @map("input_json")
   contextJson            Json            @map("context_json")
   errorJson              Json?           @map("error_json")
@@ -286,7 +301,7 @@ model Execution {
 
   organization     Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   workflow         Workflow              @relation(fields: [workflowId], references: [id], onDelete: Cascade)
-  workflowVersion  WorkflowVersion       @relation(fields: [workflowVersionId], references: [id])
+  workflowVersion  WorkflowVersion?      @relation(fields: [workflowVersionId], references: [id], onDelete: SetNull)
   webhookEvent     WebhookEvent?         @relation(fields: [webhookEventId], references: [id])
   retryOfExecution Execution?            @relation("ExecutionRetries", fields: [retryOfExecutionId], references: [id])
   retryExecutions  Execution[]           @relation("ExecutionRetries")
@@ -295,8 +310,10 @@ model Execution {
   internalRecords  InternalRecord[]
   deadLetters      DeadLetterExecution[] @relation("DeadLetterOriginalExecution")
   retryDeadLetters DeadLetterExecution[] @relation("DeadLetterRetryExecution")
+  testRun          WorkflowTestRun?
 
   @@index([organizationId, workflowId, status])
+  @@index([organizationId, workflowId, executionMode, createdAt])
   @@index([organizationId, correlationId])
   @@index([status, lockedUntil])
   @@index([retryOfExecutionId, status])
@@ -307,7 +324,7 @@ model StepExecution {
   id             String              @id @default(uuid())
   organizationId String              @map("organization_id")
   executionId    String              @map("execution_id")
-  workflowStepId String              @map("workflow_step_id")
+  workflowStepId String?             @map("workflow_step_id")
   stepKey        String              @map("step_key")
   stepType       String              @map("step_type")
   status         StepExecutionStatus @default(PENDING)
@@ -321,6 +338,7 @@ model StepExecution {
   inputJson      Json                @map("input_json")
   outputJson     Json?               @map("output_json")
   errorJson      Json?               @map("error_json")
+  debugJson      Json?               @map("debug_json")
   startedAt      DateTime?           @map("started_at")
   completedAt    DateTime?           @map("completed_at")
   durationMs     Int?                @map("duration_ms")
@@ -329,13 +347,45 @@ model StepExecution {
 
   organization    Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   execution       Execution             @relation(fields: [executionId], references: [id], onDelete: Cascade)
-  workflowStep    WorkflowStep          @relation(fields: [workflowStepId], references: [id])
+  workflowStep    WorkflowStep?         @relation(fields: [workflowStepId], references: [id], onDelete: SetNull)
   internalRecords InternalRecord[]
   deadLetters     DeadLetterExecution[] @relation("DeadLetterFailedStep")
 
-  @@unique([executionId, workflowStepId])
+  @@unique([executionId, stepKey])
   @@index([organizationId, executionId])
   @@map("step_executions")
+}
+
+model WorkflowTestRun {
+  id                String           @id @default(uuid())
+  organizationId    String           @map("organization_id")
+  workflowId        String           @map("workflow_id")
+  workflowVersionId String?          @map("workflow_version_id")
+  executionId       String           @unique @map("execution_id")
+  createdByUserId   String           @map("created_by_user_id")
+  externalMode      TestExternalMode @default(mock) @map("external_mode")
+  displayName       String?          @map("display_name")
+  payloadJson       Json             @map("payload_json")
+  stepMocksJson     Json             @map("step_mocks_json")
+  snapshotDefinitionJson Json         @map("snapshot_definition_json")
+  draftDefinitionJson Json?          @map("draft_definition_json")
+  source             String           @default("version")
+  realModeConfirmedAt DateTime?       @map("real_mode_confirmed_at")
+  realModeConfirmedByUserId String?   @map("real_mode_confirmed_by_user_id")
+  compareWithLastReal Boolean        @default(false) @map("compare_with_last_real")
+  createdAt         DateTime         @default(now()) @map("created_at")
+  updatedAt         DateTime         @updatedAt @map("updated_at")
+
+  organization    Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  workflow        Workflow        @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  workflowVersion WorkflowVersion? @relation(fields: [workflowVersionId], references: [id], onDelete: SetNull)
+  execution       Execution       @relation(fields: [executionId], references: [id], onDelete: Cascade)
+  createdBy       User            @relation("WorkflowTestRunCreatedBy", fields: [createdByUserId], references: [id])
+
+  @@index([organizationId, workflowId, createdAt])
+  @@index([organizationId, executionId])
+  @@index([organizationId, workflowVersionId])
+  @@map("workflow_test_runs")
 }
 
 model WebhookEvent {

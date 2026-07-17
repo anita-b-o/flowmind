@@ -1,5 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import { StepExecutionStatus, WorkflowStepDefinition } from "@automation/shared-types";
+import { sanitizeForLog } from "@automation/observability";
 import { Prisma } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import { StepRegistry } from "./step-registry";
@@ -9,6 +10,8 @@ import { JobContextService } from "../observability/job-context.service";
 import { WorkerLoggerService } from "../observability/worker-logger.service";
 import { WorkerMetricsService, workerErrorCategory } from "../metrics/worker-metrics.service";
 import { ExpressionResolver } from "./expression-resolver";
+import { TestRuntimePolicy } from "./test-runtime-policy";
+import { DebugArtifactRecorder } from "./debug-artifact-recorder";
 
 export type StepExecutionRecord = {
   id: string;
@@ -29,6 +32,8 @@ export class StepExecutor {
     private readonly errorClassifier: ErrorClassifier,
     private readonly retryPolicyResolver: RetryPolicyResolver,
     private readonly expressionResolver?: ExpressionResolver,
+    private readonly testRuntime?: TestRuntimePolicy,
+    private readonly debugRecorder?: DebugArtifactRecorder,
     private readonly jobContext?: JobContextService,
     private readonly logger?: WorkerLoggerService,
     private readonly metrics?: WorkerMetricsService
@@ -37,18 +42,18 @@ export class StepExecutor {
   async ensure(input: {
     organizationId: string;
     executionId: string;
-    workflowStepId: string;
+    workflowStepId?: string | null;
     step: WorkflowStepDefinition;
   }) {
     const policy = this.retryPolicyResolver.resolve(input.step);
     const effectKey = `flowmind:${input.executionId}:${input.step.key}`;
     return this.prisma.stepExecution.upsert({
-      where: { executionId_workflowStepId: { executionId: input.executionId, workflowStepId: input.workflowStepId } },
-      update: { maxAttempts: policy.maxAttempts, effectKey },
+      where: { executionId_stepKey: { executionId: input.executionId, stepKey: input.step.key } },
+      update: { maxAttempts: policy.maxAttempts, effectKey, workflowStepId: input.workflowStepId ?? undefined },
       create: {
         organizationId: input.organizationId,
         executionId: input.executionId,
-        workflowStepId: input.workflowStepId,
+        workflowStepId: input.workflowStepId ?? undefined,
         stepKey: input.step.key,
         stepType: input.step.type,
         status: StepExecutionStatus.Pending,
@@ -64,7 +69,7 @@ export class StepExecutor {
   async execute(input: {
     organizationId: string;
     executionId: string;
-    workflowStepId: string;
+    workflowStepId?: string | null;
     step: WorkflowStepDefinition;
     context: any;
     stepExecution: StepExecutionRecord;
@@ -116,10 +121,29 @@ export class StepExecutor {
       const resolvedStep = { ...input.step, config: resolvedConfig as Record<string, unknown> };
       await this.prisma.stepExecution.update({
         where: { id: input.stepExecution.id },
-        data: { inputJson: toJson({ config: resolvedConfig }) }
+        data: { inputJson: toJson(sanitizePersisted({ config: resolvedConfig })) }
       });
+      await this.debugRecorder?.record(input.stepExecution.id, {
+        originalConfig: input.step.config,
+        resolvedConfig,
+        expressions: collectExpressions(input.step.config, resolvedConfig),
+        resolvedVariables: collectExpressions(input.step.config, resolvedConfig).map((entry) => ({
+          path: entry.expression.replace(/^\{\{\s*|\s*\}\}$/g, ""),
+          original: entry.expression,
+          resolved: entry.result,
+          origin: entry.expression.split(".")[0]?.replace(/^\{\{\s*/, "") ?? "unknown"
+        })),
+        connection: input.context.connection ?? {}
+      });
+      const decision = await this.testRuntime?.decide({ executionId: input.executionId, step: input.step, resolvedConfig: resolvedStep.config });
+      if (decision?.kind === "error") {
+        throw decision.error;
+      }
       const handler = this.registry.get(input.step.type);
-      const result = await withTimeout(handler.execute(resolvedStep, input.context), policy.timeoutSeconds * 1000);
+      const result =
+        decision?.kind === "mock"
+          ? decision.result
+          : await withTimeout(handler.execute(resolvedStep, input.context), policy.timeoutSeconds * 1000);
       const completedAt = new Date();
       const control = result.control;
       const waitUntil = control?.waitUntil ? new Date(control.waitUntil) : null;
@@ -128,7 +152,7 @@ export class StepExecutor {
           where: { id: input.stepExecution.id },
           data: {
             status: StepExecutionStatus.Retrying,
-            outputJson: result.output as object,
+            outputJson: toJson(sanitizePersisted(result.output)),
             errorJson: Prisma.JsonNull,
             completedAt,
             durationMs: completedAt.getTime() - startedAt.getTime(),
@@ -149,7 +173,7 @@ export class StepExecutor {
         where: { id: input.stepExecution.id },
         data: {
           status: result.status,
-          outputJson: result.output as object,
+          outputJson: toJson(sanitizePersisted(result.output)),
           errorJson: Prisma.JsonNull,
           completedAt,
           durationMs: completedAt.getTime() - startedAt.getTime(),
@@ -173,7 +197,7 @@ export class StepExecutor {
         where: { id: input.stepExecution.id },
         data: {
           status: canRetry ? StepExecutionStatus.Retrying : StepExecutionStatus.Failed,
-          errorJson: serializeError(error, classification),
+          errorJson: toJson(sanitizePersisted(serializeError(error, classification))),
           completedAt,
           durationMs: completedAt.getTime() - startedAt.getTime(),
           nextRetryAt,
@@ -205,7 +229,7 @@ export class StepExecutor {
   async skip(input: {
     organizationId: string;
     executionId: string;
-    workflowStepId: string;
+    workflowStepId?: string | null;
     step: WorkflowStepDefinition;
     stepExecution: StepExecutionRecord;
     reason: string;
@@ -216,8 +240,8 @@ export class StepExecutor {
       where: { id: input.stepExecution.id },
       data: {
         status: StepExecutionStatus.Skipped,
-        inputJson: { reason: input.reason },
-        outputJson: output,
+        inputJson: toJson({ reason: input.reason }),
+        outputJson: toJson(sanitizePersisted(output)),
         startedAt: now,
         completedAt: now,
         durationMs: 0,
@@ -237,7 +261,7 @@ export class StepExecutor {
       where: { id: input.stepExecution.id },
       data: {
         status: StepExecutionStatus.Completed,
-        outputJson: toJson(output),
+        outputJson: toJson(sanitizePersisted(output)),
         errorJson: Prisma.JsonNull,
         completedAt: now,
         nextRetryAt: null,
@@ -259,11 +283,20 @@ export class StepExecutor {
     if (!connectionId) return {};
     const connection = await this.prisma.connection.findFirst({
       where: { id: connectionId, organizationId, deletedAt: null },
-      select: { id: true, name: true, type: true }
+      select: { id: true, name: true, type: true, status: true }
     });
     if (!connection) return {};
-    return { id: connection.id, name: connection.name, type: connection.type };
+    return { id: connection.id, name: connection.name, type: connection.type, status: connection.status };
   }
+}
+
+function collectExpressions(original: unknown, resolved: unknown, path = ""): Array<{ expression: string; result: unknown; type: string }> {
+  if (typeof original === "string" && original.includes("{{")) {
+    return [{ expression: original, result: resolved, type: Array.isArray(resolved) ? "array" : resolved === null ? "null" : typeof resolved }];
+  }
+  if (!original || typeof original !== "object" || Array.isArray(original)) return [];
+  const resolvedRecord = resolved && typeof resolved === "object" && !Array.isArray(resolved) ? (resolved as Record<string, unknown>) : {};
+  return Object.entries(original as Record<string, unknown>).flatMap(([key, value]) => collectExpressions(value, resolvedRecord[key], path ? `${path}.${key}` : key));
 }
 
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
@@ -287,6 +320,32 @@ function serializeError(error: unknown, classification: string) {
     message: error instanceof Error ? error.message : String(error),
     classification
   };
+}
+
+const SENSITIVE_WORDS = /(^|[^a-z0-9])(authorization|cookie|token|secret|password|api[-_ ]?key)([^a-z0-9]|$)/i;
+
+function sanitizePersisted(value: unknown): unknown {
+  return sanitizeForLog(redact(value), { maxBytes: 16_384 });
+}
+
+function redact(value: unknown, seen = new WeakSet<object>()): unknown {
+  if (typeof value === "string") return SENSITIVE_WORDS.test(value) ? "[redacted]" : value;
+  if (!value || typeof value !== "object") return value;
+  if (seen.has(value)) return "[Circular]";
+  seen.add(value);
+  if (Array.isArray(value)) return value.map((entry) => redact(entry, seen));
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>).map(([key, entry]) => [
+      key,
+      isSensitiveKey(key) ? "[redacted]" : redact(entry, seen)
+    ])
+  );
+}
+
+function isSensitiveKey(key: string) {
+  return /^(authorization|cookie|setcookie|password|token|secret|apikey|xapikey|accesstoken|refreshtoken|encryptedvalue|ciphertext|authtag|iv|smtppassword)$/i.test(
+    key.replace(/[-_]/g, "")
+  );
 }
 
 function workerId() {
