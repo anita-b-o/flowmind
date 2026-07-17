@@ -35,7 +35,8 @@ pnpm test:integration
 - Pydantic schema validation.
 - Invalid output behavior.
 - Provider fake tests.
-- Timeout/fallback tests once real providers are added.
+- OpenAI provider tests with mocked HTTP clients only; no test may call the real OpenAI API.
+- Timeout, retry, rate-limit, authentication, quota, invalid JSON, structured-output validation, configuration, and sanitization tests.
 
 ## Expressions
 

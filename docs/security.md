@@ -18,7 +18,7 @@ Current controls:
 - Webhook tokens are shown only on create/rotate and stored as SHA-256 hashes with a server-side pepper.
 - Webhook intake enforces JSON content type, payload size limits and Redis-backed rate limits.
 - HTTP Request steps use the safe HTTP client: protocol allowlist, URL credential rejection, DNS resolution, private/reserved/link-local/metadata IP blocking, manual redirect validation, timeout and response-size limits.
-- AI service endpoints require `x-service-api-key`.
+- AI service endpoints require `x-service-api-key`. LLM provider credentials such as `OPENAI_API_KEY` are used only inside `apps/ai-service` and are never exposed to the worker, frontend, logs, metrics, or public API responses.
 - Metrics endpoints are disabled by default and, when enabled, require `Authorization: Bearer <METRICS_API_KEY>` or the operational `x-metrics-api-key` header. Metrics keys are never accepted in query strings.
 - Sensitive headers are stripped from persisted webhook metadata.
 - Dead-letter and audit-log APIs are tenant-scoped by `x-organization-id`. DLQ viewing requires viewer or higher; manual retry requires editor or higher; AuditLog requires owner or admin.
@@ -45,6 +45,8 @@ Trace IDs are diagnostic metadata only. They are not authentication or authoriza
 Structured logs redact sensitive fields case-insensitively, including `authorization`, `cookie`, `set-cookie`, `password`, `token`, `accessToken`, `refreshToken`, `apiKey`, `x-api-key`, `secret`, `secretValue`, `connectionSecret`, `clientSecret`, `smtpPassword`, `privateKey`, `encryptedValue`, `ciphertext`, `authTag`, `iv`, and `encryptionKey`. URL usernames/passwords and sensitive query parameters such as `token`, `key`, `secret`, and `signature` are redacted before logging.
 
 Logs must not include full webhook bodies, prompts, provider inputs, provider outputs, cookies, bearer tokens, refresh tokens, webhook tokens, internal API keys, or secrets. Persisted execution errors remain operational data, but log events should include only sanitized summaries and categories.
+
+OpenAI provider errors are mapped to sanitized public categories such as `authentication`, `rate_limit`, `timeout`, `validation`, `external_4xx`, and `external_5xx`. Raw OpenAI error bodies, request payloads, prompts, and headers must not be returned to clients.
 
 Metrics are separate from logs and AuditLog. They use bounded labels only and must not contain `requestId`, `correlationId`, organization/user/workflow/execution IDs, emails, hostnames, IPs, full URLs, cookies, tokens, or free-form error messages. See `docs/observability.md`.
 

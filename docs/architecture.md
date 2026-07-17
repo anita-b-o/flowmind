@@ -13,6 +13,14 @@ PostgreSQL is the source of truth. Redis powers BullMQ queues and operational lo
 
 The workflow engine supports ordered workflows and persisted DAG routing through Graph v2 for If/Switch branches, skipped paths, Delay, and Wait Until.
 
+## AI Service
+
+The AI service exposes stable internal HTTP endpoints for the worker: `/classify`, `/extract`, `/summarize`, and `/evaluate`. Provider selection is configured inside the service with `LLM_PROVIDER`; the worker and frontend do not select providers directly.
+
+`LLM_PROVIDER=fake` remains the local default. `LLM_PROVIDER=openai` uses OpenAI Responses API with strict JSON outputs. Each provider must implement the existing `complete_json(task, payload)` boundary and return validated JSON matching the existing FastAPI response contracts. Extraction additionally validates model output against the requested JSON Schema when one is supplied.
+
+OpenAI configuration is environment-driven: `OPENAI_API_KEY`, `OPENAI_MODEL`, `OPENAI_TIMEOUT_MS`, `OPENAI_MAX_RETRIES`, `OPENAI_TEMPERATURE`, and `OPENAI_MAX_OUTPUT_TOKENS`. Models are never hardcoded.
+
 ## Workflow Builder
 
 Workflow editing supports a visual React Flow builder plus a form fallback. The frontend builds local drafts, validates type-specific config immediately, and serializes the result to the existing `POST /workflows/:workflowId/versions` DTO. Drafts are local browser state until saved, except debugger test runs persist an immutable snapshot owned by `WorkflowTestRun`.

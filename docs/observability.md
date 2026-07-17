@@ -95,7 +95,9 @@ AI:
 - `flowmind_ai_output_tokens_total`
 - `flowmind_ai_cost_usd_total`
 
-The fake AI provider reports zero tokens and zero cost because it does not receive provider billing data. Values are not estimated.
+The fake AI provider reports zero tokens and zero cost because it does not receive provider billing data. OpenAI reports input and output tokens when the API returns usage. Cost remains zero until a pricing catalog is introduced; values are not estimated.
+
+AI service logs may include operation, provider, model, duration, retry count, token counts, and error category. They must not include prompts, provider request/response bodies, API keys, Authorization headers, or raw provider errors.
 
 ## Labels
 

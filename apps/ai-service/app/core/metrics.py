@@ -107,6 +107,9 @@ async def observe_ai_operation(
 
 
 def classify_error(error: Exception) -> str:
+    category = getattr(error, "error_category", None)
+    if isinstance(category, str) and category in ERROR_CATEGORIES:
+        return category
     status = getattr(error, "status_code", None)
     if status in {400, 422}:
         return "validation"

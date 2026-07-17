@@ -7,7 +7,7 @@ Mini Zapier + GPT para workflows empresariales multi-tenant.
 - Web: Next.js, React, TypeScript, TanStack Query, React Hook Form, Zod.
 - API: NestJS, Prisma, PostgreSQL, JWT, Swagger.
 - Worker: NestJS, BullMQ, Redis.
-- IA: FastAPI, Pydantic, abstraccion de provider LLM.
+- IA: FastAPI, Pydantic, abstraccion de provider LLM, OpenAI opcional.
 - Infra local: Docker Compose, PostgreSQL, Redis, Mailpit.
 
 ## Inicio rapido
@@ -27,6 +27,28 @@ Servicios locales:
 - Web: `http://localhost:3000`
 - AI Service: `http://localhost:8000`
 - Mailpit: `http://localhost:8025`
+
+## AI providers
+
+The AI service defaults to the deterministic fake provider:
+
+```env
+LLM_PROVIDER=fake
+```
+
+To use OpenAI for `classify`, `extract`, `summarize`, and `evaluate`, configure the AI service:
+
+```env
+LLM_PROVIDER=openai
+OPENAI_API_KEY=sk-...
+OPENAI_MODEL=your-openai-model
+OPENAI_TIMEOUT_MS=30000
+OPENAI_MAX_RETRIES=2
+OPENAI_TEMPERATURE=0.2
+OPENAI_MAX_OUTPUT_TOKENS=1000
+```
+
+The worker still calls only the AI service via `AI_SERVICE_URL` and `AI_SERVICE_API_KEY`; provider selection stays inside `apps/ai-service`. OpenAI responses use strict JSON outputs and are validated before they are returned to workflow steps. Prompts, provider payloads, API keys, and Authorization headers must not be logged.
 
 ## Metrics
 
