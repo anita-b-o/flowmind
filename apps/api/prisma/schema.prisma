@@ -263,20 +263,27 @@ model Trigger {
   workflowId      String    @map("workflow_id")
   type            String
   httpMethod      String    @default("POST") @map("http_method")
-  tokenHash       String    @map("token_hash")
+  tokenHash       String?   @map("token_hash")
   tokenPreview    String?   @map("token_preview")
   configJson      Json      @map("config_json")
   enabled         Boolean   @default(true)
+  paused          Boolean   @default(false)
+  cron            String?
+  timezone        String?
+  executionPolicy String    @default("skip_if_running") @map("execution_policy")
   createdAt       DateTime  @default(now()) @map("created_at")
   updatedAt       DateTime  @updatedAt @map("updated_at")
   rotatedAt       DateTime? @map("rotated_at")
   deletedAt       DateTime? @map("deleted_at")
   lastReceivedAt  DateTime? @map("last_received_at")
   lastExecutionId String?   @map("last_execution_id")
+  lastRunAt       DateTime? @map("last_run_at")
+  nextRunAt       DateTime? @map("next_run_at")
 
   organization        Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   workflow            Workflow             @relation(fields: [workflowId], references: [id], onDelete: Cascade)
   lastExecution       Execution?           @relation("TriggerLastExecution", fields: [lastExecutionId], references: [id], onDelete: SetNull)
+  scheduledExecutions Execution[]           @relation("ScheduledTriggerExecutions")
   webhookEvents       WebhookEvent[]
   webhookReplayNonces WebhookReplayNonce[]
 
@@ -284,6 +291,7 @@ model Trigger {
   @@index([tokenHash])
   @@index([organizationId, workflowId])
   @@index([workflowId, enabled])
+  @@index([type, enabled, paused, deletedAt, nextRunAt])
   @@map("triggers")
 }
 
@@ -293,6 +301,8 @@ model Execution {
   workflowId             String          @map("workflow_id")
   workflowVersionId      String?         @map("workflow_version_id")
   webhookEventId         String?         @map("webhook_event_id")
+  scheduledTriggerId     String?         @map("scheduled_trigger_id")
+  scheduledFor           DateTime?       @map("scheduled_for")
   correlationId          String?         @map("correlation_id")
   retryOfExecutionId     String?         @map("retry_of_execution_id")
   retryRequestedByUserId String?         @map("retry_requested_by_user_id")
@@ -322,6 +332,7 @@ model Execution {
   workflow         Workflow              @relation(fields: [workflowId], references: [id], onDelete: Cascade)
   workflowVersion  WorkflowVersion?      @relation(fields: [workflowVersionId], references: [id], onDelete: SetNull)
   webhookEvent     WebhookEvent?         @relation(fields: [webhookEventId], references: [id])
+  scheduledTrigger Trigger?              @relation("ScheduledTriggerExecutions", fields: [scheduledTriggerId], references: [id], onDelete: SetNull)
   retryOfExecution Execution?            @relation("ExecutionRetries", fields: [retryOfExecutionId], references: [id])
   retryExecutions  Execution[]           @relation("ExecutionRetries")
   retryRequestedBy User?                 @relation("ExecutionRetryRequestedBy", fields: [retryRequestedByUserId], references: [id])
@@ -338,6 +349,7 @@ model Execution {
   @@index([organizationId, workflowId, executionMode, createdAt])
   @@index([organizationId, correlationId])
   @@index([organizationId, manualExecutionKey])
+  @@index([organizationId, scheduledTriggerId, scheduledFor])
   @@index([status, lockedUntil])
   @@index([retryOfExecutionId, status])
   @@map("executions")

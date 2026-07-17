@@ -1,7 +1,7 @@
 import { timingSafeEqual } from "node:crypto";
 import { createServer, type Server, type ServerResponse } from "node:http";
 import { Injectable, OnModuleDestroy, OnModuleInit } from "@nestjs/common";
-import { Counter, Histogram, Registry, collectDefaultMetrics } from "prom-client";
+import { Counter, Gauge, Histogram, Registry, collectDefaultMetrics } from "prom-client";
 import { AuthOutcome, ErrorCategory, WebhookOutcome, WebhookReasonCode } from "./metrics-catalog";
 
 const HTTP_BUCKETS = [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10];
@@ -100,6 +100,45 @@ export class ApiMetricsService implements OnModuleInit, OnModuleDestroy {
     labelNames: ["operation", "error_category"],
     registers: [this.registry]
   });
+  readonly scheduledTriggers = new Gauge({
+    name: "flowmind_scheduled_triggers",
+    help: "Scheduled triggers by state.",
+    labelNames: ["state"],
+    registers: [this.registry]
+  });
+  readonly scheduledExecutionsCreated = new Counter({
+    name: "flowmind_scheduled_executions_created_total",
+    help: "Executions created by scheduled triggers.",
+    registers: [this.registry]
+  });
+  readonly scheduledLatency = new Histogram({
+    name: "flowmind_scheduled_trigger_latency_seconds",
+    help: "Seconds between scheduled time and execution creation.",
+    buckets: HTTP_BUCKETS,
+    registers: [this.registry]
+  });
+  readonly scheduledSchedulerLatency = new Histogram({
+    name: "flowmind_scheduled_scheduler_latency_seconds",
+    help: "Seconds spent processing scheduled trigger jobs.",
+    buckets: HTTP_BUCKETS,
+    registers: [this.registry]
+  });
+  readonly scheduledMissed = new Counter({
+    name: "flowmind_scheduled_missed_total",
+    help: "Scheduled runs skipped by scheduler reason.",
+    labelNames: ["reason_code"],
+    registers: [this.registry]
+  });
+  readonly scheduledDuplicatePrevented = new Counter({
+    name: "flowmind_scheduled_duplicate_prevented_total",
+    help: "Duplicate scheduled executions prevented by persistence.",
+    registers: [this.registry]
+  });
+  readonly scheduledRecovered = new Counter({
+    name: "flowmind_scheduled_recovered_total",
+    help: "Scheduled triggers recovered on API startup.",
+    registers: [this.registry]
+  });
   readonly readinessFailures = new Counter({
     name: "flowmind_readiness_failures_total",
     help: "API readiness failures.",
@@ -182,8 +221,36 @@ export class ApiMetricsService implements OnModuleInit, OnModuleDestroy {
     this.executionCancels.inc({ outcome });
   }
 
-  recordEnqueueFailure(operation: "webhook" | "manual_retry", errorCategory: ErrorCategory) {
+  recordEnqueueFailure(operation: "webhook" | "manual_retry" | "scheduled", errorCategory: ErrorCategory) {
     this.enqueueFailures.inc({ operation, error_category: errorCategory });
+  }
+
+  recordScheduledTriggers(state: "enabled" | "disabled" | "paused", value: number) {
+    this.scheduledTriggers.set({ state }, value);
+  }
+
+  recordScheduledExecutionCreated() {
+    this.scheduledExecutionsCreated.inc();
+  }
+
+  recordScheduledLatency(seconds: number) {
+    this.scheduledLatency.observe(Math.max(0, seconds));
+  }
+
+  recordScheduledSchedulerLatency(seconds: number) {
+    this.scheduledSchedulerLatency.observe(Math.max(0, seconds));
+  }
+
+  recordScheduledMissed(reasonCode: "inactive_workflow" | "active_execution") {
+    this.scheduledMissed.inc({ reason_code: reasonCode });
+  }
+
+  recordScheduledDuplicatePrevented() {
+    this.scheduledDuplicatePrevented.inc();
+  }
+
+  recordScheduledRecovered() {
+    this.scheduledRecovered.inc();
   }
 
   enabled() {

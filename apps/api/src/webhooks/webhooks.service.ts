@@ -461,7 +461,7 @@ export class WebhooksService {
       where: { id: publicId, type: "webhook", deletedAt: null },
       include: { workflow: { include: { activeVersion: true } } }
     });
-    if (trigger && this.tokenService.verifyToken(token, trigger.tokenHash)) {
+    if (trigger?.tokenHash && this.tokenService.verifyToken(token, trigger.tokenHash)) {
       return { trigger, workflow: trigger.workflow };
     }
 
@@ -469,7 +469,7 @@ export class WebhooksService {
       where: { id: publicId },
       include: { activeVersion: true, triggers: { where: { type: "webhook", deletedAt: null } } }
     });
-    const legacyTrigger = workflow?.triggers.find((candidate) => this.tokenService.verifyToken(token, candidate.tokenHash));
+    const legacyTrigger = workflow?.triggers.find((candidate) => candidate.tokenHash && this.tokenService.verifyToken(token, candidate.tokenHash));
     return workflow && legacyTrigger ? { trigger: legacyTrigger, workflow } : undefined;
   }
 }

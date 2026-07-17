@@ -52,3 +52,35 @@ export type UpdateWebhookTriggerInput = Partial<{
   payloadLimits: Partial<WebhookTriggerConfig["payloadLimits"]>;
   signature: Partial<Omit<WebhookTriggerConfig["signature"], "algorithm" | "secretAvailable">>;
 }>;
+
+export interface ScheduledTriggerSummary {
+  id: string;
+  type: "scheduled";
+  workflowId: string;
+  enabled: boolean;
+  paused: boolean;
+  cron: string;
+  timezone: string;
+  executionPolicy: "skip_if_running";
+  metadata: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+  lastRunAt: string | null;
+  nextRunAt: string | null;
+  lastExecutionId: string | null;
+}
+
+export interface ScheduledTriggerInput {
+  cron: string;
+  timezone: string;
+  enabled?: boolean;
+  paused?: boolean;
+  executionPolicy?: "skip_if_running";
+  metadata?: Record<string, unknown>;
+}
+
+export interface ScheduledTriggerPreview {
+  cron: string;
+  timezone: string;
+  nextRuns: string[];
+}

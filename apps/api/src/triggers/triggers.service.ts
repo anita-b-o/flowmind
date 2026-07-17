@@ -56,7 +56,7 @@ export class TriggersService {
   async list(organizationId: string, workflowId: string) {
     await this.assertWorkflow(organizationId, workflowId);
     const triggers = await this.prisma.trigger.findMany({
-      where: { organizationId, workflowId, deletedAt: null },
+      where: { organizationId, workflowId, type: "webhook", deletedAt: null },
       orderBy: { createdAt: "desc" }
     });
     return triggers.map((trigger) => this.summary(trigger));

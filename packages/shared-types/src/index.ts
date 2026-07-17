@@ -173,6 +173,11 @@ export interface ExecutionJobPayload {
   testRunId?: string;
 }
 
+export interface ScheduledTriggerJobPayload {
+  organizationId: string;
+  triggerId: string;
+}
+
 export * from "./test-runs";
 export * from "./graph-validation";
 export * from "./execution-lifecycle";
