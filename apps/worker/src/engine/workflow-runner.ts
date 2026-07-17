@@ -1,5 +1,5 @@
 import { Injectable } from "@nestjs/common";
-import { ExecutionJobPayload, ExecutionStatus, StepExecutionStatus, WorkflowStepDefinition } from "@automation/shared-types";
+import { ACTIVE_EXECUTION_STATUSES, ExecutionJobPayload, ExecutionStatus, StepExecutionStatus, WorkflowStepDefinition } from "@automation/shared-types";
 import { Prisma } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import { StepExecutor } from "./step-executor";
@@ -55,12 +55,15 @@ export class WorkflowRunner {
     if (!execution) {
       throw new Error(`Execution ${payload.executionId} not found`);
     }
-    if ([ExecutionStatus.Completed, ExecutionStatus.Cancelled].includes(execution.status as ExecutionStatus)) {
+    if ([ExecutionStatus.Completed, ExecutionStatus.Failed, ExecutionStatus.Cancelled].includes(execution.status as ExecutionStatus)) {
       await this.leaseService.release(execution.id);
       if (heartbeat) clearInterval(heartbeat);
       return { status: "completed" };
     }
-      await this.prisma.execution.update({ where: { id: execution.id }, data: { startedAt: execution.startedAt ?? new Date(), completedAt: null } });
+    await this.prisma.execution.updateMany({
+      where: { id: execution.id, status: { in: ACTIVE_EXECUTION_STATUSES as any } },
+      data: { startedAt: execution.startedAt ?? new Date(), completedAt: null }
+    });
 
     try {
       let skipNext = false;
@@ -77,6 +80,11 @@ export class WorkflowRunner {
       }
 
       for (const dbStep of runtimeStepRows(current)) {
+        if (current.status === ExecutionStatus.Cancelled) {
+          if (heartbeat) clearInterval(heartbeat);
+          await this.leaseService.release(current.id);
+          return { status: "completed" };
+        }
         await this.leaseService.assertOwned(current.id);
         if (dbStep.position === 0) {
           continue;
@@ -159,13 +167,19 @@ export class WorkflowRunner {
 
       await this.leaseService.assertOwned(execution.id);
       const context = await this.reconstructContextForExecution(execution.id);
-      await this.prisma.execution.update({
-        where: { id: execution.id },
+      await this.assertNoFailedSteps(execution.id);
+      const completed = await this.prisma.execution.updateMany({
+        where: { id: execution.id, status: { in: ACTIVE_EXECUTION_STATUSES as any } },
         data: { status: ExecutionStatus.Completed, completedAt: new Date(), contextJson: toJson(context), errorJson: undefined }
       });
       if (heartbeat) clearInterval(heartbeat);
       await this.leaseService.release(execution.id);
+      if (completed.count !== 1) return { status: "completed" };
       this.logger?.info("worker.execution.completed", { durationMs: execution.startedAt ? Date.now() - execution.startedAt.getTime() : undefined });
+      await this.recordAudit(execution.organizationId, "execution.completed", "Execution", execution.id, (execution as any).correlationId, {
+        workflowId: execution.workflowId,
+        workflowVersionId: execution.workflowVersionId
+      });
       if ((execution as any).executionMode !== "TEST") this.metrics?.executionsCompleted.inc();
       return { status: "completed" };
     } catch (error) {
@@ -174,13 +188,18 @@ export class WorkflowRunner {
         this.logger?.warn("worker.lease.lost");
         return { status: "lost_lease" };
       }
+      const latest = await this.prisma.execution.findUnique({ where: { id: execution.id }, select: { status: true } });
+      if (latest?.status === ExecutionStatus.Cancelled || latest?.status === ExecutionStatus.Completed) {
+        await this.leaseService.release(execution.id).catch(() => undefined);
+        return { status: "completed" };
+      }
       const context = await this.reconstructContextForExecution(execution.id);
       const failedStep = await this.prisma.stepExecution.findFirst({
         where: { executionId: execution.id, status: StepExecutionStatus.Failed },
         orderBy: { updatedAt: "desc" }
       });
-      await this.prisma.execution.update({
-        where: { id: execution.id },
+      const failed = await this.prisma.execution.updateMany({
+        where: { id: execution.id, status: { in: ACTIVE_EXECUTION_STATUSES as any } },
         data: {
           status: ExecutionStatus.Failed,
           completedAt: new Date(),
@@ -188,6 +207,10 @@ export class WorkflowRunner {
           errorJson: { message: error instanceof Error ? error.message : String(error) }
         }
       });
+      if (failed.count !== 1) {
+        await this.leaseService.release(execution.id).catch(() => undefined);
+        return { status: "completed" };
+      }
       if ((execution as any).executionMode !== "TEST") {
         if (!execution.workflowVersionId) {
           throw new Error(`Execution ${execution.id} is missing workflowVersionId`);
@@ -205,6 +228,11 @@ export class WorkflowRunner {
           jobId: `execution-${execution.id}`
         });
       }
+      await this.recordAudit(execution.organizationId, "execution.failed", "Execution", execution.id, (execution as any).correlationId, {
+        workflowId: execution.workflowId,
+        workflowVersionId: execution.workflowVersionId,
+        failedStepKey: failedStep?.stepKey
+      });
       this.logger?.error("worker.execution.failed", {
         failedStepKey: failedStep?.stepKey,
         stepExecutionId: failedStep?.id,
@@ -255,6 +283,11 @@ export class WorkflowRunner {
     let current = currentExecution;
     let nextStepKey: string | undefined = graph.entryStepKey;
     while (nextStepKey) {
+      if ((current as any).status === ExecutionStatus.Cancelled) {
+        stopHeartbeat();
+        await this.leaseService.release(current.id);
+        return { status: "completed" };
+      }
       await this.leaseService.assertOwned(current.id);
       const dbStep = stepRowsByKey.get(nextStepKey);
       if (!dbStep) {
@@ -347,14 +380,23 @@ export class WorkflowRunner {
 
     await this.leaseService.assertOwned(initialExecution.id);
     const context = await this.reconstructContextForExecution(initialExecution.id);
-    await this.prisma.execution.update({
-      where: { id: initialExecution.id },
+    await this.assertNoFailedSteps(initialExecution.id);
+    const completed = await this.prisma.execution.updateMany({
+      where: { id: initialExecution.id, status: { in: ACTIVE_EXECUTION_STATUSES as any } },
       data: { status: ExecutionStatus.Completed, completedAt: new Date(), contextJson: toJson(context), errorJson: undefined }
     });
     stopHeartbeat();
     await this.leaseService.release(initialExecution.id);
+    if (completed.count !== 1) return { status: "completed" };
     this.logger?.info("worker.execution.completed", { durationMs: initialExecution.startedAt ? Date.now() - initialExecution.startedAt.getTime() : undefined });
     const fullExecution = await this.prisma.execution.findUnique({ where: { id: initialExecution.id }, select: { executionMode: true } });
+    const auditExecution = await this.prisma.execution.findUnique({ where: { id: initialExecution.id }, select: { organizationId: true, workflowId: true, workflowVersionId: true, correlationId: true } });
+    if (auditExecution) {
+      await this.recordAudit(auditExecution.organizationId, "execution.completed", "Execution", initialExecution.id, auditExecution.correlationId, {
+        workflowId: auditExecution.workflowId,
+        workflowVersionId: auditExecution.workflowVersionId
+      });
+    }
     if (fullExecution?.executionMode !== "TEST") this.metrics?.executionsCompleted.inc();
     return { status: "completed" };
   }
@@ -459,10 +501,29 @@ export class WorkflowRunner {
   }
 
   private markWaiting(executionId: string) {
-    return this.prisma.execution.update({
-      where: { id: executionId },
+    return this.prisma.execution.updateMany({
+      where: { id: executionId, status: { in: ACTIVE_EXECUTION_STATUSES as any } },
       data: { status: ExecutionStatus.Retrying, completedAt: null }
     });
+  }
+
+  private async assertNoFailedSteps(executionId: string) {
+    const failed = await this.prisma.stepExecution.count({ where: { executionId, status: StepExecutionStatus.Failed } });
+    if (failed > 0) throw new Error("Execution cannot complete with failed steps");
+  }
+
+  private async recordAudit(organizationId: string, action: string, resourceType: string, resourceId: string, correlationId: string | null | undefined, metadata: Record<string, unknown>) {
+    await this.prisma.auditLog.create({
+      data: {
+        organizationId,
+        actorUserId: null,
+        action,
+        resourceType,
+        resourceId,
+        correlationId: correlationId ?? null,
+        metadataJson: toJson(metadata)
+      }
+    }).catch(() => undefined);
   }
 }
 

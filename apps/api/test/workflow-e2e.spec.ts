@@ -103,6 +103,36 @@ describe("workflow webhook execution e2e", () => {
     expect(await prisma.internalRecord.count({ where: { workflowId: workflow.id } })).toBe(1);
   }, 30_000);
 
+  it("runs a manual execution through BullMQ and the worker", async () => {
+    const user = await register("manual-e2e@example.com", "Manual E2E");
+    const workflow = await createWorkflow(user, "Manual real workflow");
+    const version = await createVersion(user, workflow.id);
+    await request(app.getHttpServer())
+      .patch(`/workflows/${workflow.id}/versions/${version.id}/activate`)
+      .set(authHeaders(user))
+      .expect(200);
+
+    const created = await request(app.getHttpServer())
+      .post(`/workflows/${workflow.id}/executions`)
+      .set(authHeaders(user))
+      .set("Idempotency-Key", "manual-e2e-1")
+      .send({
+        input: { trigger: { body: { name: "Lin", email: "lin@example.com", priority: "low" } }, metadata: { source: "smoke" } },
+        confirmRealEffects: true
+      })
+      .expect(201);
+
+    const detail = await waitForExecution(created.body.execution.id, "COMPLETED");
+    expect(detail.body.publicStatus).toBe("completed");
+    expect(detail.body.startedBy.display).toBe("manual-e2e");
+    expect(detail.body.steps.map((step: any) => [step.stepKey, step.status])).toEqual([
+      ["check_priority", "COMPLETED"],
+      ["notify_sales", "SKIPPED"],
+      ["save_lead", "COMPLETED"]
+    ]);
+    expect(await prisma.internalRecord.count({ where: { executionId: created.body.execution.id } })).toBe(1);
+  }, 30_000);
+
   it("prevents cross-tenant trigger and execution access", async () => {
     const userA = await register("tenant-a@example.com", "Tenant A");
     const userB = await register("tenant-b@example.com", "Tenant B");

@@ -325,7 +325,7 @@ function serializeError(error: unknown, classification: string) {
 const SENSITIVE_WORDS = /(^|[^a-z0-9])(authorization|cookie|token|secret|password|api[-_ ]?key)([^a-z0-9]|$)/i;
 
 function sanitizePersisted(value: unknown): unknown {
-  return sanitizeForLog(redact(value), { maxBytes: 16_384 });
+  return sanitizeForLog(limitValue(redact(value)), { maxBytes: Number(process.env.PERSISTED_EXECUTION_PAYLOAD_MAX_BYTES ?? 65_536) });
 }
 
 function redact(value: unknown, seen = new WeakSet<object>()): unknown {
@@ -346,6 +346,22 @@ function isSensitiveKey(key: string) {
   return /^(authorization|cookie|setcookie|password|token|secret|apikey|xapikey|accesstoken|refreshtoken|encryptedvalue|ciphertext|authtag|iv|smtppassword)$/i.test(
     key.replace(/[-_]/g, "")
   );
+}
+
+function limitValue(value: unknown, depth = 0): unknown {
+  if (depth > 8) return { truncated: true, reason: "max_depth", limit: 8 };
+  if (typeof value === "string") {
+    const limit = 16_384;
+    if (value.length <= limit) return value;
+    return { truncated: true, originalSize: value.length, limit, preview: value.slice(0, limit) };
+  }
+  if (!value || typeof value !== "object") return value;
+  if (Array.isArray(value)) {
+    const limit = 200;
+    const preview = value.slice(0, limit).map((entry) => limitValue(entry, depth + 1));
+    return value.length > limit ? { truncated: true, originalSize: value.length, limit, preview } : preview;
+  }
+  return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([key, entry]) => [key, limitValue(entry, depth + 1)]));
 }
 
 function workerId() {

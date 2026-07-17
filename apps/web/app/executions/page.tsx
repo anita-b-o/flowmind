@@ -14,7 +14,9 @@ export default function ExecutionsPage() {
   const [page, setPage] = useState(1);
   const [workflowId, setWorkflowId] = useState("");
   const [status, setStatus] = useState<ExecutionStatus | "">("");
-  const executions = useExecutions({ page, pageSize: 20, workflowId, status });
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
+  const executions = useExecutions({ page, pageSize: 20, workflowId, status, from, to });
   const workflows = useWorkflows();
 
   return (
@@ -57,6 +59,19 @@ export default function ExecutionsPage() {
                 ))}
               </select>
             </label>
+            <label>
+              From
+              <input type="date" value={from} onChange={(event) => setFrom(event.target.value)} />
+            </label>
+            <label>
+              To
+              <input type="date" value={to} onChange={(event) => setTo(event.target.value)} />
+            </label>
+            <div style={{ alignSelf: "end" }}>
+              <button type="button" onClick={() => executions.refetch()}>
+                Refresh
+              </button>
+            </div>
           </div>
         </section>
         {executions.error && <ErrorMessage error={executions.error} onRetry={() => executions.refetch()} />}
@@ -71,7 +86,12 @@ export default function ExecutionsPage() {
                     <th>Status</th>
                     <th>Execution</th>
                     <th>Workflow</th>
+                    <th>Version</th>
+                    <th>Steps</th>
+                    <th>Initiator</th>
                     <th>Duration</th>
+                    <th>Started</th>
+                    <th>Finished</th>
                     <th>Created</th>
                   </tr>
                 </thead>
@@ -79,13 +99,21 @@ export default function ExecutionsPage() {
                   {executions.data.items.map((execution) => (
                     <tr key={execution.id}>
                       <td>
-                        <StatusBadge status={execution.status} />
+                        <StatusBadge status={execution.publicStatus ?? execution.status} />
                       </td>
                       <td>
                         <Link href={`/executions/${execution.id}`}>{execution.id}</Link>
                       </td>
-                      <td>{execution.workflowId}</td>
-                      <td>{duration(execution.startedAt, execution.completedAt)}</td>
+                      <td>{execution.workflowName ?? execution.workflow?.name ?? execution.workflowId}</td>
+                      <td>{execution.versionNumber ?? execution.workflowVersion?.versionNumber ?? "-"}</td>
+                      <td>
+                        {(execution.completedStepCount ?? 0)}/{execution.stepCount ?? 0}
+                        {(execution.failedStepCount ?? 0) > 0 ? ` failed ${execution.failedStepCount}` : ""}
+                      </td>
+                      <td>{execution.initiator?.display ?? "-"}</td>
+                      <td>{formatDuration(execution.durationMs, execution.startedAt, execution.finishedAt ?? execution.completedAt)}</td>
+                      <td>{execution.startedAt ? formatDate(execution.startedAt) : "-"}</td>
+                      <td>{execution.finishedAt ? formatDate(execution.finishedAt) : "-"}</td>
                       <td>{formatDate(execution.createdAt)}</td>
                     </tr>
                   ))}
@@ -105,7 +133,8 @@ export default function ExecutionsPage() {
   );
 }
 
-function duration(start?: string | null, end?: string | null) {
+function formatDuration(value?: number | null, start?: string | null, end?: string | null) {
+  if (typeof value === "number") return `${value} ms`;
   if (!start || !end) {
     return "-";
   }

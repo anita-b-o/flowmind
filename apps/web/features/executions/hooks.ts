@@ -1,15 +1,17 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "../../lib/api-client";
 import { useAuth } from "../auth/use-auth";
-import type { ExecutionDetail, ExecutionListResponse, ExecutionStatus } from "./types";
+import type { CancelExecutionResponse, ExecutionDetail, ExecutionListResponse, ExecutionStatus, ManualExecutionResponse } from "./types";
 
 export function useExecutions(params: {
   page: number;
   pageSize: number;
   workflowId?: string;
   status?: ExecutionStatus | "";
+  from?: string;
+  to?: string;
 }) {
   const { activeOrganizationId } = useAuth();
   return useQuery({
@@ -23,6 +25,39 @@ export function useExecution(executionId: string) {
   return useQuery({
     queryKey: ["execution", activeOrganizationId, executionId],
     queryFn: () => apiClient.get<ExecutionDetail>(`/executions/${executionId}`),
-    enabled: Boolean(activeOrganizationId && executionId)
+    enabled: Boolean(activeOrganizationId && executionId),
+    refetchInterval: (query) => {
+      const status = query.state.data?.status;
+      return status === "QUEUED" || status === "RUNNING" || status === "RETRYING" || status === "PENDING" ? 2000 : false;
+    },
+    refetchIntervalInBackground: false
+  });
+}
+
+export function useCreateManualExecution(workflowId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { payload?: { trigger?: Record<string, unknown>; metadata?: Record<string, unknown> }; idempotencyKey: string }) =>
+      apiClient.post<ManualExecutionResponse>(`/workflows/${workflowId}/executions`, {
+        input: input.payload,
+        idempotencyKey: input.idempotencyKey,
+        confirmRealEffects: true
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["executions"] });
+      void queryClient.invalidateQueries({ queryKey: ["workflows", workflowId] });
+    }
+  });
+}
+
+export function useCancelExecution(executionId: string) {
+  const queryClient = useQueryClient();
+  const { activeOrganizationId } = useAuth();
+  return useMutation({
+    mutationFn: (reason?: string) => apiClient.post<CancelExecutionResponse>(`/executions/${executionId}/cancel`, { reason }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["execution", activeOrganizationId, executionId] });
+      void queryClient.invalidateQueries({ queryKey: ["executions"] });
+    }
   });
 }

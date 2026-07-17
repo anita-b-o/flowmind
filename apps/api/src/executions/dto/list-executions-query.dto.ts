@@ -1,6 +1,5 @@
-import { IsEnum, IsOptional, IsString, Max, Min } from "class-validator";
+import { IsISO8601, IsOptional, IsString, Max, Min } from "class-validator";
 import { Type } from "class-transformer";
-import { ExecutionStatus } from "@automation/shared-types";
 
 export class ListExecutionsQueryDto {
   @IsOptional()
@@ -19,6 +18,14 @@ export class ListExecutionsQueryDto {
   workflowId?: string;
 
   @IsOptional()
-  @IsEnum(ExecutionStatus)
-  status?: ExecutionStatus;
+  @IsString()
+  status?: string;
+
+  @IsOptional()
+  @IsISO8601()
+  from?: string;
+
+  @IsOptional()
+  @IsISO8601()
+  to?: string;
 }

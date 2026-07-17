@@ -26,7 +26,7 @@ const SENSITIVE_KEYS = new Set([
 ]);
 
 export function sanitizePublic(value: unknown): unknown {
-  return sanitizeForLog(redact(value), { maxBytes: 16_384 });
+  return sanitizeForLog(limitValue(redact(value)), { maxBytes: publicPayloadBytes() });
 }
 
 export function publicError(value: unknown) {
@@ -116,4 +116,24 @@ function publicErrorMessage(value: unknown, category: string) {
 
 function containsSensitiveWord(value: string) {
   return /(^|[^a-z0-9])(authorization|cookie|token|secret|password|api[-_ ]?key)([^a-z0-9]|$)/i.test(value);
+}
+
+function publicPayloadBytes() {
+  return Number(process.env.PUBLIC_EXECUTION_PAYLOAD_MAX_BYTES ?? 65_536);
+}
+
+function limitValue(value: unknown, depth = 0): unknown {
+  if (depth > 8) return { truncated: true, reason: "max_depth", limit: 8 };
+  if (typeof value === "string") {
+    const limit = 16_384;
+    if (value.length <= limit) return value;
+    return { truncated: true, originalSize: value.length, limit, preview: value.slice(0, limit) };
+  }
+  if (!value || typeof value !== "object") return value;
+  if (Array.isArray(value)) {
+    const limit = 200;
+    const visible = value.slice(0, limit).map((entry) => limitValue(entry, depth + 1));
+    return value.length > limit ? { truncated: true, originalSize: value.length, limit, preview: visible } : visible;
+  }
+  return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([key, entry]) => [key, limitValue(entry, depth + 1)]));
 }

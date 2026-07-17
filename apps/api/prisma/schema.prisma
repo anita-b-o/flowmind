@@ -107,6 +107,8 @@ model User {
   versions                  WorkflowVersion[]     @relation("WorkflowVersionCreatedBy")
   sessions                  RefreshTokenSession[]
   requestedExecutionRetries Execution[]           @relation("ExecutionRetryRequestedBy")
+  startedExecutions         Execution[]           @relation("ExecutionStartedBy")
+  requestedExecutionCancels Execution[]           @relation("ExecutionCancelRequestedBy")
   workflowTestRuns          WorkflowTestRun[]      @relation("WorkflowTestRunCreatedBy")
 
   @@map("users")
@@ -285,6 +287,12 @@ model Execution {
   retryRequestedByUserId String?         @map("retry_requested_by_user_id")
   retryRequestedAt       DateTime?       @map("retry_requested_at")
   retryReason            String?         @map("retry_reason")
+  startedByUserId        String?         @map("started_by_user_id")
+  cancelRequestedByUserId String?        @map("cancel_requested_by_user_id")
+  cancelRequestedAt      DateTime?       @map("cancel_requested_at")
+  cancelledAt            DateTime?       @map("cancelled_at")
+  cancelReason           String?         @map("cancel_reason")
+  manualExecutionKey     String?         @map("manual_execution_key")
   status                 ExecutionStatus @default(PENDING)
   executionMode          ExecutionMode   @default(REAL) @map("execution_mode")
   inputJson              Json            @map("input_json")
@@ -306,6 +314,8 @@ model Execution {
   retryOfExecution Execution?            @relation("ExecutionRetries", fields: [retryOfExecutionId], references: [id])
   retryExecutions  Execution[]           @relation("ExecutionRetries")
   retryRequestedBy User?                 @relation("ExecutionRetryRequestedBy", fields: [retryRequestedByUserId], references: [id])
+  startedBy        User?                 @relation("ExecutionStartedBy", fields: [startedByUserId], references: [id])
+  cancelRequestedBy User?                @relation("ExecutionCancelRequestedBy", fields: [cancelRequestedByUserId], references: [id])
   steps            StepExecution[]
   internalRecords  InternalRecord[]
   deadLetters      DeadLetterExecution[] @relation("DeadLetterOriginalExecution")
@@ -315,6 +325,7 @@ model Execution {
   @@index([organizationId, workflowId, status])
   @@index([organizationId, workflowId, executionMode, createdAt])
   @@index([organizationId, correlationId])
+  @@index([organizationId, manualExecutionKey])
   @@index([status, lockedUntil])
   @@index([retryOfExecutionId, status])
   @@map("executions")

@@ -1,13 +1,8 @@
 import { IsOptional, IsString, MaxLength } from "class-validator";
 
-export class RetryExecutionDto {
+export class CancelExecutionDto {
   @IsOptional()
   @IsString()
   @MaxLength(500)
   reason?: string;
-
-  @IsOptional()
-  @IsString()
-  @MaxLength(200)
-  idempotencyKey?: string;
 }

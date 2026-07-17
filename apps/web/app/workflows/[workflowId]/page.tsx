@@ -6,6 +6,9 @@ import { ErrorMessage } from "../../../components/error-message";
 import { OneTimeSecretPanel, type OneTimeSecret } from "../../../components/one-time-secret-panel";
 import { StatusBadge } from "../../../components/status-badge";
 import { RequireAuth } from "../../../features/auth/require-auth";
+import { canRunWorkflow } from "../../../features/auth/rbac";
+import { useAuth } from "../../../features/auth/use-auth";
+import { RunWorkflowDialog } from "../../../features/executions/components/run-workflow-dialog";
 import { useCreateWebhookTrigger, useRotateWebhookTrigger, useTriggers } from "../../../features/triggers/hooks";
 import { useWorkflow } from "../../../features/workflows/hooks";
 import { WorkflowEditor } from "../../../features/workflows/components/workflow-editor";
@@ -20,6 +23,9 @@ export default function WorkflowDetailPage({ params }: { params: Promise<{ workf
   const resetRotateTrigger = rotateTrigger.reset;
   const [secret, setSecret] = useState<OneTimeSecret | null>(null);
   const [rotateId, setRotateId] = useState<string | null>(null);
+  const [runOpen, setRunOpen] = useState(false);
+  const { organizations, activeOrganizationId } = useAuth();
+  const role = organizations.find((organization) => organization.id === activeOrganizationId)?.role;
 
   useEffect(
     () => () => {
@@ -50,8 +56,17 @@ export default function WorkflowDetailPage({ params }: { params: Promise<{ workf
     <RequireAuth>
       <main className="content stack">
         <section className="panel stack">
-          <h1>{workflow.data?.name ?? "Workflow"}</h1>
-          {workflow.data && <StatusBadge status={workflow.data.status} />}
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 16, alignItems: "center" }}>
+            <div>
+              <h1>{workflow.data?.name ?? "Workflow"}</h1>
+              {workflow.data && <StatusBadge status={workflow.data.status} />}
+            </div>
+            {workflow.data?.activeVersionId && workflow.data.status === "ACTIVE" && canRunWorkflow(role) && (
+              <button type="button" onClick={() => setRunOpen(true)}>
+                Run
+              </button>
+            )}
+          </div>
           {workflow.error && <ErrorMessage error={workflow.error} onRetry={() => workflow.refetch()} />}
         </section>
 
@@ -95,6 +110,14 @@ export default function WorkflowDetailPage({ params }: { params: Promise<{ workf
         onCancel={() => setRotateId(null)}
         onConfirm={onRotate}
       />
+      {workflow.data && (
+        <RunWorkflowDialog
+          open={runOpen}
+          workflowId={workflow.data.id}
+          workflowName={workflow.data.name}
+          onClose={() => setRunOpen(false)}
+        />
+      )}
     </RequireAuth>
   );
 }

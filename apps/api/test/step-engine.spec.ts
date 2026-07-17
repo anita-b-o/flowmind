@@ -265,6 +265,39 @@ describe("step recovery engine", () => {
     expect(delay.status).toBe(StepExecutionStatus.Completed);
     expect(delay.attemptCount).toBe(1);
   });
+
+  it("does not execute an already cancelled execution", async () => {
+    const seed = await seedExecution([step("first", StepType.Conditional)]);
+    await prisma.execution.update({ where: { id: seed.executionId }, data: { status: ExecutionStatus.Cancelled, completedAt: new Date() } });
+    let calls = 0;
+    const runner = runnerWith({
+      [StepType.Conditional]: async () => {
+        calls += 1;
+        return { status: StepExecutionStatus.Completed, output: { ok: true } };
+      }
+    });
+
+    await runner.run(seed.payload);
+
+    expect(calls).toBe(0);
+    const execution = await prisma.execution.findUniqueOrThrow({ where: { id: seed.executionId } });
+    expect(execution.status).toBe(ExecutionStatus.Cancelled);
+  });
+
+  it("does not overwrite a cancellation applied while a step is returning", async () => {
+    const seed = await seedExecution([step("first", StepType.Conditional)]);
+    const runner = runnerWith({
+      [StepType.Conditional]: async () => {
+        await prisma.execution.update({ where: { id: seed.executionId }, data: { status: ExecutionStatus.Cancelled, completedAt: new Date(), lockedBy: null, lockedUntil: null } });
+        return { status: StepExecutionStatus.Completed, output: { ok: true } };
+      }
+    });
+
+    await runner.run(seed.payload);
+
+    const execution = await prisma.execution.findUniqueOrThrow({ where: { id: seed.executionId } });
+    expect(execution.status).toBe(ExecutionStatus.Cancelled);
+  });
 });
 
 function runnerWith(handlers: Partial<Record<StepType, StepHandler["execute"]>>, expressionResolver?: ExpressionResolver) {

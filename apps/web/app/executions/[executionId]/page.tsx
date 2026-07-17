@@ -7,17 +7,20 @@ import { JsonViewer } from "../../../components/json-viewer";
 import { StatusBadge } from "../../../components/status-badge";
 import { RequireAuth } from "../../../features/auth/require-auth";
 import { useAuth } from "../../../features/auth/use-auth";
-import { useExecution } from "../../../features/executions/hooks";
-import { canRetryExecution } from "../../../features/auth/rbac";
+import { useCancelExecution, useExecution } from "../../../features/executions/hooks";
+import { canCancelExecution, canRetryExecution } from "../../../features/auth/rbac";
 import { RetryExecutionDialog } from "../../../features/dead-letter-executions/components/retry-execution-dialog";
+import { ConfirmDialog } from "../../../components/confirm-dialog";
 
 export default function ExecutionDetailPage({ params }: { params: Promise<{ executionId: string }> }) {
   const { executionId } = use(params);
   const execution = useExecution(executionId);
   const detail = execution.data;
   const [retryOpen, setRetryOpen] = useState(false);
+  const [cancelOpen, setCancelOpen] = useState(false);
   const { organizations, activeOrganizationId } = useAuth();
   const role = organizations.find((organization) => organization.id === activeOrganizationId)?.role;
+  const cancelExecution = useCancelExecution(executionId);
 
   return (
     <RequireAuth>
@@ -28,13 +31,26 @@ export default function ExecutionDetailPage({ params }: { params: Promise<{ exec
           <>
             <section className="panel stack">
               <h1>Execution</h1>
-              <StatusBadge status={detail.status} />
+              <StatusBadge status={detail.publicStatus ?? detail.status} />
               {detail.deadLetter && <StatusBadge status={detail.deadLetter.active ? "DLQ ACTIVE" : "DLQ RESOLVED"} />}
               <p className="muted">{detail.id}</p>
               <p>Workflow: {detail.workflow.name}</p>
-              <p>Version: {detail.workflowVersion.versionNumber}</p>
+              <p>Version: {detail.workflowVersion?.versionNumber ?? "-"}</p>
+              <p>Mode: {detail.mode ?? "REAL"}</p>
+              <p>Started by: {detail.initiator?.display ?? "-"}</p>
               <p>Duration: {formatDuration(detail.durationMs, detail.startedAt, detail.completedAt)}</p>
               <p>Created: {formatDate(detail.createdAt)}</p>
+              <p>Started: {detail.startedAt ? formatDate(detail.startedAt) : "-"}</p>
+              <p>Finished: {detail.finishedAt ? formatDate(detail.finishedAt) : "-"}</p>
+              <p className="muted">Last updated: {execution.dataUpdatedAt ? formatDate(new Date(execution.dataUpdatedAt).toISOString()) : "-"}</p>
+              {detail.workflowSnapshot && (
+                <p>
+                  Snapshot: version {detail.workflowSnapshot.versionNumber}, schema {detail.workflowSnapshot.definitionSchemaVersion}
+                </p>
+              )}
+              {detail.cancelledAt && <p>Cancelled: {formatDate(detail.cancelledAt)}</p>}
+              {detail.cancelReason && <p>Cancel reason: {detail.cancelReason}</p>}
+              {detail.cancelRequestedBy && <p>Cancelled by: {detail.cancelRequestedBy.display}</p>}
               <p>
                 Correlation: <code>{detail.correlationId ?? "-"}</code>{" "}
                 {detail.correlationId && (
@@ -58,6 +74,11 @@ export default function ExecutionDetailPage({ params }: { params: Promise<{ exec
               {(detail.status === "FAILED" || detail.deadLetter?.active) && canRetryExecution(role) && (
                 <button type="button" onClick={() => setRetryOpen(true)}>
                   Retry execution
+                </button>
+              )}
+              {["PENDING", "QUEUED", "RUNNING", "RETRYING"].includes(detail.status) && canCancelExecution(role) && (
+                <button type="button" onClick={() => setCancelOpen(true)} disabled={cancelExecution.isPending}>
+                  Cancel execution
                 </button>
               )}
             </section>
@@ -111,7 +132,7 @@ export default function ExecutionDetailPage({ params }: { params: Promise<{ exec
                       <strong>{step.stepKey}</strong>
                       <p className="muted">{step.stepType}</p>
                     </div>
-                    <StatusBadge status={step.status} />
+                    <StatusBadge status={step.publicStatus ?? step.status} />
                   </div>
                   <p>
                     Attempts: {step.attemptCount}/{step.maxAttempts}
@@ -124,6 +145,15 @@ export default function ExecutionDetailPage({ params }: { params: Promise<{ exec
                   )}
                   {step.errorCategory && <p>Error category: {step.errorCategory}</p>}
                   <p>Duration: {step.durationMs ?? 0} ms</p>
+                  {step.nextRetryAt && <p>Waiting until: {formatDate(step.nextRetryAt)}</p>}
+                  {Boolean(step.providerMetadata) && (
+                    <>
+                      <h3>Provider metadata</h3>
+                      <JsonViewer value={step.providerMetadata} />
+                    </>
+                  )}
+                  <h3>Input</h3>
+                  <JsonViewer value={step.input ?? null} />
                   <h3>Output</h3>
                   <JsonViewer value={step.output} />
                   {Boolean(step.error) && (
@@ -136,6 +166,21 @@ export default function ExecutionDetailPage({ params }: { params: Promise<{ exec
               ))}
             </section>
             <RetryExecutionDialog open={retryOpen} executionId={detail.id} deadLetterId={detail.deadLetter?.id} onClose={() => setRetryOpen(false)} />
+            <ConfirmDialog
+              open={cancelOpen}
+              title="Cancel execution"
+              description="No new steps will be started. Steps that already finished will remain visible."
+              confirmLabel={cancelExecution.isPending ? "Cancelling..." : "Cancel execution"}
+              onCancel={() => setCancelOpen(false)}
+              onConfirm={async () => {
+                try {
+                  await cancelExecution.mutateAsync("Cancelled from execution detail");
+                  setCancelOpen(false);
+                } catch {
+                  setCancelOpen(false);
+                }
+              }}
+            />
           </>
         )}
       </main>

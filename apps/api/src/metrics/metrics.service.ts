@@ -71,6 +71,18 @@ export class ApiMetricsService implements OnModuleInit, OnModuleDestroy {
     labelNames: ["outcome"],
     registers: [this.registry]
   });
+  readonly manualExecutions = new Counter({
+    name: "flowmind_manual_executions_total",
+    help: "Manual execution requests.",
+    labelNames: ["outcome"],
+    registers: [this.registry]
+  });
+  readonly executionCancels = new Counter({
+    name: "flowmind_execution_cancels_total",
+    help: "Execution cancel requests.",
+    labelNames: ["outcome"],
+    registers: [this.registry]
+  });
   readonly enqueueFailures = new Counter({
     name: "flowmind_enqueue_failures_total",
     help: "Execution enqueue failures.",
@@ -141,6 +153,14 @@ export class ApiMetricsService implements OnModuleInit, OnModuleDestroy {
 
   recordManualRetry(outcome: "success" | "not_found" | "conflict" | "enqueue_failed" | "error") {
     this.manualRetries.inc({ outcome });
+  }
+
+  recordManualExecution(outcome: "success" | "conflict" | "enqueue_failed" | "rejected") {
+    this.manualExecutions.inc({ outcome });
+  }
+
+  recordExecutionCancel(outcome: "success" | "not_found" | "conflict") {
+    this.executionCancels.inc({ outcome });
   }
 
   recordEnqueueFailure(operation: "webhook" | "manual_retry", errorCategory: ErrorCategory) {

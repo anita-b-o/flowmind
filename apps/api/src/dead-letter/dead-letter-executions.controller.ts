@@ -17,13 +17,13 @@ export class DeadLetterExecutionsController {
   constructor(private readonly service: DeadLetterExecutionsService) {}
 
   @Get()
-  @Roles(OrganizationRole.Viewer)
+  @Roles(OrganizationRole.Admin)
   list(@OrganizationContext() org: OrganizationContext, @Query() query: ListDeadLetterExecutionsQueryDto) {
     return this.service.list(org.organizationId, query);
   }
 
   @Get(":id")
-  @Roles(OrganizationRole.Viewer)
+  @Roles(OrganizationRole.Admin)
   get(@OrganizationContext() org: OrganizationContext, @Param("id") deadLetterId: string) {
     return this.service.get(org.organizationId, deadLetterId);
   }

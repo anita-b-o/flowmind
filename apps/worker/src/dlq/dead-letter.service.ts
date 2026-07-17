@@ -56,6 +56,17 @@ export class DeadLetterService implements OnModuleDestroy {
     }));
 
     this.metrics?.dlqEntries.inc({ reason_code: dlqReasonCode(row.reason), outcome: existing ? "existing" : "created" });
+    await this.prisma.auditLog.create({
+      data: {
+        organizationId: row.organizationId,
+        actorUserId: null,
+        action: "execution.dead_lettered",
+        resourceType: "DeadLetterExecution",
+        resourceId: row.id,
+        correlationId: null,
+        metadataJson: toJson({ executionId: row.executionId, workflowId: row.workflowId, workflowVersionId: row.workflowVersionId, reason: row.reason })
+      }
+    }).catch(() => undefined);
     await this.publish(row.id).catch((error) => {
       this.metrics?.dlqPublishFailures.inc({ reason_code: dlqReasonCode(row.reason) });
       this.logger?.warn("worker.execution.dead_letter_publish_failed", {

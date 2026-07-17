@@ -38,11 +38,14 @@ describe("DLQ, retry and audit log API", () => {
     await prisma.$disconnect();
   });
 
-  it("lets viewers list and inspect sanitized DLQ entries but not retry", async () => {
+  it("restricts DLQ to admins and keeps errors sanitized", async () => {
     const seed = await seedFailure();
     const viewer = await addMember(seed.organizationId, OrganizationRole.Viewer, "viewer@example.com");
+    const admin = await addMember(seed.organizationId, OrganizationRole.Admin, "dlq-admin@example.com");
 
-    const list = await request(app.getHttpServer()).get("/dead-letter-executions?status=active&page=1&pageSize=10").set(authHeaders(viewer, seed.organizationId)).expect(200);
+    await request(app.getHttpServer()).get("/dead-letter-executions?status=active&page=1&pageSize=10").set(authHeaders(viewer, seed.organizationId)).expect(403);
+
+    const list = await request(app.getHttpServer()).get("/dead-letter-executions?status=active&page=1&pageSize=10").set(authHeaders(admin, seed.organizationId)).expect(200);
     expect(list.body.total).toBe(1);
     expect(list.body.items[0]).toMatchObject({
       id: seed.deadLetterId,
@@ -52,7 +55,7 @@ describe("DLQ, retry and audit log API", () => {
     });
     expect(JSON.stringify(list.body)).not.toMatch(/secret|worker-1|lockedBy|job-/i);
 
-    const detail = await request(app.getHttpServer()).get(`/dead-letter-executions/${seed.deadLetterId}`).set(authHeaders(viewer, seed.organizationId)).expect(200);
+    const detail = await request(app.getHttpServer()).get(`/dead-letter-executions/${seed.deadLetterId}`).set(authHeaders(admin, seed.organizationId)).expect(200);
     expect(detail.body.lastError).toMatchObject({ category: "timeout", code: "STEP_TIMEOUT" });
     expect(JSON.stringify(detail.body)).not.toMatch(/top-secret|authorization|cookie|worker-1|lockedBy|job-/i);
 
@@ -63,13 +66,15 @@ describe("DLQ, retry and audit log API", () => {
     const seed = await seedFailure();
     const other = await seedFailure("other");
     const viewer = await addMember(seed.organizationId, OrganizationRole.Viewer, "viewer2@example.com");
+    const admin = await addMember(seed.organizationId, OrganizationRole.Admin, "admin2@example.com");
 
     await prisma.deadLetterExecution.update({ where: { id: seed.deadLetterId }, data: { resolvedAt: new Date(), resolution: "RETRIED" } });
 
-    await request(app.getHttpServer()).get(`/dead-letter-executions/${other.deadLetterId}`).set(authHeaders(viewer, seed.organizationId)).expect(404);
+    await request(app.getHttpServer()).get(`/dead-letter-executions/${other.deadLetterId}`).set(authHeaders(viewer, seed.organizationId)).expect(403);
+    await request(app.getHttpServer()).get(`/dead-letter-executions/${other.deadLetterId}`).set(authHeaders(admin, seed.organizationId)).expect(404);
     const resolved = await request(app.getHttpServer())
       .get(`/dead-letter-executions?status=resolved&reason=attempts_exhausted&workflowId=${seed.workflowId}`)
-      .set(authHeaders(viewer, seed.organizationId))
+      .set(authHeaders(admin, seed.organizationId))
       .expect(200);
     expect(resolved.body.items).toHaveLength(1);
     expect(resolved.body.items[0]).toMatchObject({ id: seed.deadLetterId, active: false });
