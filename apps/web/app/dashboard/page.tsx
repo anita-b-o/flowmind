@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { canViewAuditLog, canViewDeadLetters } from "../../features/auth/rbac";
+import { canManageDataStores, canViewAuditLog, canViewDeadLetters } from "../../features/auth/rbac";
 import { useAuth } from "../../features/auth/use-auth";
 
 const nav = [
@@ -17,6 +17,7 @@ export default function DashboardPage() {
   const role = organizations.find((organization) => organization.id === activeOrganizationId)?.role;
   const visibleNav = [
     ...nav,
+    ...(canManageDataStores(role) ? [["Data Stores", "/data-stores"]] : []),
     ...(canViewDeadLetters(role) ? [["Dead letters", "/dead-letter-executions"]] : []),
     ...(canViewAuditLog(role) ? [["Audit log", "/audit-log"]] : [])
   ];

@@ -21,7 +21,13 @@ export type StepType =
   | "wait_until"
   | "email_notification"
   | "database_record"
-  | "transform";
+  | "transform"
+  | "data_store_get_record"
+  | "data_store_upsert_record"
+  | "data_store_delete_record"
+  | "data_store_exists_record"
+  | "data_store_count_records"
+  | "data_store_list_records";
 
 export type WorkflowVersionStatus = "DRAFT" | "ACTIVE" | "ARCHIVED";
 

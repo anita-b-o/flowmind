@@ -72,7 +72,7 @@ function mockResult(step: WorkflowStepDefinition, resolvedConfig: Record<string,
       }
     };
   }
-  if (step.type === StepType.DatabaseRecord) {
+    if (step.type === StepType.DatabaseRecord) {
     return {
       status: StepExecutionStatus.Completed,
       output: {
@@ -81,6 +81,18 @@ function mockResult(step: WorkflowStepDefinition, resolvedConfig: Record<string,
         collection: resolvedConfig.collection,
         data: resolvedConfig.data,
         wouldPersist: true
+      }
+      };
+    }
+  if (isDataStoreStep(step.type)) {
+    return {
+      status: StepExecutionStatus.Completed,
+      output: {
+        dryRun: true,
+        simulated: true,
+        operation: step.type,
+        key: resolvedConfig.key,
+        wouldPersist: step.type === StepType.DataStoreUpsertRecord || step.type === StepType.DataStoreDeleteRecord
       }
     };
   }
@@ -102,7 +114,18 @@ function mockResult(step: WorkflowStepDefinition, resolvedConfig: Record<string,
 }
 
 function isEffectStep(type: string) {
-  return type === StepType.HttpRequest || type === StepType.EmailNotification || type === StepType.DatabaseRecord || type.startsWith("ai_");
+  return type === StepType.HttpRequest || type === StepType.EmailNotification || type === StepType.DatabaseRecord || isDataStoreStep(type) || type.startsWith("ai_");
+}
+
+function isDataStoreStep(type: string) {
+  return [
+    StepType.DataStoreGetRecord,
+    StepType.DataStoreUpsertRecord,
+    StepType.DataStoreDeleteRecord,
+    StepType.DataStoreExistsRecord,
+    StepType.DataStoreCountRecords,
+    StepType.DataStoreListRecords
+  ].includes(type as StepType);
 }
 
 function asRecord(value: unknown): Record<string, any> {

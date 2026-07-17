@@ -76,6 +76,14 @@ function validateStepConfig(step: NonNullable<WorkflowDraftModel["stepsByKey"][s
     if (typeof config.collection === "string" && config.collection && !COLLECTION_PATTERN.test(config.collection)) issues.push(error("invalid_collection", "Collection may only contain letters, numbers, _ or -.", step.key));
     requiredJsonObject(config.data, issues, step.key, "Data must be a JSON object.");
   }
+  if (step.type.startsWith("data_store_")) {
+    requiredString(config.dataStoreName || config.dataStoreId, issues, step.key, "Data Store is required.");
+    if (["data_store_get_record", "data_store_upsert_record", "data_store_delete_record", "data_store_exists_record"].includes(step.type)) requiredString(config.key, issues, step.key, "Key is required.");
+    if (step.type === "data_store_upsert_record") {
+      requiredJson(config.value, issues, step.key, "Value must be valid JSON.");
+      optionalJsonObject(config.metadata, issues, step.key, "Metadata must be a JSON object.");
+    }
+  }
   if (step.type === "transform") {
     const serialized = safeSerializeConfig(step);
     for (const transformIssue of validateTransformStepConfig(serialized)) {
@@ -166,6 +174,14 @@ function requiredJsonObject(value: unknown, issues: DraftValidationIssue[], step
     return;
   }
   optionalJsonObject(value, issues, stepKey, message);
+}
+
+function requiredJson(value: unknown, issues: DraftValidationIssue[], stepKey: string, message: string) {
+  if (value === undefined || value === null || value === "") {
+    issues.push(error("required_config", message, stepKey));
+    return;
+  }
+  optionalJson(value, issues, stepKey, message);
 }
 
 function error(code: string, message: string, stepKey?: string, handle?: string): DraftValidationIssue {

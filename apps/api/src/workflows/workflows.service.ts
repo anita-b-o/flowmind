@@ -1,6 +1,19 @@
 import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
-import { StepType, validateTransformStepConfig, WorkflowStatus, WorkflowVersionStatus } from "@automation/shared-types";
+import {
+  assertDataStoreKey,
+  assertDataStoreSelector,
+  assertDataStoreMetadata,
+  assertDataStoreValue,
+  DataStoreValidationError,
+  normalizeListLimit,
+  normalizeOffset,
+  StepType,
+  ttlSecondsToExpiresAt,
+  validateTransformStepConfig,
+  WorkflowStatus,
+  WorkflowVersionStatus
+} from "@automation/shared-types";
 import { PrismaService } from "../prisma/prisma.service";
 import { CreateWorkflowDto } from "./dto/create-workflow.dto";
 import { CreateWorkflowVersionDto } from "./dto/create-workflow-version.dto";
@@ -234,9 +247,13 @@ export class WorkflowsService {
 
   private validateStepConfigs(steps: Array<{ type: string; config: Record<string, unknown> }>) {
     for (const step of steps) {
-      if (step.type !== StepType.Transform) continue;
-      const issues = validateTransformStepConfig(step.config);
-      if (issues.length) throw new BadRequestException(issues[0].message);
+      if (step.type === StepType.Transform) {
+        const issues = validateTransformStepConfig(step.config);
+        if (issues.length) throw new BadRequestException(issues[0].message);
+      }
+      if (isDataStoreStep(step.type)) {
+        this.validateDataStoreStepConfig(step.type, step.config);
+      }
     }
   }
 
@@ -248,6 +265,49 @@ export class WorkflowsService {
       throw new BadRequestException("Workflow step references an invalid connection");
     }
   }
+
+  private validateDataStoreStepConfig(type: string, config: Record<string, unknown>) {
+    try {
+      if (!selectorHasExpression(config)) assertDataStoreSelector(config);
+      if ([StepType.DataStoreGetRecord, StepType.DataStoreUpsertRecord, StepType.DataStoreDeleteRecord, StepType.DataStoreExistsRecord].includes(type as StepType)) {
+        if (!(typeof config.key === "string" && config.key.includes("{{"))) assertDataStoreKey(config.key);
+      }
+      if (type === StepType.DataStoreUpsertRecord) {
+        if (config.ttlSeconds !== undefined && !(typeof config.ttlSeconds === "string" && config.ttlSeconds.includes("{{"))) ttlSecondsToExpiresAt(config.ttlSeconds);
+        if (config.value !== undefined && !containsExpression(config.value)) assertDataStoreValue(config.value);
+        if (config.metadata !== undefined && !containsExpression(config.metadata)) assertDataStoreMetadata(config.metadata);
+      }
+      if (type === StepType.DataStoreListRecords) {
+        if (config.limit !== undefined && !(typeof config.limit === "string" && config.limit.includes("{{"))) normalizeListLimit(config.limit);
+        if (config.offset !== undefined && !(typeof config.offset === "string" && config.offset.includes("{{"))) normalizeOffset(config.offset);
+      }
+    } catch (error) {
+      if (error instanceof DataStoreValidationError) throw new BadRequestException(error.message);
+      throw error;
+    }
+  }
+}
+
+function isDataStoreStep(type: string) {
+  return [
+    StepType.DataStoreGetRecord,
+    StepType.DataStoreUpsertRecord,
+    StepType.DataStoreDeleteRecord,
+    StepType.DataStoreExistsRecord,
+    StepType.DataStoreCountRecords,
+    StepType.DataStoreListRecords
+  ].includes(type as StepType);
+}
+
+function containsExpression(value: unknown): boolean {
+  if (typeof value === "string") return value.includes("{{");
+  if (Array.isArray(value)) return value.some(containsExpression);
+  if (value && typeof value === "object") return Object.values(value as Record<string, unknown>).some(containsExpression);
+  return false;
+}
+
+function selectorHasExpression(config: Record<string, unknown>) {
+  return (typeof config.dataStoreId === "string" && config.dataStoreId.includes("{{")) || (typeof config.dataStoreName === "string" && config.dataStoreName.includes("{{"));
 }
 
 function normalizeRetryPolicy(raw: Record<string, unknown>) {

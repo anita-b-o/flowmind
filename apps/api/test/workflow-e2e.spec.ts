@@ -178,6 +178,65 @@ describe("workflow webhook execution e2e", () => {
     });
   }, 30_000);
 
+  it("runs webhook -> transform -> data store upsert/get -> conditional -> database_record", async () => {
+    const user = await register("datastore-smoke@example.com", "Data Store Smoke");
+    const workflow = await createWorkflow(user, "Data Store workflow");
+    const store = await prisma.dataStore.create({
+      data: {
+        organizationId: user.organizationId,
+        name: "Workflow state",
+        description: "E2E smoke state"
+      }
+    });
+    const version = await createDataStoreVersion(user, workflow.id, store.id);
+    const trigger = await createTrigger(user, workflow.id);
+    await request(app.getHttpServer())
+      .patch(`/workflows/${workflow.id}/versions/${version.id}/activate`)
+      .set(authHeaders(user))
+      .expect(200);
+
+    const webhook = await request(app.getHttpServer())
+      .post(`/webhooks/${workflow.id}/${trigger.token}`)
+      .set("Idempotency-Key", "datastore-webhook-1")
+      .send({ sessionId: "session-42", email: "state@example.com", count: 7 })
+      .expect(202);
+
+    const detail = await waitForExecution(webhook.body.executionId, "COMPLETED");
+    expect(detail.body.steps.map((step: any) => [step.stepKey, step.status])).toEqual([
+      ["shape", "COMPLETED"],
+      ["save_state", "COMPLETED"],
+      ["load_state", "COMPLETED"],
+      ["has_state", "COMPLETED"],
+      ["save_result", "COMPLETED"]
+    ]);
+
+    const record = await prisma.dataStoreRecord.findFirstOrThrow({
+      where: { organizationId: user.organizationId, dataStoreId: store.id, key: "session-42", deletedAt: null }
+    });
+    expect(record.version).toBe(1);
+    expect(record.valueJson).toMatchObject({ sessionId: "session-42", email: "state@example.com", count: 7 });
+
+    const getStep = await prisma.stepExecution.findFirstOrThrow({
+      where: { executionId: webhook.body.executionId, stepKey: "load_state" }
+    });
+    expect(getStep.outputJson).toMatchObject({
+      found: true,
+      key: "session-42",
+      version: 1,
+      value: { sessionId: "session-42", email: "state@example.com", count: 7 }
+    });
+    expect(getStep.debugJson).toMatchObject({
+      dataStore: { operation: "get", found: true, key: "session-42", version: 1 }
+    });
+    expect(JSON.stringify(getStep.debugJson)).not.toContain("state@example.com");
+
+    const records = await prisma.internalRecord.findMany({
+      where: { executionId: webhook.body.executionId, collection: "datastore_smoke" }
+    });
+    expect(records).toHaveLength(1);
+    expect(records[0].dataJson).toMatchObject({ sessionId: "session-42", version: 1, count: 7 });
+  }, 30_000);
+
   it("prevents cross-tenant trigger and execution access", async () => {
     const userA = await register("tenant-a@example.com", "Tenant A");
     const userB = await register("tenant-b@example.com", "Tenant B");
@@ -290,6 +349,79 @@ describe("workflow webhook execution e2e", () => {
                 email: "{{steps.shape.output.email}}",
                 priority: "{{steps.shape.output.priority}}",
                 source: "{{steps.shape.output.source}}"
+              }
+            }
+          }
+        ]
+      })
+      .expect(201);
+    return response.body;
+  }
+
+  async function createDataStoreVersion(user: TestUser, workflowId: string, dataStoreId: string) {
+    const response = await request(app.getHttpServer())
+      .post(`/workflows/${workflowId}/versions`)
+      .set(authHeaders(user))
+      .send({
+        trigger: { key: "webhook", name: "Webhook", type: "webhook_trigger", config: {} },
+        steps: [
+          {
+            key: "shape",
+            name: "Shape state",
+            type: "transform",
+            config: {
+              mode: "OBJECT",
+              fields: {
+                sessionId: "{{trigger.body.sessionId}}",
+                email: "{{trigger.body.email}}",
+                count: "{{trigger.body.count}}"
+              },
+              outputType: "OBJECT"
+            }
+          },
+          {
+            key: "save_state",
+            name: "Save state",
+            type: "data_store_upsert_record",
+            config: {
+              dataStoreId,
+              key: "{{steps.shape.output.sessionId}}",
+              value: "{{steps.shape.output}}",
+              metadata: { source: "webhook-smoke" },
+              mode: "replace"
+            }
+          },
+          {
+            key: "load_state",
+            name: "Load state",
+            type: "data_store_get_record",
+            config: {
+              dataStoreId,
+              key: "{{steps.shape.output.sessionId}}",
+              failIfMissing: true
+            }
+          },
+          {
+            key: "has_state",
+            name: "Has state",
+            type: "conditional",
+            config: {
+              left: "{{steps.load_state.output.found}}",
+              operator: "equals",
+              right: true,
+              skipNextOnFalse: true
+            }
+          },
+          {
+            key: "save_result",
+            name: "Save result",
+            type: "database_record",
+            config: {
+              collection: "datastore_smoke",
+              data: {
+                sessionId: "{{steps.load_state.output.key}}",
+                version: "{{steps.load_state.output.version}}",
+                count: "{{steps.load_state.output.value.count}}"
               }
             }
           }

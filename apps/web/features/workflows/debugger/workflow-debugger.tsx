@@ -317,7 +317,7 @@ function collectSideEffectNodes(draft: WorkflowDraftModel) {
 }
 
 function isSideEffectStep(type: string) {
-  return type === "http_request" || type === "email_notification" || type === "database_record" || type.startsWith("ai_");
+  return type === "http_request" || type === "email_notification" || type === "database_record" || type.startsWith("data_store_") || type.startsWith("ai_");
 }
 
 function formatDate(value: string) {

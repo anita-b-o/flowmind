@@ -167,6 +167,25 @@ export class WorkerMetricsService implements OnModuleInit, OnModuleDestroy {
     buckets: [0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5],
     registers: [this.registry]
   });
+  readonly dataStoreOperations = new Counter({
+    name: "flowmind_data_store_operations_total",
+    help: "Data Store operations by outcome.",
+    labelNames: ["operation", "outcome"],
+    registers: [this.registry]
+  });
+  readonly dataStoreErrors = new Counter({
+    name: "flowmind_data_store_errors_total",
+    help: "Data Store operation errors by category.",
+    labelNames: ["operation", "error_category"],
+    registers: [this.registry]
+  });
+  readonly dataStoreLatency = new Histogram({
+    name: "flowmind_data_store_latency_seconds",
+    help: "Data Store operation latency.",
+    labelNames: ["operation", "outcome"],
+    buckets: [0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5],
+    registers: [this.registry]
+  });
 
   constructor() {
     this.registry.setDefaultLabels({ service: "worker" });
@@ -232,6 +251,14 @@ export class WorkerMetricsService implements OnModuleInit, OnModuleDestroy {
       this.transformFailures.inc({ mode: safeMode, category: safeCategory });
       if (safeCategory === "limit_exceeded") this.transformLimitExceeded.inc({ mode: safeMode });
     }
+  }
+
+  recordDataStore(operation: string, outcome: string, durationSeconds: number, errorCategory?: string) {
+    const safeOperation = safeReason(operation);
+    const safeOutcome = safeReason(outcome);
+    this.dataStoreOperations.inc({ operation: safeOperation, outcome: safeOutcome });
+    this.dataStoreLatency.observe({ operation: safeOperation, outcome: safeOutcome }, Math.max(0, durationSeconds));
+    if (errorCategory) this.dataStoreErrors.inc({ operation: safeOperation, error_category: safeReason(errorCategory) });
   }
 
   private hasCredential(authorization: string | undefined, header: string | string[] | undefined) {

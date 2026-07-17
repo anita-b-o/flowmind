@@ -35,6 +35,13 @@ import { ConnectionResolver } from "./connections/connection-resolver";
 import { ConnectionCryptoService } from "./connections/connection-crypto.service";
 import { TestRuntimePolicy } from "./engine/test-runtime-policy";
 import { DebugArtifactRecorder } from "./engine/debug-artifact-recorder";
+import { DataStoreRuntimeService } from "./data-store/data-store-runtime.service";
+import { DataStoreGetRecordHandler } from "./engine/handlers/data-store/get-record.handler";
+import { DataStoreUpsertRecordHandler } from "./engine/handlers/data-store/upsert-record.handler";
+import { DataStoreDeleteRecordHandler } from "./engine/handlers/data-store/delete-record.handler";
+import { DataStoreExistsRecordHandler } from "./engine/handlers/data-store/exists-record.handler";
+import { DataStoreCountRecordsHandler } from "./engine/handlers/data-store/count-records.handler";
+import { DataStoreListRecordsHandler } from "./engine/handlers/data-store/list-records.handler";
 
 const redisUrl = new URL(process.env.REDIS_URL ?? "redis://localhost:6379");
 
@@ -69,6 +76,7 @@ const redisUrl = new URL(process.env.REDIS_URL ?? "redis://localhost:6379");
     JobContextService,
     WorkerLoggerService,
     WorkerMetricsService,
+    DataStoreRuntimeService,
     ConnectionCryptoService,
     ConnectionResolver,
     SafeHttpClient,
@@ -80,6 +88,12 @@ const redisUrl = new URL(process.env.REDIS_URL ?? "redis://localhost:6379");
     WaitUntilHandler,
     TransformHandler,
     DatabaseRecordHandler,
+    DataStoreGetRecordHandler,
+    DataStoreUpsertRecordHandler,
+    DataStoreDeleteRecordHandler,
+    DataStoreExistsRecordHandler,
+    DataStoreCountRecordsHandler,
+    DataStoreListRecordsHandler,
     AiHandler,
     EmailNotificationHandler
   ]

@@ -45,6 +45,18 @@ function stepOutputEntries(step: WorkflowStepLike): VariableCatalogEntry[] {
       return [...common, entry(`${base}.output.passed`, "boolean", `${step.name ?? step.key} passed`, undefined, "steps")];
     case "database_record":
       return [...common, entry(`${base}.output.recordId`, "string", `${step.name ?? step.key} record ID`, undefined, "steps"), entry(`${base}.output.collection`, "string", `${step.name ?? step.key} collection`, undefined, "steps"), entry(`${base}.output.createdAt`, "string", `${step.name ?? step.key} created at`, undefined, "steps")];
+    case "data_store_get_record":
+      return [...common, entry(`${base}.output.found`, "boolean", `${step.name ?? step.key} found`, undefined, "steps"), entry(`${base}.output.key`, "string", `${step.name ?? step.key} key`, undefined, "steps"), entry(`${base}.output.value`, "unknown", `${step.name ?? step.key} value`, undefined, "steps"), entry(`${base}.output.metadata`, "object", `${step.name ?? step.key} metadata`, undefined, "steps"), entry(`${base}.output.version`, "number", `${step.name ?? step.key} version`, undefined, "steps")];
+    case "data_store_upsert_record":
+      return [...common, entry(`${base}.output.created`, "boolean", `${step.name ?? step.key} created`, undefined, "steps"), entry(`${base}.output.updated`, "boolean", `${step.name ?? step.key} updated`, undefined, "steps"), entry(`${base}.output.version`, "number", `${step.name ?? step.key} version`, undefined, "steps"), entry(`${base}.output.value`, "unknown", `${step.name ?? step.key} value`, undefined, "steps")];
+    case "data_store_delete_record":
+      return [...common, entry(`${base}.output.deleted`, "boolean", `${step.name ?? step.key} deleted`, undefined, "steps"), entry(`${base}.output.existed`, "boolean", `${step.name ?? step.key} existed`, undefined, "steps")];
+    case "data_store_exists_record":
+      return [...common, entry(`${base}.output.exists`, "boolean", `${step.name ?? step.key} exists`, undefined, "steps")];
+    case "data_store_count_records":
+      return [...common, entry(`${base}.output.count`, "number", `${step.name ?? step.key} count`, undefined, "steps")];
+    case "data_store_list_records":
+      return [...common, entry(`${base}.output.items`, "array", `${step.name ?? step.key} records`, undefined, "steps"), entry(`${base}.output.limit`, "number", `${step.name ?? step.key} limit`, undefined, "steps"), entry(`${base}.output.offset`, "number", `${step.name ?? step.key} offset`, undefined, "steps"), entry(`${base}.output.hasMore`, "boolean", `${step.name ?? step.key} has more`, undefined, "steps")];
     case "email_notification":
       return [...common, entry(`${base}.output.messageId`, "string", `${step.name ?? step.key} message ID`, undefined, "steps"), entry(`${base}.output.accepted`, "array", `${step.name ?? step.key} accepted recipients`, undefined, "steps")];
     default:

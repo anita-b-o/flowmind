@@ -10,6 +10,12 @@ export const STEP_TYPES: Array<{ value: StepType; label: string }> = [
   { value: "ai_summary", label: "AI Summary" },
   { value: "email_notification", label: "Email" },
   { value: "database_record", label: "Database Record" },
+  { value: "data_store_get_record", label: "Data Store: Get" },
+  { value: "data_store_upsert_record", label: "Data Store: Upsert" },
+  { value: "data_store_delete_record", label: "Data Store: Delete" },
+  { value: "data_store_exists_record", label: "Data Store: Exists" },
+  { value: "data_store_count_records", label: "Data Store: Count" },
+  { value: "data_store_list_records", label: "Data Store: List" },
   { value: "transform", label: "Transform" },
   { value: "if", label: "If" },
   { value: "switch", label: "Switch" },
@@ -59,6 +65,12 @@ export const workflowEditorSchema: z.ZodType<WorkflowEditorFormValue> = z
           "ai_summary",
           "email_notification",
           "database_record",
+          "data_store_get_record",
+          "data_store_upsert_record",
+          "data_store_delete_record",
+          "data_store_exists_record",
+          "data_store_count_records",
+          "data_store_list_records",
           "transform",
           "conditional",
           "if",
@@ -118,6 +130,16 @@ function validateStepConfig(step: StepFormValue, index: number, ctx: z.Refinemen
       ctx.addIssue({ code: "custom", path: ["steps", index, "config", "collection"], message: "Use letters, numbers, _ or - only." });
     }
     requiredJsonObject(config.data, ctx, index, "data", "Data must be a JSON object.");
+  }
+  if (step.type.startsWith("data_store_")) {
+    requiredString(config.dataStoreName || config.dataStoreId, ctx, index, "dataStoreName", "Data Store is required.");
+    if (["data_store_get_record", "data_store_upsert_record", "data_store_delete_record", "data_store_exists_record"].includes(step.type)) {
+      requiredString(config.key, ctx, index, "key", "Key is required.");
+    }
+    if (step.type === "data_store_upsert_record") {
+      optionalJson(config.value, ctx, index, "value", "Value must be valid JSON.");
+      optionalJsonObject(config.metadata, ctx, index, "metadata", "Metadata must be a JSON object.");
+    }
   }
   if (step.type === "transform") {
     const issues = validateTransformStepConfig(safeSerializeStepConfig(step));
@@ -251,6 +273,18 @@ export function defaultConfig(type: StepType): Record<string, unknown> {
       return { connectionId: "", to: "", subject: "", text: "" };
     case "database_record":
       return { collection: "", data: "{}" };
+    case "data_store_get_record":
+      return { dataStoreId: "", dataStoreName: "", key: "", failIfMissing: false };
+    case "data_store_upsert_record":
+      return { dataStoreId: "", dataStoreName: "", key: "", value: "{}", metadata: "{}", ttlSeconds: "", mode: "replace", optimisticConcurrency: false, expectedVersion: "" };
+    case "data_store_delete_record":
+      return { dataStoreId: "", dataStoreName: "", key: "" };
+    case "data_store_exists_record":
+      return { dataStoreId: "", dataStoreName: "", key: "" };
+    case "data_store_count_records":
+      return { dataStoreId: "", dataStoreName: "", keyPrefix: "" };
+    case "data_store_list_records":
+      return { dataStoreId: "", dataStoreName: "", keyPrefix: "", limit: 20, offset: 0, sortBy: "key", direction: "asc" };
     case "transform":
       return { mode: "OBJECT", fields: "{\n  \"result\": \"{{trigger.body}}\"\n}", source: "{{trigger.body}}", paths: "id,name", template: "{\n  \"item\": \"{{item}}\",\n  \"index\": \"{{index}}\"\n}", condition: "{{item.active}}", mergeSources: "[\"{{trigger.body}}\", \"{{steps.previous.output}}\"]", conflictPolicy: "LAST_WINS", outputType: "AUTO" };
     case "conditional":
@@ -309,6 +343,9 @@ function configToForm(type: StepType, config: Record<string, unknown>) {
   }
   if (type === "database_record") {
     return { ...defaults, ...config, data: JSON.stringify(config.data ?? {}, null, 2) };
+  }
+  if (type === "data_store_upsert_record") {
+    return { ...defaults, ...config, value: JSON.stringify(config.value ?? {}, null, 2), metadata: JSON.stringify(config.metadata ?? {}, null, 2) };
   }
   if (type === "transform") {
     return {
@@ -401,6 +438,25 @@ export function serializeStepConfig(step: StepFormValue) {
       };
     case "database_record":
       return { collection: String(config.collection ?? ""), data: parseJsonObject(config.data, {}) };
+    case "data_store_get_record":
+      return dataStoreBaseConfig(config, { key: String(config.key ?? ""), failIfMissing: config.failIfMissing === true || config.failIfMissing === "true" });
+    case "data_store_upsert_record":
+      return dataStoreBaseConfig(config, {
+        key: String(config.key ?? ""),
+        value: parseJson(config.value, {}),
+        metadata: parseJsonObject(config.metadata, {}),
+        ...(config.ttlSeconds !== "" && config.ttlSeconds !== undefined ? { ttlSeconds: Number(config.ttlSeconds) } : {}),
+        mode: config.mode === "merge" ? "merge" : "replace",
+        optimisticConcurrency: config.optimisticConcurrency === true || config.optimisticConcurrency === "true",
+        ...(config.expectedVersion !== "" && config.expectedVersion !== undefined ? { expectedVersion: Number(config.expectedVersion) } : {})
+      });
+    case "data_store_delete_record":
+    case "data_store_exists_record":
+      return dataStoreBaseConfig(config, { key: String(config.key ?? "") });
+    case "data_store_count_records":
+      return dataStoreBaseConfig(config, { keyPrefix: String(config.keyPrefix ?? "") });
+    case "data_store_list_records":
+      return dataStoreBaseConfig(config, { keyPrefix: String(config.keyPrefix ?? ""), limit: Number(config.limit ?? 20), offset: Number(config.offset ?? 0), sortBy: String(config.sortBy ?? "key"), direction: String(config.direction ?? "asc") });
     case "transform":
       return serializeTransformConfig(config);
     case "conditional":
@@ -477,6 +533,14 @@ function parseJson(value: unknown, fallback: unknown) {
 function parseJsonArray(value: unknown, fallback: unknown[]) {
   const parsed = parseJson(value, fallback);
   return Array.isArray(parsed) ? parsed : fallback;
+}
+
+function dataStoreBaseConfig(config: Record<string, unknown>, extra: Record<string, unknown>) {
+  return {
+    ...(config.dataStoreId ? { dataStoreId: String(config.dataStoreId) } : {}),
+    ...(config.dataStoreName ? { dataStoreName: String(config.dataStoreName) } : {}),
+    ...extra
+  };
 }
 
 function parsePaths(value: unknown) {

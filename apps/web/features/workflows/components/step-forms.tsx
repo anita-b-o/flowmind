@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useMemo, useState } from "react";
 import type { FieldErrors, UseFormGetValues, UseFormRegister, UseFormSetValue } from "react-hook-form";
 import { useConnections } from "../../connections/hooks";
+import { useDataStores } from "../../data-stores/hooks";
 import type { WorkflowEditorFormValue } from "../workflow-builder";
 import { catalogForSteps } from "../expressions";
 import { ExpressionPreview } from "./expression-preview";
@@ -31,6 +32,9 @@ export function StepForm({ index, type, register, errors, disabled, setValue, ge
   }
   if (type === "database_record") {
     return <DatabaseStepForm index={index} register={register} errors={errors} disabled={disabled} setValue={setValue} getValues={getValues} />;
+  }
+  if (type.startsWith("data_store_")) {
+    return <DataStoreStepForm index={index} type={type} register={register} errors={errors} disabled={disabled} setValue={setValue} getValues={getValues} />;
   }
   if (type === "transform") {
     return <TransformStepForm index={index} register={register} errors={errors} disabled={disabled} setValue={setValue} getValues={getValues} />;
@@ -208,6 +212,115 @@ export function DatabaseStepForm({ index, register, errors, disabled, setValue, 
         <ExpressionTools field={`steps.${index}.config.data`} entries={entries} previousKeys={previousKeys} disabled={disabled} getValues={getValues} setValue={setValue} />
         <FieldError message={configError(errors, index, "data")} />
       </label>
+    </div>
+  );
+}
+
+export function DataStoreStepForm({ index, type, register, errors, disabled, setValue, getValues }: StepFormProps & { type: string }) {
+  const dataStores = useDataStores();
+  const entries = catalogForSteps(getValues("steps"), index);
+  const previousKeys = getValues("steps").slice(0, index).map((step) => step.key);
+  return (
+    <div className="stack">
+      <div className="workflow-form-grid">
+        <label>
+          Data Store
+          <select disabled={disabled || dataStores.isLoading} {...register(`steps.${index}.config.dataStoreId`)}>
+            <option value="">Select a Data Store</option>
+            {dataStores.data?.map((store) => (
+              <option key={store.id} value={store.id}>
+                {store.name}
+              </option>
+            ))}
+          </select>
+          <FieldError message={configError(errors, index, "dataStoreId") ?? configError(errors, index, "dataStoreName")} />
+        </label>
+        {["data_store_get_record", "data_store_upsert_record", "data_store_delete_record", "data_store_exists_record"].includes(type) && (
+          <label>
+            Key
+            <input disabled={disabled} {...register(`steps.${index}.config.key`)} />
+            <ExpressionTools field={`steps.${index}.config.key`} entries={entries} previousKeys={previousKeys} disabled={disabled} getValues={getValues} setValue={setValue} />
+            <FieldError message={configError(errors, index, "key")} />
+          </label>
+        )}
+        {(type === "data_store_count_records" || type === "data_store_list_records") && (
+          <label>
+            Key prefix
+            <input disabled={disabled} {...register(`steps.${index}.config.keyPrefix`)} />
+            <ExpressionTools field={`steps.${index}.config.keyPrefix`} entries={entries} previousKeys={previousKeys} disabled={disabled} getValues={getValues} setValue={setValue} />
+          </label>
+        )}
+      </div>
+      {type === "data_store_get_record" && (
+        <label className="workflow-checkbox">
+          <input type="checkbox" disabled={disabled} {...register(`steps.${index}.config.failIfMissing`)} />
+          Fail if missing
+        </label>
+      )}
+      {type === "data_store_upsert_record" && (
+        <>
+          <div className="workflow-form-grid">
+            <label>
+              Mode
+              <select disabled={disabled} {...register(`steps.${index}.config.mode`)}>
+                <option value="replace">Replace</option>
+                <option value="merge">Merge object</option>
+              </select>
+            </label>
+            <label>
+              TTL seconds
+              <input type="number" min={0} disabled={disabled} {...register(`steps.${index}.config.ttlSeconds`)} />
+            </label>
+            <label className="workflow-checkbox">
+              <input type="checkbox" disabled={disabled} {...register(`steps.${index}.config.optimisticConcurrency`)} />
+              Optimistic concurrency
+            </label>
+            <label>
+              Expected version
+              <input type="number" min={1} disabled={disabled} {...register(`steps.${index}.config.expectedVersion`)} />
+            </label>
+          </div>
+          <label>
+            Value
+            <textarea rows={6} disabled={disabled} {...register(`steps.${index}.config.value`)} />
+            <ExpressionTools field={`steps.${index}.config.value`} entries={entries} previousKeys={previousKeys} disabled={disabled} getValues={getValues} setValue={setValue} />
+            <FieldError message={configError(errors, index, "value")} />
+          </label>
+          <label>
+            Metadata
+            <textarea rows={3} disabled={disabled} {...register(`steps.${index}.config.metadata`)} />
+            <ExpressionTools field={`steps.${index}.config.metadata`} entries={entries} previousKeys={previousKeys} disabled={disabled} getValues={getValues} setValue={setValue} />
+            <FieldError message={configError(errors, index, "metadata")} />
+          </label>
+        </>
+      )}
+      {type === "data_store_list_records" && (
+        <div className="workflow-form-grid">
+          <label>
+            Limit
+            <input type="number" min={1} max={100} disabled={disabled} {...register(`steps.${index}.config.limit`, { valueAsNumber: true })} />
+          </label>
+          <label>
+            Offset
+            <input type="number" min={0} disabled={disabled} {...register(`steps.${index}.config.offset`, { valueAsNumber: true })} />
+          </label>
+          <label>
+            Sort
+            <select disabled={disabled} {...register(`steps.${index}.config.sortBy`)}>
+              <option value="key">Key</option>
+              <option value="createdAt">Created at</option>
+              <option value="updatedAt">Updated at</option>
+            </select>
+          </label>
+          <label>
+            Direction
+            <select disabled={disabled} {...register(`steps.${index}.config.direction`)}>
+              <option value="asc">Ascending</option>
+              <option value="desc">Descending</option>
+            </select>
+          </label>
+        </div>
+      )}
     </div>
   );
 }

@@ -163,6 +163,8 @@ model Organization {
   internalRecords      InternalRecord[]
   organizationVariables OrganizationVariable[]
   workflowVariables    WorkflowVariable[]
+  dataStores           DataStore[]
+  dataStoreRecords     DataStoreRecord[]
 
   @@map("organizations")
 }
@@ -574,6 +576,43 @@ model InternalRecord {
   @@unique([organizationId, executionId, collection, dedupeKey])
   @@index([organizationId, collection, createdAt])
   @@map("internal_records")
+}
+
+model DataStore {
+  id             String    @id @default(uuid())
+  organizationId String    @map("organization_id")
+  name           String
+  description    String?
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+  deletedAt      DateTime? @map("deleted_at")
+
+  organization Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  records      DataStoreRecord[]
+
+  @@index([organizationId, deletedAt, updatedAt])
+  @@map("data_stores")
+}
+
+model DataStoreRecord {
+  id             String    @id @default(uuid())
+  organizationId String    @map("organization_id")
+  dataStoreId    String    @map("data_store_id")
+  key            String
+  valueJson      Json      @map("value_json")
+  metadataJson   Json      @default("{}") @map("metadata_json")
+  expiresAt      DateTime? @map("expires_at")
+  version        Int       @default(1)
+  deletedAt      DateTime? @map("deleted_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  dataStore    DataStore    @relation(fields: [dataStoreId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, dataStoreId, deletedAt, key])
+  @@index([dataStoreId, expiresAt, deletedAt])
+  @@map("data_store_records")
 }
 
 model DeadLetterExecution {

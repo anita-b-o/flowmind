@@ -38,6 +38,10 @@ export function canDeleteConnections(role: OrganizationRole) {
   return roleRank(role) >= rank.owner;
 }
 
+export function canManageDataStores(role: OrganizationRole) {
+  return roleRank(role) >= rank.editor;
+}
+
 function roleRank(role: OrganizationRole) {
   return role ? rank[role] ?? 0 : 0;
 }

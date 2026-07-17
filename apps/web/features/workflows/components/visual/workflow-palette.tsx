@@ -32,6 +32,12 @@ const GROUPS: Array<{ label: string; items: Array<{ type: StepType; name: string
     items: [
       { type: "transform", name: "Transform", description: "Shape data with safe expressions.", icon: "TX" },
       { type: "database_record", name: "Database Record", description: "Write a workflow record.", icon: "DB" },
+      { type: "data_store_get_record", name: "Data Store Get", description: "Read persistent workflow state.", icon: "GET" },
+      { type: "data_store_upsert_record", name: "Data Store Upsert", description: "Create or update a record.", icon: "PUT" },
+      { type: "data_store_delete_record", name: "Data Store Delete", description: "Soft delete a record.", icon: "DEL" },
+      { type: "data_store_exists_record", name: "Data Store Exists", description: "Check whether a key exists.", icon: "EX" },
+      { type: "data_store_count_records", name: "Data Store Count", description: "Count records.", icon: "#" },
+      { type: "data_store_list_records", name: "Data Store List", description: "Page through records.", icon: "LS" },
       { type: "email_notification", name: "Email", description: "Send via SMTP connection.", icon: "MAIL" }
     ]
   }

@@ -55,7 +55,13 @@ export enum StepType {
   WaitUntil = "wait_until",
   EmailNotification = "email_notification",
   DatabaseRecord = "database_record",
-  Transform = "transform"
+  Transform = "transform",
+  DataStoreGetRecord = "data_store_get_record",
+  DataStoreUpsertRecord = "data_store_upsert_record",
+  DataStoreDeleteRecord = "data_store_delete_record",
+  DataStoreExistsRecord = "data_store_exists_record",
+  DataStoreCountRecords = "data_store_count_records",
+  DataStoreListRecords = "data_store_list_records"
 }
 
 export enum ConnectionType {
@@ -183,3 +189,4 @@ export * from "./test-runs";
 export * from "./graph-validation";
 export * from "./execution-lifecycle";
 export * from "./transform-step";
+export * from "./data-store";

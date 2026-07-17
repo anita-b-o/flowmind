@@ -148,6 +148,9 @@ export class StepExecutor {
       if (input.step.type === StepType.Transform) {
         await this.debugRecorder?.record(input.stepExecution.id, transformDebugArtifact(input.step.config, result.output));
       }
+      if (isDataStoreStep(input.step.type)) {
+        await this.debugRecorder?.record(input.stepExecution.id, dataStoreDebugArtifact(resolvedStep.config, result.output));
+      }
       const completedAt = new Date();
       const control = result.control;
       const waitUntil = control?.waitUntil ? new Date(control.waitUntil) : null;
@@ -380,6 +383,68 @@ function transformDebugValue(value: unknown): unknown {
     return { type: "array", length: value.length, preview: value.slice(0, 5).map((entry) => limitValue(entry)) };
   }
   return limitValue(value);
+}
+
+function isDataStoreStep(type: string) {
+  return String(type).startsWith("data_store_");
+}
+
+function dataStoreDebugArtifact(config: Record<string, unknown>, output: unknown) {
+  const result = output && typeof output === "object" ? (output as Record<string, unknown>) : {};
+  return {
+    resolvedConfig: dataStoreSafeConfig(config),
+    dataStore: {
+      operation: dataStoreOperation(config, result),
+      key: typeof config.key === "string" ? config.key : undefined,
+      found: result.found,
+      created: result.created,
+      updated: result.updated,
+      deleted: result.deleted,
+      existed: result.existed,
+      exists: result.exists,
+      count: result.count,
+      version: result.version,
+      list: Array.isArray(result.items) ? { items: result.items.length, hasMore: result.hasMore, limit: result.limit, offset: result.offset } : undefined,
+      result: {
+        found: result.found,
+        created: result.created,
+        updated: result.updated,
+        deleted: result.deleted,
+        existed: result.existed,
+        exists: result.exists,
+        count: result.count,
+        version: result.version,
+        list: Array.isArray(result.items) ? { items: result.items.length, hasMore: result.hasMore, limit: result.limit, offset: result.offset } : undefined
+      }
+    }
+  };
+}
+
+function dataStoreOperation(config: Record<string, unknown>, output: Record<string, unknown>) {
+  if ("created" in output || "updated" in output) return "upsert";
+  if ("deleted" in output) return "delete";
+  if ("exists" in output) return "exists";
+  if ("count" in output) return "count";
+  if ("items" in output) return "list";
+  if ("found" in output) return "get";
+  return String(config.operation ?? "unknown");
+}
+
+function dataStoreSafeConfig(config: Record<string, unknown>) {
+  return {
+    dataStoreId: config.dataStoreId,
+    dataStoreName: config.dataStoreName,
+    key: config.key,
+    keyPrefix: config.keyPrefix,
+    mode: config.mode,
+    ttlSeconds: config.ttlSeconds,
+    optimisticConcurrency: config.optimisticConcurrency,
+    expectedVersion: config.expectedVersion,
+    limit: config.limit,
+    offset: config.offset,
+    sortBy: config.sortBy,
+    direction: config.direction
+  };
 }
 
 function isStructuredStepError(error: unknown) {

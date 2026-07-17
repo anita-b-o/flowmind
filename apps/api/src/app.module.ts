@@ -18,6 +18,7 @@ import { WorkflowTestRunsModule } from "./workflow-test-runs/workflow-test-runs.
 import { ConnectionsModule } from "./connections/connections.module";
 import { ExpressionsModule } from "./expressions/expressions.module";
 import { VariablesModule } from "./variables/variables.module";
+import { DataStoresModule } from "./data-stores/data-stores.module";
 
 const redisUrl = new URL(process.env.REDIS_URL ?? "redis://localhost:6379");
 
@@ -39,6 +40,7 @@ const redisUrl = new URL(process.env.REDIS_URL ?? "redis://localhost:6379");
     OrganizationsModule,
     ConnectionsModule,
     VariablesModule,
+    DataStoresModule,
     ExpressionsModule,
     WorkflowsModule,
     WorkflowTestRunsModule,
