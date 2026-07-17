@@ -35,6 +35,7 @@ export type DraftValidationIssue = {
   code: string;
   message: string;
   stepKey?: string;
+  edgeId?: string;
   handle?: string;
   severity: "error" | "warning";
 };
@@ -55,7 +56,7 @@ export type WorkflowNodeData = {
 };
 
 export type WorkflowFlowNode = Node<WorkflowNodeData>;
-export type WorkflowFlowEdge = Edge<{ uiOnly?: boolean; label?: string }>;
+export type WorkflowFlowEdge = Edge<{ uiOnly?: boolean; label?: string; issues?: DraftValidationIssue[] }>;
 
 export function graphKindToHandle(edge: WorkflowGraphDto["edges"][number]) {
   if (edge.kind === "if_true") return "true";

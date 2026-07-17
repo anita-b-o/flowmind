@@ -100,9 +100,10 @@ export function draftToGraph(draft: WorkflowDraftModel): WorkflowGraphDto {
 
 export function draftToReactFlow(draft: WorkflowDraftModel): { nodes: WorkflowFlowNode[]; edges: WorkflowFlowEdge[] } {
   const issueByStep = new Map<string, typeof draft.validation.issues>();
+  const issueByEdge = new Map<string, typeof draft.validation.issues>();
   for (const issue of draft.validation.issues) {
-    if (!issue.stepKey) continue;
-    issueByStep.set(issue.stepKey, [...(issueByStep.get(issue.stepKey) ?? []), issue]);
+    if (issue.edgeId) issueByEdge.set(issue.edgeId, [...(issueByEdge.get(issue.edgeId) ?? []), issue]);
+    if (issue.stepKey) issueByStep.set(issue.stepKey, [...(issueByStep.get(issue.stepKey) ?? []), issue]);
   }
   const nodes: WorkflowFlowNode[] = [
     {
@@ -153,7 +154,8 @@ export function draftToReactFlow(draft: WorkflowDraftModel): { nodes: WorkflowFl
       target: edge.target,
       targetHandle: "in",
       label: edge.sourceHandle === "next" ? undefined : edge.sourceHandle.replace("case:", ""),
-      data: { label: edge.sourceHandle }
+      className: issueByEdge.get(graphEdgeIssueId(edge))?.some((issue) => issue.severity === "error") ? "workflow-edge-invalid" : undefined,
+      data: { label: edge.sourceHandle, issues: issueByEdge.get(graphEdgeIssueId(edge)) ?? [] }
     }))
   ];
   return { nodes, edges };
@@ -214,7 +216,8 @@ export function duplicateStepInDraft(draft: WorkflowDraftModel, key: string): Wo
   const step = draft.stepsByKey[key];
   if (!step) return draft;
   const nextKey = generateStepKey(step.type, draft.stepOrder);
-  const copy = { ...step, id: crypto.randomUUID(), key: nextKey, name: `${step.name} copy`, expanded: true };
+  const sourcePosition = draft.ui.nodes?.[key] ?? { x: 260, y: 0 };
+  const copy = { ...step, id: crypto.randomUUID(), key: nextKey, name: `${step.name} copy`, config: sanitizeCopiedConfig(step.config), expanded: true };
   const index = draft.stepOrder.indexOf(key);
   const stepOrder = [...draft.stepOrder];
   stepOrder.splice(index + 1, 0, nextKey);
@@ -222,8 +225,9 @@ export function duplicateStepInDraft(draft: WorkflowDraftModel, key: string): Wo
     ...draft,
     stepsByKey: { ...draft.stepsByKey, [nextKey]: copy },
     stepOrder,
+    ui: { ...draft.ui, nodes: { ...(draft.ui.nodes ?? {}), [nextKey]: { x: sourcePosition.x + 40, y: sourcePosition.y + 40 } } },
     selectedStepKey: nextKey,
-    dirty: { ...draft.dirty, semantic: true }
+    dirty: { ...draft.dirty, semantic: true, layout: true }
   });
 }
 
@@ -235,6 +239,8 @@ export function connectDraftEdge(draft: WorkflowDraftModel, connection: Connecti
     return { draft, error: "Invalid connection." };
   }
   if (!draft.stepsByKey[source] || !draft.stepsByKey[target]) return { draft, error: "Connection references a missing step." };
+  const semanticError = validateHandleForSource(draft.stepsByKey[source].type, sourceHandle);
+  if (semanticError) return { draft, error: semanticError };
   if (draft.edges.some((edge) => edge.source === source && edge.sourceHandle === sourceHandle)) return { draft, error: "This output already has a target." };
   const edge = { source, sourceHandle, target };
   if (wouldCreateCycle(draft, edge)) return { draft, error: "This connection would create a cycle." };
@@ -303,6 +309,28 @@ function switchCaseMetadata(step: StepFormValue | undefined, handle: string) {
   const cases = Array.isArray(step?.config.cases) ? (step?.config.cases as Array<Record<string, unknown>>) : [];
   const entry = cases.find((item) => String(item.key ?? "") === caseKey);
   return { caseKey, label: String(entry?.label ?? entry?.key ?? caseKey) };
+}
+
+function graphEdgeIssueId(edge: DraftEdge) {
+  const kind = handleToGraphKind(edge.sourceHandle);
+  const caseKey = kind === "switch_case" ? caseKeyFromHandle(edge.sourceHandle) ?? "" : "";
+  return `${edge.source}:${kind}:${caseKey}->${edge.target}`;
+}
+
+function sanitizeCopiedConfig(config: Record<string, unknown>) {
+  const result: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(config)) {
+    const lower = key.toLowerCase();
+    if (lower.includes("secret") || lower.includes("password") || lower.includes("token") || lower === "authorization") continue;
+    result[key] = value;
+  }
+  return result;
+}
+
+function validateHandleForSource(type: StepType, handle: string) {
+  if (type === "if") return handle === "true" || handle === "false" ? undefined : "If nodes must connect from True or False.";
+  if (type === "switch") return handle === "default" || handle.startsWith("case:") ? undefined : "Switch nodes must connect from a case or Default.";
+  return handle === "next" ? undefined : "This node type can only use a Next connection.";
 }
 
 function stepSummary(step: StepFormValue) {

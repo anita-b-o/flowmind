@@ -54,6 +54,19 @@ export function SwitchStepForm({ index, register, errors, disabled, setValue, ge
   function updateCases(next: Array<Record<string, unknown>>) {
     setValue(`steps.${index}.config.cases`, next, { shouldDirty: true, shouldValidate: true });
   }
+  function removeCase(caseIndex: number) {
+    const entry = cases[caseIndex];
+    if (entry?.stepKey && !window.confirm("Remove this case and its connected branch?")) return;
+    updateCases(cases.filter((_, idx) => idx !== caseIndex));
+  }
+  function moveCase(caseIndex: number, direction: -1 | 1) {
+    const nextIndex = caseIndex + direction;
+    if (nextIndex < 0 || nextIndex >= cases.length) return;
+    const next = [...cases];
+    const [item] = next.splice(caseIndex, 1);
+    next.splice(nextIndex, 0, item);
+    updateCases(next);
+  }
   return (
     <div className="stack">
       <label>
@@ -95,7 +108,13 @@ export function SwitchStepForm({ index, register, errors, disabled, setValue, ge
               ))}
             </select>
           </label>
-          <button type="button" disabled={disabled || cases.length <= 1} onClick={() => updateCases(cases.filter((_, idx) => idx !== caseIndex))}>
+          <button type="button" disabled={disabled || caseIndex === 0} onClick={() => moveCase(caseIndex, -1)}>
+            Move up
+          </button>
+          <button type="button" disabled={disabled || caseIndex === cases.length - 1} onClick={() => moveCase(caseIndex, 1)}>
+            Move down
+          </button>
+          <button type="button" disabled={disabled || cases.length <= 1} onClick={() => removeCase(caseIndex)}>
             Remove case
           </button>
         </div>

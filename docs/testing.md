@@ -30,6 +30,12 @@ pnpm test:integration
 - Graph flow tests for If, Switch, skipped branches, Delay, and Wait Until resume.
 - Test runtime policy tests for HTTP mock success/error/timeout, AI mock tokens/cost, email preview, database dry-run, and test failures without production DLQ entries.
 
+## Workflow Builder
+
+- Graph v2 validation helpers cover valid connections, self-loops, cycles, disconnected nodes, duplicate step IDs/keys, If/Switch branch rules, required config, and expression availability.
+- Visual editor tests cover dirty state, save success/error, duplicate-save prevention, autosave recovery, debugger source choice, and read-only activation flow.
+- Autosave tests must use mocked browser storage and must not store tokens, decrypted secrets, or credentials.
+
 ## AI Service
 
 - Pydantic schema validation.

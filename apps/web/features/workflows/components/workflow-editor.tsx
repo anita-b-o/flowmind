@@ -4,11 +4,14 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useFieldArray, useForm } from "react-hook-form";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { useAuth } from "../../auth/use-auth";
 import { ConfirmDialog } from "../../../components/confirm-dialog";
 import { ErrorMessage } from "../../../components/error-message";
 import { StatusBadge } from "../../../components/status-badge";
 import { draftToFormValue, draftToWorkflowDefinitionDto, formValueToDraft, workflowVersionToDraft } from "../draft-adapters";
 import type { WorkflowDraftModel } from "../draft-model";
+import { createDraftHistory, pushDraftHistory, redoDraftHistory, resetDraftHistory, undoDraftHistory } from "../draft-history";
+import { discardDraftSnapshot, loadDraftSnapshot, saveDraftSnapshot, type DraftAutosaveSnapshot } from "../draft-autosave";
 import { useActivateWorkflowVersion, useCreateWorkflowVersion } from "../hooks";
 import type { WorkflowDetail, WorkflowVersion } from "../types";
 import { emptyStep, STEP_TYPES, workflowEditorSchema, type StepFormValue, type WorkflowEditorFormValue } from "../workflow-builder";
@@ -17,9 +20,12 @@ import { WorkflowVisualEditor } from "./visual/workflow-visual-editor";
 import { WorkflowDebugger } from "../debugger/workflow-debugger";
 
 type EditorMode = "visual" | "form" | "debugger";
+type SaveState = "clean" | "dirty" | "saving" | "saved" | "save_error" | "recovered" | "stale_or_conflict";
+type DebuggerSource = "version" | "draft";
 
 export function WorkflowEditor({ workflow, onRefresh }: { workflow: WorkflowDetail; onRefresh: () => void }) {
   const router = useRouter();
+  const auth = useAuth();
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const requestedVersionId = searchParams.get("version");
@@ -31,6 +37,10 @@ export function WorkflowEditor({ workflow, onRefresh }: { workflow: WorkflowDeta
   const [typeNotice, setTypeNotice] = useState<string | null>(null);
   const [stepTypeToAdd, setStepTypeToAdd] = useState<StepFormValue["type"]>("http_request");
   const [mode, setMode] = useState<EditorMode>("visual");
+  const [saveState, setSaveState] = useState<SaveState>("clean");
+  const [recoverySnapshot, setRecoverySnapshot] = useState<DraftAutosaveSnapshot | null>(null);
+  const [debuggerConfirmOpen, setDebuggerConfirmOpen] = useState(false);
+  const [debuggerSource, setDebuggerSource] = useState<DebuggerSource>("version");
   const selectedVersion = workflow.versions.find((version) => version.id === selectedVersionId);
   const versionForForm = selectedVersion ?? latestVersion;
   const isLatest = Boolean(selectedVersion && latestVersion && selectedVersion.id === latestVersion.id);
@@ -38,8 +48,19 @@ export function WorkflowEditor({ workflow, onRefresh }: { workflow: WorkflowDeta
   const createVersion = useCreateWorkflowVersion(workflow.id);
   const activateVersion = useActivateWorkflowVersion(workflow.id);
   const initialDraft = useMemo(() => workflowVersionToDraft(workflow, versionForForm, !isEditable), [workflow, versionForForm, isEditable]);
-  const [draft, setDraft] = useState<WorkflowDraftModel>(initialDraft);
+  const [history, setHistory] = useState(() => createDraftHistory(initialDraft));
+  const draft = history.present;
   const syncingRef = useRef(false);
+  const dirtyRef = useRef(false);
+  const autosaveIdentity = useMemo(
+    () => ({
+      userId: auth.user?.id,
+      organizationId: auth.activeOrganizationId,
+      workflowId: workflow.id,
+      versionId: selectedVersion?.id ?? latestVersion?.id ?? "local-draft"
+    }),
+    [auth.activeOrganizationId, auth.user?.id, latestVersion?.id, selectedVersion?.id, workflow.id]
+  );
 
   const {
     register,
@@ -60,7 +81,8 @@ export function WorkflowEditor({ workflow, onRefresh }: { workflow: WorkflowDeta
   const steps = watch("steps");
 
   useEffect(() => {
-    setDraft(initialDraft);
+    setHistory((current) => resetDraftHistory(current, initialDraft));
+    setSaveState("clean");
     syncingRef.current = true;
     reset(draftToFormValue(initialDraft));
     queueMicrotask(() => {
@@ -71,23 +93,65 @@ export function WorkflowEditor({ workflow, onRefresh }: { workflow: WorkflowDeta
   useEffect(() => {
     const subscription = watch((value) => {
       if (syncingRef.current || draft.readOnly || !value.name || !Array.isArray(value.steps)) return;
-      setDraft((current) => formValueToDraft(value as WorkflowEditorFormValue, current));
+      applyDraft(formValueToDraft(value as WorkflowEditorFormValue, draft));
     });
     return () => subscription.unsubscribe();
-  }, [watch, draft.readOnly]);
+  }, [watch, draft]);
+
+  useEffect(() => {
+    dirtyRef.current = hasUnsavedChanges();
+  });
+
+  useEffect(() => {
+    if (typeof window === "undefined" || draft.readOnly) return;
+    const snapshot = loadDraftSnapshot(window.localStorage, autosaveIdentity);
+    if (snapshot && snapshot.savedAt > (versionForForm?.createdAt ?? "")) {
+      setRecoverySnapshot(snapshot);
+    }
+  }, [autosaveIdentity, draft.readOnly, versionForForm?.createdAt]);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || draft.readOnly || !hasUnsavedChanges()) return;
+    const handle = window.setTimeout(() => {
+      saveDraftSnapshot(window.localStorage, autosaveIdentity, draft);
+    }, 800);
+    return () => window.clearTimeout(handle);
+  }, [autosaveIdentity, draft]);
 
   useEffect(() => {
     const listener = (event: BeforeUnloadEvent) => {
-      if (isDirty || draft.dirty.semantic || draft.dirty.layout) {
+      if (dirtyRef.current) {
         event.preventDefault();
       }
     };
     window.addEventListener("beforeunload", listener);
     return () => window.removeEventListener("beforeunload", listener);
-  }, [isDirty, draft.dirty.semantic, draft.dirty.layout]);
+  }, []);
 
-  function applyDraft(next: WorkflowDraftModel, options: { syncForm?: boolean } = {}) {
-    setDraft(next);
+  useEffect(() => {
+    const listener = (event: KeyboardEvent) => {
+      const isModifier = event.metaKey || event.ctrlKey;
+      if (!isModifier || draft.readOnly) return;
+      const target = event.target as HTMLElement | null;
+      if (target && ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName)) return;
+      if (event.key.toLowerCase() === "z" && event.shiftKey) {
+        event.preventDefault();
+        redo();
+      } else if (event.key.toLowerCase() === "z") {
+        event.preventDefault();
+        undo();
+      } else if (event.key.toLowerCase() === "y") {
+        event.preventDefault();
+        redo();
+      }
+    };
+    window.addEventListener("keydown", listener);
+    return () => window.removeEventListener("keydown", listener);
+  }, [draft.readOnly, history]);
+
+  function applyDraft(next: WorkflowDraftModel, options: { syncForm?: boolean; record?: boolean } = {}) {
+    setHistory((current) => pushDraftHistory(current, next, { record: options.record }));
+    if (saveState !== "recovered") setSaveState("dirty");
     if (options.syncForm !== false) {
       syncingRef.current = true;
       reset(draftToFormValue(next), { keepDirty: true, keepErrors: true });
@@ -98,15 +162,26 @@ export function WorkflowEditor({ workflow, onRefresh }: { workflow: WorkflowDeta
   }
 
   async function submit(values: WorkflowEditorFormValue) {
+    if (createVersion.isPending) return undefined;
     const nextDraft = formValueToDraft(values, draft);
     applyDraft(nextDraft, { syncForm: false });
     if (nextDraft.validation.issues.some((issue) => issue.severity === "error")) {
+      setSaveState("save_error");
       return;
     }
-    const version = (await createVersion.mutateAsync(draftToWorkflowDefinitionDto(nextDraft))) as WorkflowVersion;
-    setSelectedVersionId(version.id);
-    router.replace(`${pathname}?version=${version.id}`);
-    onRefresh();
+    try {
+      setSaveState("saving");
+      const version = (await createVersion.mutateAsync(draftToWorkflowDefinitionDto(nextDraft))) as WorkflowVersion;
+      setSaveState("saved");
+      if (typeof window !== "undefined") discardDraftSnapshot(window.localStorage, autosaveIdentity);
+      setSelectedVersionId(version.id);
+      router.replace(`${pathname}?version=${version.id}`);
+      onRefresh();
+      return version;
+    } catch (error) {
+      setSaveState("save_error");
+      return undefined;
+    }
   }
 
   async function confirmActivation() {
@@ -117,11 +192,88 @@ export function WorkflowEditor({ workflow, onRefresh }: { workflow: WorkflowDeta
   }
 
   function selectVersion(versionId: string) {
-    if ((isDirty || draft.dirty.semantic || draft.dirty.layout) && !window.confirm("Discard local draft changes?")) {
+    if (hasUnsavedChanges() && !window.confirm("Discard local draft changes?")) {
       return;
     }
     setSelectedVersionId(versionId);
     router.replace(versionId === "draft" ? pathname : `${pathname}?version=${versionId}`);
+  }
+
+  function undo() {
+    const next = undoDraftHistory(history);
+    setHistory(next);
+    syncFormFromDraft(next.present);
+    setSaveState("dirty");
+  }
+
+  function redo() {
+    const next = redoDraftHistory(history);
+    setHistory(next);
+    syncFormFromDraft(next.present);
+    setSaveState("dirty");
+  }
+
+  function syncFormFromDraft(next: WorkflowDraftModel) {
+    syncingRef.current = true;
+    reset(draftToFormValue(next), { keepDirty: true, keepErrors: true });
+    queueMicrotask(() => {
+      syncingRef.current = false;
+    });
+  }
+
+  function hasUnsavedChanges() {
+    return isDirty || draft.dirty.semantic || draft.dirty.layout || saveState === "recovered";
+  }
+
+  function restoreSnapshot(snapshot: DraftAutosaveSnapshot) {
+    applyDraft({ ...snapshot.draft, readOnly: false }, { syncForm: true });
+    setSaveState("recovered");
+    setRecoverySnapshot(null);
+  }
+
+  function discardSnapshot() {
+    if (typeof window !== "undefined") discardDraftSnapshot(window.localStorage, autosaveIdentity);
+    setRecoverySnapshot(null);
+  }
+
+  function discardDraft() {
+    setHistory((current) => resetDraftHistory(current, initialDraft));
+    syncFormFromDraft(initialDraft);
+    setSaveState("clean");
+    if (typeof window !== "undefined") discardDraftSnapshot(window.localStorage, autosaveIdentity);
+  }
+
+  async function openDebuggerFromChoice(source: DebuggerSource) {
+    if (source === "version") {
+      setDebuggerSource("version");
+      setMode("debugger");
+      setDebuggerConfirmOpen(false);
+      return;
+    }
+    setDebuggerSource("draft");
+    setMode("debugger");
+    setDebuggerConfirmOpen(false);
+  }
+
+  async function saveAndOpenDebugger() {
+    const version = await submit(getValues());
+    if (!version) return;
+    setDebuggerSource("version");
+    setMode("debugger");
+    setDebuggerConfirmOpen(false);
+  }
+
+  function requestMode(nextMode: EditorMode) {
+    if (nextMode !== "debugger") {
+      setMode(nextMode);
+      return;
+    }
+    if (hasUnsavedChanges()) {
+      setDebuggerConfirmOpen(true);
+      return;
+    }
+    setDebuggerSource("version");
+    setMode("debugger");
   }
 
   async function addStep(type = stepTypeToAdd) {
@@ -143,6 +295,7 @@ export function WorkflowEditor({ workflow, onRefresh }: { workflow: WorkflowDeta
   }
 
   const hasDraftErrors = draft.validation.issues.some((issue) => issue.severity === "error");
+  const saveLabel = saveStateLabel(saveState, createVersion.isPending);
 
   return (
     <div className="workflow-layout">
@@ -153,7 +306,7 @@ export function WorkflowEditor({ workflow, onRefresh }: { workflow: WorkflowDeta
         </div>
         <button type="button" className={selectedVersionId === "draft" ? "version-item active" : "version-item"} onClick={() => selectVersion("draft")}>
           <strong>Local draft</strong>
-          <span className="muted">{isDirty || draft.dirty.semantic || draft.dirty.layout ? "Unsaved changes" : "Editable draft"}</span>
+          <span className="muted">{hasUnsavedChanges() ? "Unsaved changes" : "Editable draft"}</span>
         </button>
         {workflow.versions.map((version) => (
           <button key={version.id} type="button" className={selectedVersionId === version.id ? "version-item active" : "version-item"} onClick={() => selectVersion(version.id)}>
@@ -174,7 +327,8 @@ export function WorkflowEditor({ workflow, onRefresh }: { workflow: WorkflowDeta
                 <StatusBadge status={workflow.status} />
                 {selectedVersion && <span className="status-badge">v{selectedVersion.versionNumber}</span>}
                 {workflow.activeVersionId === selectedVersion?.id && <span className="status-badge">Active version</span>}
-                {(isDirty || draft.dirty.semantic || draft.dirty.layout) && <span className="status-badge">Unsaved draft</span>}
+                <span className="status-badge" aria-live="polite">{saveLabel}</span>
+                {hasUnsavedChanges() && <span className="status-badge">Unsaved draft</span>}
               </div>
             </div>
             {selectedVersion && workflow.activeVersionId !== selectedVersion.id && (
@@ -199,22 +353,35 @@ export function WorkflowEditor({ workflow, onRefresh }: { workflow: WorkflowDeta
             </label>
           </div>
           <div className="workflow-actions" role="tablist" aria-label="Workflow editor mode">
-            <button type="button" className={mode === "visual" ? "mode-tab active" : "mode-tab"} onClick={() => setMode("visual")}>
+            <button type="button" className={mode === "visual" ? "mode-tab active" : "mode-tab"} onClick={() => requestMode("visual")}>
               Visual
             </button>
-            <button type="button" className={mode === "form" ? "mode-tab active" : "mode-tab"} onClick={() => setMode("form")}>
+            <button type="button" className={mode === "form" ? "mode-tab active" : "mode-tab"} onClick={() => requestMode("form")}>
               Form
             </button>
-            <button type="button" className={mode === "debugger" ? "mode-tab active" : "mode-tab"} onClick={() => setMode("debugger")}>
+            <button type="button" className={mode === "debugger" ? "mode-tab active" : "mode-tab"} onClick={() => requestMode("debugger")}>
               Debugger
             </button>
           </div>
         </section>
 
         {mode === "visual" ? (
-          <WorkflowVisualEditor draft={draft} applyDraft={applyDraft} register={register} errors={errors} setValue={setValue} getValues={getValues} />
+          <WorkflowVisualEditor
+            draft={draft}
+            applyDraft={applyDraft}
+            canUndo={Boolean(history.past.length)}
+            canRedo={Boolean(history.future.length)}
+            onUndo={undo}
+            onRedo={redo}
+            saveState={saveLabel}
+            saving={createVersion.isPending}
+            register={register}
+            errors={errors}
+            setValue={setValue}
+            getValues={getValues}
+          />
         ) : mode === "debugger" ? (
-          <WorkflowDebugger workflow={workflow} draft={draft} workflowVersionId={selectedVersion?.id ?? latestVersion?.id} />
+          <WorkflowDebugger workflow={workflow} draft={draft} workflowVersionId={selectedVersion?.id ?? latestVersion?.id} source={debuggerSource} />
         ) : (
           <section className="panel stack">
             <div className="workflow-title-row">
@@ -262,15 +429,15 @@ export function WorkflowEditor({ workflow, onRefresh }: { workflow: WorkflowDeta
         <section className="panel workflow-title-row">
           <div>
             <strong>{isValid && !hasDraftErrors ? "Definition valid" : "Definition has errors"}</strong>
-            <p className="muted">{isDirty || draft.dirty.semantic || draft.dirty.layout ? "Local draft changes are not saved to the backend." : "No local changes."}</p>
-            {draft.validation.issues.map((issue) => (
-              <p key={`${issue.code}-${issue.stepKey ?? "global"}-${issue.handle ?? ""}`} className={issue.severity === "error" ? "field-error" : "form-warning"}>
+            <p className="muted">{hasUnsavedChanges() ? "Local draft changes are not saved to the backend." : "No local changes."}</p>
+            {draft.validation.issues.map((issue, index) => (
+              <p key={`${issue.code}-${issue.stepKey ?? "global"}-${issue.edgeId ?? ""}-${issue.handle ?? ""}-${index}`} className={issue.severity === "error" ? "field-error" : "form-warning"}>
                 {issue.stepKey ? `${issue.stepKey}: ${issue.message}` : issue.message}
               </p>
             ))}
           </div>
           <div className="workflow-actions">
-            <button type="button" disabled={!isEditable || (!isDirty && !draft.dirty.semantic && !draft.dirty.layout)} onClick={() => applyDraft(initialDraft)}>
+            <button type="button" disabled={!isEditable || !hasUnsavedChanges() || createVersion.isPending} onClick={discardDraft}>
               Discard draft
             </button>
             <button type="submit" disabled={!isEditable || !isValid || hasDraftErrors || createVersion.isPending}>
@@ -288,6 +455,73 @@ export function WorkflowEditor({ workflow, onRefresh }: { workflow: WorkflowDeta
         onCancel={() => setActivateVersionId(null)}
         onConfirm={confirmActivation}
       />
+      <RecoveryDialog snapshot={recoverySnapshot} onRestore={restoreSnapshot} onDiscard={discardSnapshot} />
+      <DebuggerChoiceDialog
+        open={debuggerConfirmOpen}
+        hasDraftErrors={hasDraftErrors}
+        pending={createVersion.isPending}
+        onCancel={() => setDebuggerConfirmOpen(false)}
+        onSaveAndTest={() => void saveAndOpenDebugger()}
+        onDraftSnapshot={() => void openDebuggerFromChoice("draft")}
+      />
+    </div>
+  );
+}
+
+function saveStateLabel(state: SaveState, pending: boolean) {
+  if (pending || state === "saving") return "Saving";
+  if (state === "dirty") return "Unsaved changes";
+  if (state === "saved") return "Saved";
+  if (state === "save_error") return "Save error";
+  if (state === "recovered") return "Recovered local changes";
+  if (state === "stale_or_conflict") return "Version changed";
+  return "No changes";
+}
+
+function RecoveryDialog({ snapshot, onRestore, onDiscard }: { snapshot: DraftAutosaveSnapshot | null; onRestore: (snapshot: DraftAutosaveSnapshot) => void; onDiscard: () => void }) {
+  if (!snapshot) return null;
+  return (
+    <div className="modal-backdrop" role="presentation">
+      <section className="modal panel stack" role="dialog" aria-modal="true" aria-label="Recover local workflow draft">
+        <h2>Recover local draft</h2>
+        <p className="muted">A local draft from {formatDate(snapshot.savedAt)} is newer than this version. It was not saved to the backend.</p>
+        <div className="workflow-actions">
+          <button type="button" onClick={onDiscard}>Discard local copy</button>
+          <button type="button" onClick={() => onRestore(snapshot)}>Restore local copy</button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function DebuggerChoiceDialog({
+  open,
+  hasDraftErrors,
+  pending,
+  onCancel,
+  onSaveAndTest,
+  onDraftSnapshot
+}: {
+  open: boolean;
+  hasDraftErrors: boolean;
+  pending: boolean;
+  onCancel: () => void;
+  onSaveAndTest: () => void;
+  onDraftSnapshot: () => void;
+}) {
+  if (!open) return null;
+  return (
+    <div className="modal-backdrop" role="presentation">
+      <section className="modal panel stack" role="dialog" aria-modal="true" aria-label="Choose workflow test source">
+        <h2>Choose test source</h2>
+        <p className="muted">This workflow has local changes. Choose whether the debugger should run a saved version or an explicit draft snapshot.</p>
+        {hasDraftErrors && <p className="field-error" aria-live="assertive">Fix graph errors before testing a draft snapshot or creating a new version.</p>}
+        <div className="workflow-actions">
+          <button type="button" onClick={onCancel}>Cancel</button>
+          <button type="button" disabled={pending || hasDraftErrors} onClick={onSaveAndTest}>{pending ? "Saving..." : "Save and test"}</button>
+          <button type="button" disabled={hasDraftErrors} onClick={onDraftSnapshot}>Test draft snapshot</button>
+        </div>
+      </section>
     </div>
   );
 }

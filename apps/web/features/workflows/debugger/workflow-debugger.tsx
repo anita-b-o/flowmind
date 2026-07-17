@@ -21,7 +21,7 @@ import { canRunRealWorkflowTest } from "../../auth/rbac";
 
 const NODE_TYPES = { workflow: WorkflowNode };
 
-export function WorkflowDebugger({ workflow, draft, workflowVersionId }: { workflow: WorkflowDetail; draft: WorkflowDraftModel; workflowVersionId?: string }) {
+export function WorkflowDebugger({ workflow, draft, workflowVersionId, source = "version" }: { workflow: WorkflowDetail; draft: WorkflowDraftModel; workflowVersionId?: string; source?: "version" | "draft" }) {
   const [payloadText, setPayloadText] = useState(JSON.stringify({ trigger: { body: { email: "ada@example.com", priority: "high" }, headers: {} } }, null, 2));
   const [externalMode, setExternalMode] = useState<TestExternalMode>("mock");
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
@@ -66,7 +66,7 @@ export function WorkflowDebugger({ workflow, draft, workflowVersionId }: { workf
       const parsed = JSON.parse(payloadText);
       const result = await createRun.mutateAsync({
         workflowVersionId,
-        draftDefinition: draftToWorkflowDefinitionDto(draft),
+        ...(source === "draft" ? { draftDefinition: draftToWorkflowDefinitionDto(draft) } : {}),
         payload: {
           trigger: parsed.trigger ?? parsed,
           metadata: parsed.metadata ?? {}
@@ -97,6 +97,7 @@ export function WorkflowDebugger({ workflow, draft, workflowVersionId }: { workf
           <textarea value={payloadText} onChange={(event) => setPayloadText(event.target.value)} rows={7} />
         </label>
         <div className="debugger-controls">
+          <span className="status-badge" aria-live="polite">{source === "draft" ? "Testing draft snapshot" : "Testing saved version"}</span>
           <label>
             Mode
             <select value={externalMode} onChange={(event) => setExternalMode(event.target.value as TestExternalMode)}>

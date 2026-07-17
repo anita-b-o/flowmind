@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Background,
   Controls,
@@ -9,6 +9,7 @@ import {
   ReactFlowProvider,
   type Connection,
   type EdgeChange,
+  type Node,
   type NodeChange,
   type OnEdgesDelete,
   type OnNodesDelete
@@ -29,24 +30,37 @@ const NODE_TYPES = { workflow: WorkflowNode };
 export function WorkflowVisualEditor({
   draft,
   applyDraft,
+  canRedo,
+  canUndo,
+  onRedo,
   register,
   errors,
   setValue,
-  getValues
+  getValues,
+  onUndo,
+  saveState,
+  saving
 }: {
   draft: WorkflowDraftModel;
-  applyDraft: (draft: WorkflowDraftModel, options?: { syncForm?: boolean }) => void;
+  applyDraft: (draft: WorkflowDraftModel, options?: { syncForm?: boolean; record?: boolean }) => void;
+  canUndo: boolean;
+  canRedo: boolean;
+  onUndo: () => void;
+  onRedo: () => void;
   register: UseFormRegister<WorkflowEditorFormValue>;
   errors: FieldErrors<WorkflowEditorFormValue>;
   setValue: UseFormSetValue<WorkflowEditorFormValue>;
   getValues: UseFormGetValues<WorkflowEditorFormValue>;
+  saveState: string;
+  saving: boolean;
 }) {
   const [connectionError, setConnectionError] = useState<string | null>(null);
+  const dragStartRef = useRef<WorkflowDraftModel | null>(null);
   const { nodes, edges } = useMemo(() => draftToReactFlow(draft), [draft]);
   const hasPositions = Boolean(draft.ui.nodes && Object.keys(draft.ui.nodes).length);
 
   function onNodesChange(changes: NodeChange[]) {
-    applyDraft(reactFlowChangesToDraft(draft, changes, []), { syncForm: false });
+    applyDraft(reactFlowChangesToDraft(draft, changes, []), { syncForm: false, record: !changes.some((change) => change.type === "position") });
   }
 
   function onEdgesChange(changes: EdgeChange[]) {
@@ -79,7 +93,9 @@ export function WorkflowVisualEditor({
 
   function removeNode(key: string) {
     const hasEdges = draft.edges.some((edge) => edge.source === key || edge.target === key);
-    if (hasEdges && !window.confirm("Delete this node and its connected edges?")) return;
+    const step = draft.stepsByKey[key];
+    const hasConfig = step && Object.values(step.config).some((value) => value !== "" && value !== "{}" && value !== undefined && value !== null);
+    if ((hasEdges || hasConfig) && !window.confirm("Delete this node? Its configuration and connected edges will be removed. Undo can restore it.")) return;
     applyDraft(removeStepFromDraft(draft, key));
   }
 
@@ -93,6 +109,18 @@ export function WorkflowVisualEditor({
   }
 
   const globalIssues = draft.validation.issues.filter((issue) => !issue.stepKey);
+  useEffect(() => {
+    const listener = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (target && ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName)) return;
+      if ((event.key === "Delete" || event.key === "Backspace") && draft.selectedStepKey && !draft.readOnly) {
+        event.preventDefault();
+        removeNode(draft.selectedStepKey);
+      }
+    };
+    window.addEventListener("keydown", listener);
+    return () => window.removeEventListener("keydown", listener);
+  });
   return (
     <ReactFlowProvider>
       <div className="workflow-visual-shell">
@@ -104,7 +132,14 @@ export function WorkflowVisualEditor({
               <p className="muted">Visual layout does not change execution order.</p>
             </div>
             <div className="workflow-actions">
-              <button type="button" onClick={arrange}>
+              <span className="status-badge" aria-live="polite">{saveState}</span>
+              <button type="button" onClick={onUndo} disabled={draft.readOnly || !canUndo || saving} aria-label="Undo">
+                Undo
+              </button>
+              <button type="button" onClick={onRedo} disabled={draft.readOnly || !canRedo || saving} aria-label="Redo">
+                Redo
+              </button>
+              <button type="button" onClick={arrange} disabled={draft.readOnly || saving}>
                 Auto arrange
               </button>
             </div>
@@ -129,9 +164,22 @@ export function WorkflowVisualEditor({
               onConnect={onConnect}
               onNodesDelete={onNodesDelete}
               onEdgesDelete={onEdgesDelete}
+              onNodeDragStart={() => {
+                dragStartRef.current = draft;
+              }}
+              onNodeDragStop={(_, node: Node) => {
+                if (!dragStartRef.current || draft.readOnly) return;
+                const next = withValidation({
+                  ...draft,
+                  ui: { ...draft.ui, nodes: { ...(draft.ui.nodes ?? {}), [node.id]: { ...draft.ui.nodes?.[node.id], x: node.position.x, y: node.position.y } } },
+                  dirty: { ...draft.dirty, layout: true }
+                });
+                dragStartRef.current = null;
+                applyDraft(next, { syncForm: false, record: true });
+              }}
               onNodeClick={(_, node) => node.id !== TRIGGER_NODE_ID && applyDraft({ ...draft, selectedStepKey: node.id }, { syncForm: false })}
-              nodesDraggable={!draft.readOnly}
-              nodesConnectable={!draft.readOnly}
+              nodesDraggable={!draft.readOnly && !saving}
+              nodesConnectable={!draft.readOnly && !saving}
               elementsSelectable
               fitView
             >

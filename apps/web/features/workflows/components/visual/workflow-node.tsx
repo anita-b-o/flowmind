@@ -28,8 +28,8 @@ export function WorkflowNode({ id, data, selected }: NodeProps<WorkflowFlowNode>
       {isTerminalCapable && !isTrigger && <OutputHandle id="next" label="Next" disabled={data.readOnly} />}
       {isIf && (
         <>
-          <OutputHandle id="true" label="Yes" disabled={data.readOnly} offset={36} />
-          <OutputHandle id="false" label="No" disabled={data.readOnly} offset={78} />
+          <OutputHandle id="true" label="True" disabled={data.readOnly} offset={36} />
+          <OutputHandle id="false" label="False" disabled={data.readOnly} offset={78} />
         </>
       )}
       {isSwitch && (

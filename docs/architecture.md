@@ -23,7 +23,9 @@ OpenAI configuration is environment-driven: `OPENAI_API_KEY`, `OPENAI_MODEL`, `O
 
 ## Workflow Builder
 
-Workflow editing supports a visual React Flow builder plus a form fallback. The frontend builds local drafts, validates type-specific config immediately, and serializes the result to the existing `POST /workflows/:workflowId/versions` DTO. Drafts are local browser state until saved, except debugger test runs persist an immutable snapshot owned by `WorkflowTestRun`.
+Workflow editing supports a visual React Flow builder plus a form fallback. The frontend builds local drafts, validates type-specific config and Graph v2 routing immediately, and serializes the result to the existing `POST /workflows/:workflowId/versions` DTO. Drafts are local browser state until saved, except debugger test runs can persist an explicit immutable draft snapshot owned by `WorkflowTestRun`.
+
+The visual builder distinguishes clean, dirty, saving, saved, save-error, and recovered-local states. It keeps recovery snapshots in browser storage scoped by user, organization, workflow, and base version. Recovery snapshots never contain decrypted credentials or auth tokens and are never published automatically.
 
 The workflow detail API exposes all versions and ordered steps so the UI can show history, open older versions read-only, and keep only the latest version editable. Activating a version remains an explicit API call and records the existing workflow activation audit event.
 

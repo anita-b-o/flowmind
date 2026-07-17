@@ -3,6 +3,8 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { WorkflowDetail, WorkflowVersion } from "../types";
 import { WorkflowEditor } from "./workflow-editor";
+import { saveDraftSnapshot } from "../draft-autosave";
+import { workflowVersionToDraft } from "../draft-adapters";
 
 const { replace, createVersion, activateVersion } = vi.hoisted(() => ({
   replace: vi.fn(),
@@ -28,7 +30,22 @@ vi.mock("next/navigation", () => ({
 
 vi.mock("../hooks", () => ({
   useCreateWorkflowVersion: () => createVersion,
-  useActivateWorkflowVersion: () => activateVersion
+  useActivateWorkflowVersion: () => activateVersion,
+  useWorkflowTestRuns: () => ({ data: { items: [] } }),
+  useCreateWorkflowTestRun: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useWorkflowTestRun: () => ({ data: undefined }),
+  useCancelWorkflowTestRun: () => ({ mutate: vi.fn() }),
+  useRerunWorkflowTestRun: () => ({ mutate: vi.fn() }),
+  useSkipTestWait: () => ({ mutate: vi.fn() }),
+  useCompareTestRunWithLastReal: () => ({ data: undefined })
+}));
+
+vi.mock("../../auth/use-auth", () => ({
+  useAuth: () => ({
+    user: { id: "user-1", email: "ada@example.com" },
+    activeOrganizationId: "org-1",
+    organizations: [{ id: "org-1", role: "owner" }]
+  })
 }));
 
 vi.mock("../../connections/hooks", () => ({
@@ -43,9 +60,14 @@ vi.mock("../../connections/hooks", () => ({
 
 describe("WorkflowEditor", () => {
   beforeEach(() => {
+    localStorage.clear();
     replace.mockReset();
     createVersion.mutateAsync.mockReset();
+    createVersion.isPending = false;
+    createVersion.error = null;
     activateVersion.mutateAsync.mockReset();
+    activateVersion.isPending = false;
+    activateVersion.error = null;
     vi.spyOn(window, "alert").mockImplementation(() => undefined);
     vi.spyOn(window, "confirm").mockReturnValue(true);
   });
@@ -110,6 +132,46 @@ describe("WorkflowEditor", () => {
     await userEvent.click(screen.getAllByRole("button", { name: /^activate version$/i }).at(-1)!);
     await waitFor(() => expect(activateVersion.mutateAsync).toHaveBeenCalledWith("version-1"));
     expect(onRefresh).toHaveBeenCalled();
+  });
+
+  it("shows save errors and prevents duplicate save requests while pending", async () => {
+    createVersion.mutateAsync.mockRejectedValue(new Error("Backend rejected graph"));
+    const { rerender } = render(<WorkflowEditor workflow={workflow()} onRefresh={vi.fn()} />);
+
+    await userEvent.clear(screen.getByRole("textbox", { name: /workflow name/i }));
+    await userEvent.type(screen.getByRole("textbox", { name: /workflow name/i }), "Changed flow");
+    await userEvent.click(screen.getByRole("button", { name: /create version/i }));
+    await waitFor(() => expect(screen.getAllByText("Save error").length).toBeGreaterThan(0));
+
+    createVersion.mutateAsync.mockReset();
+    createVersion.isPending = true;
+    rerender(<WorkflowEditor workflow={workflow()} onRefresh={vi.fn()} />);
+    expect(screen.getByRole("button", { name: /creating/i })).toBeDisabled();
+  });
+
+  it("detects and restores a local autosave snapshot", async () => {
+    const draft = workflowVersionToDraft(workflow(), workflow().versions.at(-1));
+    draft.workflowMeta.name = "Recovered flow";
+    saveDraftSnapshot(localStorage, { userId: "user-1", organizationId: "org-1", workflowId: "workflow-1", versionId: "version-2" }, draft);
+
+    render(<WorkflowEditor workflow={workflow()} onRefresh={vi.fn()} />);
+
+    expect(await screen.findByRole("dialog", { name: /recover local workflow draft/i })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: /restore local copy/i }));
+    expect(screen.getByRole("textbox", { name: /workflow name/i })).toHaveValue("Recovered flow");
+    expect(screen.getAllByText("Recovered local changes").length).toBeGreaterThan(0);
+  });
+
+  it("requires an explicit debugger source when local changes exist", async () => {
+    render(<WorkflowEditor workflow={workflow()} onRefresh={vi.fn()} />);
+
+    await userEvent.clear(screen.getByRole("textbox", { name: /workflow name/i }));
+    await userEvent.type(screen.getByRole("textbox", { name: /workflow name/i }), "Changed flow");
+    await userEvent.click(screen.getByRole("button", { name: "Debugger" }));
+
+    expect(screen.getByRole("dialog", { name: /choose workflow test source/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /save and test/i })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /test draft snapshot/i })).toBeEnabled();
   });
 });
 

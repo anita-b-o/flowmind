@@ -176,6 +176,16 @@ button {
   font-size: 12px;
 }
 
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+.version-item:focus-visible,
+.workflow-flow-node:focus-visible {
+  outline: 3px solid rgb(15 118 110 / 35%);
+  outline-offset: 2px;
+}
+
 .workflow-form-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
@@ -347,6 +357,11 @@ button {
 
 .workflow-flow-node.warning {
   border-color: #b7791f;
+}
+
+.workflow-edge-invalid path {
+  stroke: #b42318;
+  stroke-width: 2.5;
 }
 
 .workflow-flow-node.debug-active {

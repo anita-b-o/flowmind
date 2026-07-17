@@ -33,4 +33,42 @@ describe("workflow graph validator", () => {
       )
     ).toThrow(BadRequestException);
   });
+
+  it("rejects duplicate edges and missing If branches", () => {
+    expect(() =>
+      validateWorkflowGraph(
+        [
+          { key: "route", type: "if", config: { left: "{{trigger.body.kind}}", operator: "equals", right: "vip", trueStepKey: "vip", falseStepKey: "normal" } },
+          { key: "vip", type: "database_record", config: {} },
+          { key: "normal", type: "database_record", config: {} }
+        ],
+        {
+          entryStepKey: "route",
+          edges: [
+            { from: "route", to: "vip", kind: "if_true", label: "true" },
+            { from: "route", to: "vip", kind: "if_true", label: "true" }
+          ]
+        }
+      )
+    ).toThrow(BadRequestException);
+  });
+
+  it("rejects invalid switch cases and orphan case edges", () => {
+    expect(() =>
+      validateWorkflowGraph(
+        [
+          { key: "route", type: "switch", config: { value: "{{trigger.body.kind}}", cases: [{ key: "urgent", match: "urgent", stepKey: "notify" }, { key: "urgent", match: "urgent", stepKey: "save" }], defaultStepKey: "save" } },
+          { key: "notify", type: "email_notification", config: {} },
+          { key: "save", type: "database_record", config: {} }
+        ],
+        {
+          entryStepKey: "route",
+          edges: [
+            { from: "route", to: "notify", kind: "switch_case", caseKey: "missing" },
+            { from: "route", to: "save", kind: "switch_default" }
+          ]
+        }
+      )
+    ).toThrow(BadRequestException);
+  });
 });

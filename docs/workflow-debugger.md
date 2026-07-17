@@ -11,6 +11,8 @@ Flowmind supports workflow test runs from the Builder without mixing them with p
 - Draft tests snapshot the submitted draft definition; later editor changes do not affect an active or historical test run.
 - Production execution APIs exclude test runs by default.
 
+The builder makes the test source explicit. If there are no local changes, the debugger runs the selected saved workflow version. If local changes exist, the user must choose to save and test the new version, test an explicit draft snapshot, or cancel. Draft snapshots use the existing `draftDefinition` field on `POST /workflows/:workflowId/test-runs`; no separate test mechanism exists.
+
 ## Modes
 
 - `mock`: default. HTTP, AI, email and database effects are intercepted before handlers perform external work. Mock outputs include simulated/dry-run markers.

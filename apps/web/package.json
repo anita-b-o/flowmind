@@ -14,6 +14,7 @@
   },
   "dependencies": {
     "@automation/expression-engine": "workspace:*",
+    "@automation/shared-types": "workspace:*",
     "@automation/ui": "workspace:*",
     "@dagrejs/dagre": "^3.0.0",
     "@hookform/resolvers": "^3.9.1",
