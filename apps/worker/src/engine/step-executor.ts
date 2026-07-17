@@ -283,10 +283,16 @@ export class StepExecutor {
     if (!connectionId) return {};
     const connection = await this.prisma.connection.findFirst({
       where: { id: connectionId, organizationId, deletedAt: null },
-      select: { id: true, name: true, type: true, status: true }
+      select: { id: true, name: true, type: true, status: true, configJson: true }
     });
     if (!connection) return {};
-    return { id: connection.id, name: connection.name, type: connection.type, status: connection.status };
+    return {
+      id: connection.id,
+      name: connection.name,
+      type: connection.type === "smtp" ? "SMTP" : "HTTP",
+      authScheme: connection.type === "smtp" ? undefined : safeHttpAuthScheme(connection.configJson),
+      status: connection.status
+    };
   }
 }
 
@@ -346,6 +352,14 @@ function isSensitiveKey(key: string) {
   return /^(authorization|cookie|setcookie|password|token|secret|apikey|xapikey|accesstoken|refreshtoken|encryptedvalue|ciphertext|authtag|iv|smtppassword)$/i.test(
     key.replace(/[-_]/g, "")
   );
+}
+
+function safeHttpAuthScheme(value: unknown) {
+  const config = value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+  const scheme = String(config.authScheme ?? "API_KEY");
+  if (scheme === "BEARER_TOKEN") return "BEARER";
+  if (scheme === "BASIC_AUTH") return "BASIC";
+  return ["API_KEY", "BEARER", "BASIC", "CUSTOM_HEADERS"].includes(scheme) ? scheme : "API_KEY";
 }
 
 function limitValue(value: unknown, depth = 0): unknown {

@@ -7,24 +7,35 @@ const REDACTED = "[REDACTED]";
 const SENSITIVE_KEYS = new Set([
   "authorization",
   "proxy-authorization",
+  "proxyauthorization",
   "cookie",
   "set-cookie",
+  "setcookie",
   "password",
   "pass",
   "token",
   "accesstoken",
   "refreshtoken",
   "apikey",
+  "api-key",
+  "api_key",
+  "api key",
+  "xapikey",
   "x-api-key",
+  "x api key",
   "secret",
   "secretvalue",
   "connectionsecret",
   "clientsecret",
+  "client-secret",
+  "client_secret",
+  "client secret",
   "smtppassword",
   "privatekey",
   "encryptedvalue",
   "ciphertext",
   "authtag",
+  "authTag",
   "iv",
   "encryptionkey"
 ]);
@@ -164,7 +175,7 @@ function sanitizeValue(value: unknown, seen: WeakSet<object>): unknown {
 }
 
 function normalizeKey(key: string) {
-  return key.toLowerCase().replace(/[-_]/g, "");
+  return key.toLowerCase().replace(/[-_\s]/g, "");
 }
 
 function maybeSanitizeUrl(value: string) {

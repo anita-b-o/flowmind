@@ -4,7 +4,11 @@ Connections let each organization store reusable credentials for existing workfl
 
 ## Supported Types
 
-- `HTTP_API_KEY`: optional `baseUrl`, `authLocation` (`HEADER` or `QUERY`), `authName`, secret value, and optional non-sensitive headers.
+- `HTTP`: reusable HTTP credentials with `authScheme`.
+  - `API_KEY`: optional `baseUrl`, `authLocation` (`HEADER` or `QUERY`), `authName`, secret value, and optional non-sensitive headers.
+  - `BEARER`: injects `Authorization: Bearer <token>`.
+  - `BASIC`: stores username as metadata and password as the encrypted secret.
+  - `CUSTOM_HEADERS`: stores a JSON object of secret headers as the encrypted secret.
 - `SMTP`: host, port, TLS flag, username, password, optional from name, and from email.
 
 OAuth and provider-specific integrations are intentionally deferred.
@@ -31,8 +35,10 @@ The encrypted payload stores version, algorithm, IV, ciphertext, auth tag, and k
 
 - Create stores metadata on `Connection` and one active encrypted `Secret`.
 - Rotate creates a new active secret, revokes the previous active secret, and updates `rotatedAt`.
-- Revoke marks the connection and active secret revoked. Future executions fail clearly.
+- Disable marks the connection disabled. Future executions fail clearly until it is enabled again.
+- The legacy revoke endpoint maps to disable for compatibility.
 - Delete is soft delete and owner-only. Active workflow references return `409 CONNECTION_IN_USE`.
+- Test stores safe status metadata (`lastTestedAt`, status, status code, duration, message) without storing request credentials.
 
 Plaintext is never shown after save.
 

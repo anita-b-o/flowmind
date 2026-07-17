@@ -456,6 +456,11 @@ model Connection {
   rotatedAt       DateTime?        @map("rotated_at")
   revokedAt       DateTime?        @map("revoked_at")
   deletedAt       DateTime?        @map("deleted_at")
+  lastTestedAt    DateTime?        @map("last_tested_at")
+  lastTestStatus  String?          @map("last_test_status")
+  lastTestStatusCode Int?          @map("last_test_status_code")
+  lastTestDurationMs Int?          @map("last_test_duration_ms")
+  lastTestMessage String?          @map("last_test_message")
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   secrets      Secret[]

@@ -31,7 +31,7 @@ function previewScope() {
     },
     execution: { id: "execution-preview", correlationId: "correlation-preview", retryOfExecutionId: null, startedAt: new Date(0).toISOString() },
     organization: { id: "organization-preview", slug: "acme", variables: { tier: "pro" } },
-    connection: { id: "connection-preview", name: "Primary connection", type: "HTTP_API_KEY" },
+    connection: { id: "connection-preview", name: "Primary connection", type: "HTTP", authScheme: "API_KEY" },
     metadata: { executionId: "execution-preview" }
   };
 }

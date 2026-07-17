@@ -3,7 +3,21 @@ import { lookup } from "node:dns/promises";
 import { isBlockedIp } from "./ip-range";
 
 const ALLOWED_METHODS = new Set(["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"]);
-const BLOCKED_HEADER_NAMES = [/^host$/i, /^authorization$/i, /^cookie$/i, /^proxy-/i, /^x-forwarded-/i];
+const BLOCKED_HEADER_NAMES = [
+  /^host$/i,
+  /^content-length$/i,
+  /^transfer-encoding$/i,
+  /^connection$/i,
+  /^keep-alive$/i,
+  /^te$/i,
+  /^trailer$/i,
+  /^upgrade$/i,
+  /^authorization$/i,
+  /^cookie$/i,
+  /^set-cookie$/i,
+  /^proxy-/i,
+  /^x-forwarded-/i
+];
 export const SAFE_HTTP_RESOLVER = Symbol("SAFE_HTTP_RESOLVER");
 export const SAFE_HTTP_FETCHER = Symbol("SAFE_HTTP_FETCHER");
 

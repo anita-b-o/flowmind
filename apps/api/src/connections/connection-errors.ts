@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, ForbiddenException, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ConflictException, ForbiddenException, NotFoundException, UnprocessableEntityException } from "@nestjs/common";
 
 export const CONNECTION_ERRORS = {
   notFound: "CONNECTION_NOT_FOUND",
@@ -15,7 +15,7 @@ export function connectionNotFound() {
 }
 
 export function invalidConnectionConfig(message = "Connection configuration is invalid") {
-  return new BadRequestException({ code: CONNECTION_ERRORS.invalidConfig, message });
+  return new UnprocessableEntityException({ code: CONNECTION_ERRORS.invalidConfig, message });
 }
 
 export function connectionInUse() {

@@ -3,16 +3,14 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "../auth/use-auth";
 import { apiClient } from "../../lib/api-client";
-import type { ConnectionSummary, ConnectionType, CreateConnectionDto } from "./types";
+import type { ConnectionSummary, ConnectionType, CreateConnectionDto, HttpAuthScheme } from "./types";
 
-export function useConnections(filters: { type?: ConnectionType | ""; status?: string | "" } = {}) {
+export function useConnections(filters: { type?: ConnectionType | ""; authScheme?: HttpAuthScheme | ""; status?: string | ""; q?: string } = {}) {
   const { activeOrganizationId } = useAuth();
   return useQuery({
     queryKey: ["connections", activeOrganizationId, filters],
-    queryFn: () => apiClient.get<ConnectionSummary[]>("/connections"),
-    enabled: Boolean(activeOrganizationId),
-    select: (items) =>
-      items.filter((item) => (!filters.type || item.type === filters.type) && (!filters.status || item.status === filters.status))
+    queryFn: () => apiClient.get<ConnectionSummary[]>("/connections", normalizeFilters(filters)),
+    enabled: Boolean(activeOrganizationId)
   });
 }
 
@@ -38,7 +36,7 @@ export function useRotateConnection() {
   const queryClient = useQueryClient();
   const { activeOrganizationId } = useAuth();
   return useMutation({
-    mutationFn: ({ id, secretValue }: { id: string; secretValue: string }) => apiClient.post<ConnectionSummary>(`/connections/${id}/rotate`, { secretValue }),
+    mutationFn: ({ id, secretValue, secretHeaders }: { id: string; secretValue?: string; secretHeaders?: Record<string, string> }) => apiClient.post<ConnectionSummary>(`/connections/${id}/rotate`, { secretValue, secretHeaders }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["connections", activeOrganizationId] })
   });
 }
@@ -48,6 +46,24 @@ export function useRevokeConnection() {
   const { activeOrganizationId } = useAuth();
   return useMutation({
     mutationFn: (id: string) => apiClient.post<ConnectionSummary>(`/connections/${id}/revoke`, {}),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["connections", activeOrganizationId] })
+  });
+}
+
+export function useEnableConnection() {
+  const queryClient = useQueryClient();
+  const { activeOrganizationId } = useAuth();
+  return useMutation({
+    mutationFn: (id: string) => apiClient.post<ConnectionSummary>(`/connections/${id}/enable`, {}),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["connections", activeOrganizationId] })
+  });
+}
+
+export function useDisableConnection() {
+  const queryClient = useQueryClient();
+  const { activeOrganizationId } = useAuth();
+  return useMutation({
+    mutationFn: (id: string) => apiClient.post<ConnectionSummary>(`/connections/${id}/disable`, {}),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["connections", activeOrganizationId] })
   });
 }
@@ -65,4 +81,11 @@ export function useTestConnection() {
   return useMutation({
     mutationFn: ({ id, url }: { id: string; url?: string }) => apiClient.post<{ success: boolean; durationMs: number; status?: number }>(`/connections/${id}/test`, { url })
   });
+}
+
+function normalizeFilters(filters: { type?: ConnectionType | ""; authScheme?: HttpAuthScheme | ""; status?: string | ""; q?: string }) {
+  return {
+    ...filters,
+    type: filters.type === "HTTP_API_KEY" ? "HTTP" : filters.type
+  };
 }

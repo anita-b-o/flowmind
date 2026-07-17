@@ -20,6 +20,8 @@ Core endpoints:
 - `PATCH /connections/:connectionId`
 - `POST /connections/:connectionId/rotate`
 - `POST /connections/:connectionId/revoke`
+- `POST /connections/:connectionId/enable`
+- `POST /connections/:connectionId/disable`
 - `DELETE /connections/:connectionId`
 - `POST /connections/:connectionId/test`
 - `GET /workflows`
@@ -144,9 +146,9 @@ Variables store JSON values for expression use and are not a secret store.
 
 `GET /connections` requires editor role or higher and returns metadata only: id, type, name, description, status, masked credential, created/updated/rotated timestamps.
 
-`POST /connections` requires admin or owner. Supported types are `HTTP_API_KEY` and `SMTP`. The secret field is used only during the request, encrypted, and never returned.
+`POST /connections` requires admin or owner. Supported public types are `HTTP` and `SMTP`. HTTP accepts `authScheme` values `API_KEY`, `BEARER`, `BASIC`, and `CUSTOM_HEADERS`. Secret fields are used only during create/rotate/test, encrypted, and never returned.
 
-`POST /connections/:connectionId/rotate` replaces the active encrypted secret and revokes the previous one. `POST /connections/:connectionId/revoke` blocks future executions. `DELETE /connections/:connectionId` is owner-only and returns `409 CONNECTION_IN_USE` if an active workflow version references the connection.
+`POST /connections/:connectionId/rotate` replaces the active encrypted secret and revokes the previous one. `POST /connections/:connectionId/disable` blocks future executions without deleting the secret; `enable` reactivates it. `POST /connections/:connectionId/revoke` is a compatibility alias for disable. `DELETE /connections/:connectionId` is owner-only and returns `409 CONNECTION_IN_USE` if an active workflow version references the connection.
 
 `POST /connections/:connectionId/test` verifies HTTP credentials with outbound request safety checks or SMTP credentials with Nodemailer `verify()`. Responses include success, duration, and optional HTTP status only.
 # API Trace Headers

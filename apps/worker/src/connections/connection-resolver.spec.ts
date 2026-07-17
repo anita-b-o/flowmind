@@ -35,6 +35,26 @@ describe("ConnectionResolver", () => {
 
     await expect(resolver.resolveSmtp("org-1", "conn-1")).rejects.toThrow("CONNECTION_REVOKED");
   });
+
+  it("resolves custom header secrets and legacy HTTP API key configs", async () => {
+    const custom = new ConnectionResolver(
+      prismaMock({
+        connection: { id: "conn-1", type: "http_api_key", status: "ACTIVE", configJson: { authScheme: "CUSTOM_HEADERS" } },
+        secret: { encryptedValue: encrypt(JSON.stringify({ "X-Api-Key": "secret" })) }
+      }) as any,
+      new ConnectionCryptoService()
+    );
+    await expect(custom.resolveHttp("org-1", "conn-1")).resolves.toMatchObject({ authScheme: "CUSTOM_HEADERS", secretHeaders: { "X-Api-Key": "secret" } });
+
+    const legacy = new ConnectionResolver(
+      prismaMock({
+        connection: { id: "conn-1", type: "http_api_key", status: "ACTIVE", configJson: { authLocation: "HEADER", authName: "Authorization" } },
+        secret: { encryptedValue: encrypt("legacy") }
+      }) as any,
+      new ConnectionCryptoService()
+    );
+    await expect(legacy.resolveHttp("org-1", "conn-1")).resolves.toMatchObject({ authScheme: "API_KEY", secretValue: "legacy" });
+  });
 });
 
 function prismaMock(records: { connection: unknown; secret: unknown }) {

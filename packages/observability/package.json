@@ -7,7 +7,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "lint": "tsc -p tsconfig.json --noEmit",
-    "test": "echo \"No tests for observability yet\"",
+    "test": "tsc -p tsconfig.test.json && node --test ../../node_modules/.cache/flowmind-observability-test/*.test.js",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "devDependencies": {

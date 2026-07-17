@@ -1,7 +1,12 @@
-import { IsString, MinLength } from "class-validator";
+import { IsObject, IsOptional, IsString, MinLength } from "class-validator";
 
 export class RotateConnectionSecretDto {
+  @IsOptional()
   @IsString()
   @MinLength(1)
-  secretValue!: string;
+  secretValue?: string;
+
+  @IsOptional()
+  @IsObject()
+  secretHeaders?: Record<string, string>;
 }

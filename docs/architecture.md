@@ -61,7 +61,7 @@ The worker intercepts external-effect steps in test mock mode before HTTP, AI, e
 
 ## Audit Log
 
-`AuditLog` is the business audit trail for critical user-visible actions. It is distinct from structured technical logs and metrics. Current audited actions include manual retry requested, DLQ resolved, trigger created/rotated, workflow activated, logout-all, refresh-session reuse detection, and connection create/update/rotate/revoke/delete/test.
+`AuditLog` is the business audit trail for critical user-visible actions. It is distinct from structured technical logs and metrics. Current audited actions include manual retry requested, DLQ resolved, trigger created/rotated, workflow activated, logout-all, refresh-session reuse detection, and connection create/update/rotate/enable/disable/delete/test.
 
 ## Trace Context
 

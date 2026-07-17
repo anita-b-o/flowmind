@@ -47,7 +47,7 @@ export function StepForm({ index, type, register, errors, disabled, setValue, ge
 }
 
 export function HttpStepForm({ index, register, errors, disabled, setValue, getValues }: StepFormProps) {
-  const connections = useConnections({ type: "HTTP_API_KEY", status: "ACTIVE" });
+  const connections = useConnections({ type: "HTTP", status: "ACTIVE" });
   const entries = catalogForSteps(getValues("steps"), index);
   const previousKeys = getValues("steps").slice(0, index).map((step) => step.key);
   return (

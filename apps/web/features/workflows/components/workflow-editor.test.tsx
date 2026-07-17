@@ -53,7 +53,7 @@ vi.mock("../../connections/hooks", () => ({
     data:
       type === "SMTP"
         ? [{ id: "smtp-1", name: "SMTP primary", credential: "te****@example.com", type: "SMTP", status: "ACTIVE" }]
-        : [{ id: "http-1", name: "API primary", credential: "Authorization: ****", type: "HTTP_API_KEY", status: "ACTIVE" }],
+        : [{ id: "http-1", name: "API primary", credential: "Authorization: ****", maskedCredential: "Authorization: ****", type: "HTTP", authScheme: "API_KEY", status: "ACTIVE", usageCount: 0 }],
     isLoading: false
   })
 }));

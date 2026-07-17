@@ -39,6 +39,7 @@ describe("SafeHttpClient", () => {
     const client = new SafeHttpClient(async () => ["93.184.216.34"], fakeFetch(200, "ok"));
     await expect(client.request({ url: "https://user:pass@example.com" })).rejects.toThrow("credentials");
     await expect(client.request({ url: "https://example.com", headers: { authorization: "secret" } })).rejects.toThrow("not allowed");
+    await expect(client.request({ url: "https://example.com", headers: { "Transfer-Encoding": "chunked" } })).rejects.toThrow("not allowed");
   });
 });
 

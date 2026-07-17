@@ -1,9 +1,13 @@
 import { IsBoolean, IsEmail, IsEnum, IsInt, IsObject, IsOptional, IsString, Max, MaxLength, Min, MinLength } from "class-validator";
-import { ConnectionType, HttpAuthLocation } from "@automation/shared-types";
+import { ConnectionType, HttpAuthLocation, HttpAuthScheme } from "@automation/shared-types";
 
 export class CreateConnectionDto {
   @IsEnum(ConnectionType)
   type!: ConnectionType;
+
+  @IsOptional()
+  @IsEnum(HttpAuthScheme)
+  authScheme?: HttpAuthScheme;
 
   @IsString()
   @MinLength(2)
@@ -35,6 +39,10 @@ export class CreateConnectionDto {
   @IsOptional()
   @IsString()
   secretValue?: string;
+
+  @IsOptional()
+  @IsObject()
+  secretHeaders?: Record<string, string>;
 
   @IsOptional()
   @IsString()

@@ -58,6 +58,7 @@ export enum StepType {
 }
 
 export enum ConnectionType {
+  Http = "HTTP",
   HttpApiKey = "HTTP_API_KEY",
   Smtp = "SMTP"
 }
@@ -72,6 +73,13 @@ export enum ConnectionStatus {
 export enum HttpAuthLocation {
   Header = "HEADER",
   Query = "QUERY"
+}
+
+export enum HttpAuthScheme {
+  ApiKey = "API_KEY",
+  BearerToken = "BEARER",
+  BasicAuth = "BASIC",
+  CustomHeaders = "CUSTOM_HEADERS"
 }
 
 export type JsonObject = Record<string, unknown>;

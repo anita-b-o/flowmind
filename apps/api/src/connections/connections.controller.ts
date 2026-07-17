@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, UseGuards } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from "@nestjs/common";
 import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
 import { CurrentUser, type CurrentUser as CurrentUserType } from "../auth/current-user.decorator";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
@@ -7,6 +7,7 @@ import { OrganizationGuard } from "../organizations/organization.guard";
 import { RolesGuard } from "../rbac/roles.guard";
 import { ConnectionsService } from "./connections.service";
 import { CreateConnectionDto } from "./dto/create-connection.dto";
+import { ListConnectionsQueryDto } from "./dto/list-connections-query.dto";
 import { RotateConnectionSecretDto } from "./dto/rotate-connection-secret.dto";
 import { TestConnectionDto } from "./dto/test-connection.dto";
 import { UpdateConnectionDto } from "./dto/update-connection.dto";
@@ -19,8 +20,8 @@ export class ConnectionsController {
   constructor(private readonly connections: ConnectionsService) {}
 
   @Get()
-  list(@OrganizationContext() org: OrganizationContext, @CurrentUser() user: CurrentUserType) {
-    return this.connections.list(org.organizationId, user.userId);
+  list(@OrganizationContext() org: OrganizationContext, @CurrentUser() user: CurrentUserType, @Query() query: ListConnectionsQueryDto) {
+    return this.connections.list(org.organizationId, user.userId, query);
   }
 
   @Post()
@@ -56,6 +57,16 @@ export class ConnectionsController {
   @Post(":connectionId/revoke")
   revoke(@OrganizationContext() org: OrganizationContext, @CurrentUser() user: CurrentUserType, @Param("connectionId") connectionId: string) {
     return this.connections.revoke(org.organizationId, user.userId, connectionId);
+  }
+
+  @Post(":connectionId/enable")
+  enable(@OrganizationContext() org: OrganizationContext, @CurrentUser() user: CurrentUserType, @Param("connectionId") connectionId: string) {
+    return this.connections.enable(org.organizationId, user.userId, connectionId);
+  }
+
+  @Post(":connectionId/disable")
+  disable(@OrganizationContext() org: OrganizationContext, @CurrentUser() user: CurrentUserType, @Param("connectionId") connectionId: string) {
+    return this.connections.disable(org.organizationId, user.userId, connectionId);
   }
 
   @Delete(":connectionId")

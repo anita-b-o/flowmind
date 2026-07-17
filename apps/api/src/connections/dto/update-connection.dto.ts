@@ -1,4 +1,5 @@
-import { IsEmail, IsObject, IsOptional, IsString, MaxLength, MinLength } from "class-validator";
+import { IsBoolean, IsEmail, IsEnum, IsInt, IsObject, IsOptional, IsString, Max, MaxLength, Min, MinLength } from "class-validator";
+import { HttpAuthLocation, HttpAuthScheme } from "@automation/shared-types";
 
 export class UpdateConnectionDto {
   @IsOptional()
@@ -17,6 +18,14 @@ export class UpdateConnectionDto {
   baseUrl?: string;
 
   @IsOptional()
+  @IsEnum(HttpAuthScheme)
+  authScheme?: HttpAuthScheme;
+
+  @IsOptional()
+  @IsEnum(HttpAuthLocation)
+  authLocation?: HttpAuthLocation;
+
+  @IsOptional()
   @IsString()
   authName?: string;
 
@@ -25,13 +34,25 @@ export class UpdateConnectionDto {
   additionalHeaders?: Record<string, string>;
 
   @IsOptional()
+  @IsObject()
+  secretHeaders?: Record<string, string>;
+
+  @IsOptional()
+  @IsString()
+  secretValue?: string;
+
+  @IsOptional()
   @IsString()
   host?: string;
 
   @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(65535)
   port?: number;
 
   @IsOptional()
+  @IsBoolean()
   secure?: boolean;
 
   @IsOptional()

@@ -119,4 +119,4 @@ Flow-control runtime decisions such as branch selection, skipped branches, sched
 
 Workflow test runs record business AuditLog entries for creation, cancellation, real-mode enablement, and test wait skipping. Debug payloads, prompts, outputs, resolved values, mock bodies, and comparison details must not be logged or used as metric labels.
 
-Connection create, update, rotate, revoke, delete, and test actions are AuditLog events. Audit metadata must contain only safe fields such as connection id, type, status, and test outcome; encrypted payload fields and plaintext credentials are redacted by the shared sanitizer.
+Connection create, update, rotate, enable, disable, delete, and test actions are AuditLog events. Audit metadata must contain only safe fields such as connection id, type, status, auth scheme, and test outcome; encrypted payload fields and plaintext credentials are redacted by the shared sanitizer.
