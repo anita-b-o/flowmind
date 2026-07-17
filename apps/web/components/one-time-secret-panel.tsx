@@ -1,8 +1,9 @@
 "use client";
 
 export interface OneTimeSecret {
-  token: string;
+  token?: string;
   webhookUrl: string;
+  signatureSecret?: string;
 }
 
 export function OneTimeSecretPanel({ secret, onClose }: { secret: OneTimeSecret | null; onClose: () => void }) {
@@ -26,13 +27,24 @@ export function OneTimeSecretPanel({ secret, onClose }: { secret: OneTimeSecret 
             Copy URL
           </button>
         </label>
-        <label className="stack">
-          Token
-          <input readOnly value={secret.token} />
-          <button type="button" onClick={() => copy(secret.token)}>
-            Copy token
-          </button>
-        </label>
+        {secret.token && (
+          <label className="stack">
+            Token
+            <input readOnly value={secret.token} />
+            <button type="button" onClick={() => copy(secret.token!)}>
+              Copy token
+            </button>
+          </label>
+        )}
+        {secret.signatureSecret && (
+          <label className="stack">
+            Signature secret
+            <input readOnly value={secret.signatureSecret} />
+            <button type="button" onClick={() => copy(secret.signatureSecret!)}>
+              Copy signature secret
+            </button>
+          </label>
+        )}
         <button type="button" onClick={onClose}>
           Close
         </button>

@@ -65,7 +65,7 @@ describe("webhook enqueue failure", () => {
       .expect(503);
 
     const idempotency = await prisma.idempotencyKey.findFirstOrThrow({
-      where: { organizationId: user.organizationId, scope: `webhook:${workflow.body.id}`, key: "enqueue-fails" }
+      where: { organizationId: user.organizationId, scope: `webhook:${trigger.body.id}`, key: "enqueue-fails" }
     });
     expect(idempotency.status).toBe("FAILED");
     expect(await prisma.execution.count({ where: { workflowId: workflow.body.id, status: "FAILED" } })).toBe(1);

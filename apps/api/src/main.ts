@@ -8,7 +8,7 @@ import { AppModule } from "./app.module";
 
 async function bootstrap() {
   parseBaseEnv(process.env);
-  const app = await NestFactory.create(AppModule, { bufferLogs: true });
+  const app = await NestFactory.create(AppModule, { bufferLogs: true, rawBody: true });
   app.useLogger(app.get(Logger));
   app.enableShutdownHooks();
 

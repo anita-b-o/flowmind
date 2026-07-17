@@ -17,9 +17,18 @@ export class WebhookTokenService {
     return candidate.length === expected.length && timingSafeEqual(candidate, expected);
   }
 
-  buildWebhookUrl(workflowId: string, token: string) {
+  previewToken(token: string) {
+    return `${token.slice(0, 4)}...${token.slice(-4)}`;
+  }
+
+  buildWebhookUrl(triggerId: string, token: string) {
     const baseUrl = process.env.PUBLIC_API_URL ?? "http://localhost:3001";
-    return `${baseUrl.replace(/\/$/, "")}/webhooks/${workflowId}/${token}`;
+    return `${baseUrl.replace(/\/$/, "")}/webhooks/${triggerId}/${token}`;
+  }
+
+  buildMaskedWebhookUrl(triggerId: string, tokenPreview?: string | null) {
+    const baseUrl = process.env.PUBLIC_API_URL ?? "http://localhost:3001";
+    return `${baseUrl.replace(/\/$/, "")}/webhooks/${triggerId}/${tokenPreview ?? "••••••••"}`;
   }
 
   private pepper() {

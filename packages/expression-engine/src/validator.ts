@@ -29,8 +29,11 @@ export function validateExpressionString(value: string, context: ExpressionValid
       if (namespace === "steps") {
         validateStepPath(path.segments, path.raw, context, issues);
       }
-      if (namespace === "trigger" && !["trigger.body", "trigger.headers"].some((prefix) => path.raw === prefix || path.raw.startsWith(`${prefix}.`))) {
-        issues.push(issue(EXPRESSION_ERROR_CODES.accessDenied, "trigger expressions must use trigger.body.* or trigger.headers.*", path.raw, namespace));
+      if (
+        namespace === "trigger" &&
+        !["trigger.body", "trigger.headers", "trigger.query", "trigger.method", "trigger.receivedAt"].some((prefix) => path.raw === prefix || path.raw.startsWith(`${prefix}.`))
+      ) {
+        issues.push(issue(EXPRESSION_ERROR_CODES.accessDenied, "trigger expressions must use trigger.body.*, trigger.headers.*, trigger.query.*, trigger.method, or trigger.receivedAt", path.raw, namespace));
       }
     }
   } catch (error) {

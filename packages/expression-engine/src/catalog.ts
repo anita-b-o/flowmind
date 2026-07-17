@@ -4,6 +4,9 @@ export function buildVariableCatalog(input: { steps?: WorkflowStepLike[]; includ
   const entries: VariableCatalogEntry[] = [
     entry("trigger.body", "object", "Webhook body", "Incoming webhook JSON body", "trigger"),
     entry("trigger.headers", "object", "Webhook headers", "Sanitized incoming webhook headers", "trigger"),
+    entry("trigger.query", "object", "Webhook query", "Sanitized incoming webhook query parameters", "trigger"),
+    entry("trigger.method", "string", "Webhook method", "Incoming webhook HTTP method", "trigger"),
+    entry("trigger.receivedAt", "string", "Webhook received at", "Webhook receive timestamp", "trigger"),
     entry("workflow.id", "string", "Workflow ID", undefined, "workflow"),
     entry("workflow.versionId", "string", "Workflow version ID", undefined, "workflow"),
     entry("workflow.name", "string", "Workflow name", undefined, "workflow"),

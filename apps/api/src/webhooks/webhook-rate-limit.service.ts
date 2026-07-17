@@ -1,5 +1,11 @@
-import { HttpException, HttpStatus, Injectable, OnModuleDestroy } from "@nestjs/common";
+import { HttpException, HttpStatus, Injectable, OnModuleDestroy, ServiceUnavailableException } from "@nestjs/common";
 import Redis from "ioredis";
+
+export class WebhookRateLimitExceededException extends HttpException {
+  constructor(readonly retryAfter: number) {
+    super({ message: "Webhook rate limit exceeded", retryAfter }, HttpStatus.TOO_MANY_REQUESTS);
+  }
+}
 
 @Injectable()
 export class WebhookRateLimitService implements OnModuleDestroy {
@@ -17,12 +23,18 @@ export class WebhookRateLimitService implements OnModuleDestroy {
       await this.redis.connect();
     }
     const redisKey = `webhook-rate:${key}`;
-    const count = await this.redis.incr(redisKey);
-    if (count === 1) {
-      await this.redis.expire(redisKey, windowSeconds);
+    let count: number;
+    try {
+      count = await this.redis.incr(redisKey);
+      if (count === 1) {
+        await this.redis.expire(redisKey, windowSeconds);
+      }
+    } catch {
+      throw new ServiceUnavailableException("Webhook rate limiting is unavailable");
     }
     if (count > max) {
-      throw new HttpException("Webhook rate limit exceeded", HttpStatus.TOO_MANY_REQUESTS);
+      const ttl = await this.redis.ttl(redisKey).catch(() => windowSeconds);
+      throw new WebhookRateLimitExceededException(ttl > 0 ? ttl : windowSeconds);
     }
   }
 

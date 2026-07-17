@@ -172,8 +172,8 @@ describe("DLQ, retry and audit log API", () => {
     await request(app.getHttpServer()).post("/auth/logout-all").set(authHeaders(owner, organization.id)).set("Origin", "http://localhost:3000").expect(204);
 
     await expectAudit(organization.id, "workflow.activated");
-    await expectAudit(organization.id, "trigger.created");
-    await expectAudit(organization.id, "trigger.rotated");
+    await expectAudit(organization.id, "webhook.trigger.created");
+    await expectAudit(organization.id, "webhook.trigger.rotated");
     await expectAudit(organization.id, "auth.logout_all");
   });
 

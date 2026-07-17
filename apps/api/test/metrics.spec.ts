@@ -77,7 +77,7 @@ describe("API metrics", () => {
 
   it("normalizes route candidates before they become labels", () => {
     expect(normalizeRoute("/executions/123e4567-e89b-12d3-a456-426614174000")).toBe("/executions/:id");
-    expect(normalizeRoute("/webhooks/workflow-verylongid/token-verylongid", "POST")).toBe("/webhooks/:workflowId/:token");
+    expect(normalizeRoute("/webhooks/workflow-verylongid/token-verylongid", "POST")).toBe("/webhooks/:publicId/:token");
   });
 });
 

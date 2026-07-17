@@ -69,7 +69,7 @@ Every API HTTP request receives a boundary-local `requestId` and a flow-level `c
 
 `requestId` identifies one operation inside one boundary. `correlationId` follows the business flow across webhook intake, `Execution`, BullMQ jobs, worker processing, step execution, and AI service calls. These IDs are for diagnostics only and are never used for authorization.
 
-Webhook intake stores `requestId` and `correlationId` on `WebhookEvent`, stores `correlationId` on `Execution`, and includes `correlationId` plus enqueue metadata in the BullMQ payload. Idempotent webhook repeats keep the original execution correlation ID. Manual retries inherit the original execution correlation ID so the incident and retry remain linked.
+Webhook intake stores `requestId`, `correlationId`, method, sanitized query, sanitized headers, bounded payload, and payload hash on `WebhookEvent`; stores `correlationId` on `Execution`; and includes `correlationId` plus enqueue metadata in the BullMQ payload. Idempotency is scoped to organization and trigger before enqueue. Idempotent webhook repeats keep the original execution correlation ID, while reused keys with different payloads are rejected. Manual retries inherit the original execution correlation ID so the incident and retry remain linked.
 
 Logs in API, worker, and AI service are structured. Production uses JSON, development can use pretty output. Logs use centralized redaction for credentials and sensitive fields, and do not include webhook bodies, prompts, cookies, bearer tokens, refresh tokens, API keys, or full step outputs by default.
 

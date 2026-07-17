@@ -3,10 +3,15 @@ export const HTTP_ROUTES_EXCLUDED = new Set(["/health", "/health/live", "/health
 export const WEBHOOK_REASON_CODES = [
   "accepted",
   "duplicate",
+  "idempotency_hit",
+  "idempotency_conflict",
   "invalid_token",
   "inactive_workflow",
+  "method_not_allowed",
   "unsupported_content_type",
   "payload_too_large",
+  "invalid_payload",
+  "signature_failure",
   "rate_limited",
   "enqueue_failed",
   "internal_error"
@@ -45,8 +50,8 @@ export function normalizeRoute(path: string, method = "GET") {
     .replace(/\/[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}(?=\/|$)/gi, "/:id")
     .replace(/\/[A-Za-z0-9_-]{16,}(?=\/|$)/g, "/:id")
     .replace(/\/\d+(?=\/|$)/g, "/:id");
-  if (method === "POST" && /^\/webhooks\/[^/]+\/[^/]+$/.test(path)) {
-    return "/webhooks/:workflowId/:token";
+  if (/^\/webhooks\/[^/]+\/[^/]+$/.test(path)) {
+    return "/webhooks/:publicId/:token";
   }
   return normalized || "/";
 }

@@ -93,14 +93,16 @@ Refresh cookies use `HttpOnly`, `SameSite=Lax`, `Path=/auth`, `Secure` in produc
 Use the returned URL:
 
 ```bash
-POST /webhooks/:workflowId/:token
+POST /webhooks/:triggerId/:token
 Idempotency-Key: external-event-id
 Content-Type: application/json
 ```
 
-Webhook idempotency is scoped per organization and workflow. The API creates the execution in PostgreSQL first, publishes a deterministic BullMQ job, then marks the idempotency key as `ENQUEUED`. If enqueue fails, the execution and idempotency key are marked `FAILED` so a later retry can recover instead of being falsely accepted.
+The legacy `POST /webhooks/:workflowId/:token` form is still accepted for existing integrations, but new integrations should use the trigger ID URL returned by create or rotate. The plaintext token is not recoverable after that response.
 
-Webhook intake accepts JSON only, applies `WEBHOOK_PAYLOAD_MAX_BYTES`, and rate-limits by workflow/IP before token validation plus organization/workflow/trigger/IP after validation.
+Webhook idempotency is scoped per organization and trigger. The API creates the execution in PostgreSQL first, publishes a deterministic BullMQ job, then marks the idempotency key as `ENQUEUED`. If enqueue fails, the execution and idempotency key are marked `FAILED` so a later retry can recover instead of being falsely accepted. Reusing an idempotency key with a different payload returns `409`.
+
+Webhook intake accepts JSON only, applies byte and structural payload limits, supports optional HMAC-SHA256 replay protection, and rate-limits before execution creation. Public auth failures use homogeneous responses for missing triggers, invalid tokens, disabled triggers, and deleted triggers.
 
 ## Workflow Builder
 

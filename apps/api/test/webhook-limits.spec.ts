@@ -101,7 +101,7 @@ describe("webhook limits and validation", () => {
     process.env.WEBHOOK_RATE_LIMIT_DISABLED = "true";
     await request(app.getHttpServer()).post(`/webhooks/${workflowId}/wrong-token`).send({ name: "Bad" }).expect(401);
     await prisma.workflow.update({ where: { id: workflowId }, data: { status: "PAUSED" } });
-    await request(app.getHttpServer()).post(`/webhooks/${workflowId}/${token}`).send({ name: "Paused" }).expect(404);
+    await request(app.getHttpServer()).post(`/webhooks/${workflowId}/${token}`).send({ name: "Paused" }).expect(401);
     delete process.env.WEBHOOK_RATE_LIMIT_DISABLED;
   });
 

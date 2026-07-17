@@ -48,6 +48,17 @@ export class ApiMetricsService implements OnModuleInit, OnModuleDestroy {
     labelNames: ["reason_code"],
     registers: [this.registry]
   });
+  readonly webhookExecutionsCreated = new Counter({
+    name: "flowmind_webhook_executions_created_total",
+    help: "Executions created by webhook intake.",
+    registers: [this.registry]
+  });
+  readonly webhookEnqueueLatency = new Histogram({
+    name: "flowmind_webhook_enqueue_latency_seconds",
+    help: "Seconds from webhook intake start until execution enqueue completes.",
+    buckets: HTTP_BUCKETS,
+    registers: [this.registry]
+  });
   readonly authLogin = new Counter({
     name: "flowmind_auth_login_total",
     help: "Authentication login attempts.",
@@ -140,6 +151,14 @@ export class ApiMetricsService implements OnModuleInit, OnModuleDestroy {
     this.webhookRequests.inc({ outcome, reason_code: reasonCode });
     if (outcome === "rejected") this.webhookRejected.inc({ reason_code: reasonCode });
     if (reasonCode === "rate_limited") this.webhookRateLimited.inc({ reason_code: reasonCode });
+  }
+
+  recordWebhookExecutionCreated() {
+    this.webhookExecutionsCreated.inc();
+  }
+
+  recordWebhookEnqueueLatency(seconds: number) {
+    this.webhookEnqueueLatency.observe(seconds);
   }
 
   recordAuthLogin(outcome: AuthOutcome) {
