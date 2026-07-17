@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { WorkflowDetail, WorkflowVersion } from "../types";
@@ -172,6 +172,36 @@ describe("WorkflowEditor", () => {
     expect(screen.getByRole("dialog", { name: /choose workflow test source/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /save and test/i })).toBeEnabled();
     expect(screen.getByRole("button", { name: /test draft snapshot/i })).toBeEnabled();
+  });
+
+  it("edits Transform OBJECT fields visually and preserves literal/expression choices", async () => {
+    createVersion.mutateAsync.mockResolvedValue(version("version-2", 2, "DRAFT", []));
+    render(<WorkflowEditor workflow={workflow()} onRefresh={vi.fn()} />);
+
+    await userEvent.click(screen.getByRole("button", { name: "Form" }));
+    await userEvent.selectOptions(screen.getByLabelText("Step type to add"), "transform");
+    await userEvent.click(screen.getByRole("button", { name: /add step/i }));
+
+    const fields = () => screen.getByLabelText("Transform fields");
+    expect(within(fields()).queryByRole("textbox", { name: /fields/i })).not.toBeInTheDocument();
+
+    fireEvent.change(within(fields()).getByLabelText("Field name"), { target: { value: "value" } });
+    await userEvent.selectOptions(within(fields()).getByLabelText("Field value type"), "literal");
+    expect(within(fields()).getByLabelText("Field value type")).toHaveValue("literal");
+    expect(within(fields()).getByLabelText("Field value")).toHaveValue("{{trigger.body}}");
+    fireEvent.change(within(fields()).getByLabelText("Field value"), { target: { value: "123" } });
+
+    await userEvent.selectOptions(screen.getByLabelText("Output type"), "NUMBER");
+    await userEvent.click(within(fields()).getByRole("button", { name: /add field/i }));
+    await waitFor(() => expect(within(fields()).getAllByLabelText("Field name")).toHaveLength(2));
+    fireEvent.change(within(fields()).getAllByLabelText("Field name")[1], { target: { value: "value" } });
+    expect(within(fields()).getByText("Field names must be unique.")).toBeInTheDocument();
+    fireEvent.change(within(fields()).getAllByLabelText("Field name")[1], { target: { value: "constructor" } });
+    expect(within(fields()).getByText("This field name is not allowed.")).toBeInTheDocument();
+    await userEvent.click(within(fields()).getAllByRole("button", { name: /remove/i })[1]);
+
+    await waitFor(() => expect(within(fields()).getAllByLabelText("Field name")).toHaveLength(1));
+    expect(JSON.parse((document.querySelector('input[name="steps.1.config.fields"]') as HTMLInputElement).value)).toEqual({ value: 123 });
   });
 });
 

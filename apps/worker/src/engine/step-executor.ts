@@ -1,5 +1,5 @@
 import { Injectable } from "@nestjs/common";
-import { StepExecutionStatus, WorkflowStepDefinition } from "@automation/shared-types";
+import { StepExecutionStatus, StepType, WorkflowStepDefinition } from "@automation/shared-types";
 import { sanitizeForLog } from "@automation/observability";
 import { Prisma } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
@@ -115,7 +115,8 @@ export class StepExecutor {
       };
       input.context.connection = await this.safeConnectionMetadata(input.organizationId, input.step.config);
       const mode = input.context.metadata?.expressionMode === "strict" ? "strict" : "legacy";
-      const resolvedConfig = this.expressionResolver
+      const shouldResolveConfigBeforeHandler = input.step.type !== StepType.Transform;
+      const resolvedConfig = shouldResolveConfigBeforeHandler && this.expressionResolver
         ? this.expressionResolver.resolveValue(input.step.config, input.context, { mode })
         : input.step.config;
       const resolvedStep = { ...input.step, config: resolvedConfig as Record<string, unknown> };
@@ -144,6 +145,9 @@ export class StepExecutor {
         decision?.kind === "mock"
           ? decision.result
           : await withTimeout(handler.execute(resolvedStep, input.context), policy.timeoutSeconds * 1000);
+      if (input.step.type === StepType.Transform) {
+        await this.debugRecorder?.record(input.stepExecution.id, transformDebugArtifact(input.step.config, result.output));
+      }
       const completedAt = new Date();
       const control = result.control;
       const waitUntil = control?.waitUntil ? new Date(control.waitUntil) : null;
@@ -187,10 +191,16 @@ export class StepExecutor {
         durationMs: completedAt.getTime() - startedAt.getTime()
       });
       this.metrics?.recordStep(input.step.type, "completed", (completedAt.getTime() - startedAt.getTime()) / 1000);
+      if (input.step.type === StepType.Transform) {
+        this.metrics?.recordTransform(String(input.step.config.mode ?? ""), "success", (completedAt.getTime() - startedAt.getTime()) / 1000);
+      }
       return { result, outcome: "completed" as const };
     } catch (error) {
       const completedAt = new Date();
       const classification = this.errorClassifier.classify(error);
+      if (input.step.type === StepType.Transform) {
+        await this.debugRecorder?.record(input.stepExecution.id, transformDebugArtifact(input.step.config, undefined, error)).catch(() => undefined);
+      }
       const canRetry = classification === "retryable" && nextAttempt < policy.maxAttempts;
       const nextRetryAt = canRetry ? this.retryPolicyResolver.nextRetryAt(policy, nextAttempt, completedAt) : null;
       await this.prisma.stepExecution.update({
@@ -222,6 +232,9 @@ export class StepExecutor {
         (completedAt.getTime() - startedAt.getTime()) / 1000,
         workerErrorCategory(classification)
       );
+      if (input.step.type === StepType.Transform) {
+        this.metrics?.recordTransform(String(input.step.config.mode ?? ""), "failure", (completedAt.getTime() - startedAt.getTime()) / 1000, transformFailureCategory(error));
+      }
       throw error;
     }
   }
@@ -324,8 +337,53 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
 function serializeError(error: unknown, classification: string) {
   return {
     message: error instanceof Error ? error.message : String(error),
-    classification
+    classification,
+    ...(isStructuredStepError(error) ? { code: (error as any).code } : {})
   };
+}
+
+function transformDebugArtifact(config: Record<string, unknown>, output?: unknown, error?: unknown) {
+  return {
+    originalConfig: config,
+    resolvedConfig: config,
+    expressions: collectExpressions(config, config),
+    resolvedVariables: collectExpressions(config, config).map((entry) => ({
+      path: entry.expression.replace(/^\{\{\s*|\s*\}\}$/g, ""),
+      original: entry.expression,
+      resolved: entry.result,
+      origin: entry.expression.split(".")[0]?.replace(/^\{\{\s*/, "") ?? "unknown"
+    })),
+    transform: {
+      mode: typeof config.mode === "string" ? config.mode : "unknown",
+      source: transformSourcePreview(config),
+      output: transformDebugValue(output),
+      error: error ? serializeError(error, "non_retryable") : undefined
+    }
+  };
+}
+
+function transformSourcePreview(config: Record<string, unknown>) {
+  if ("source" in config) return config.source;
+  if ("mergeSources" in config) return config.mergeSources;
+  if ("fields" in config) return config.fields;
+  return undefined;
+}
+
+function transformFailureCategory(error: unknown) {
+  const code = isStructuredStepError(error) ? String((error as any).code).toLowerCase() : "";
+  if (code) return code;
+  return "unknown";
+}
+
+function transformDebugValue(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return { type: "array", length: value.length, preview: value.slice(0, 5).map((entry) => limitValue(entry)) };
+  }
+  return limitValue(value);
+}
+
+function isStructuredStepError(error: unknown) {
+  return Boolean(error && typeof error === "object" && "code" in error && typeof (error as any).code === "string");
 }
 
 const SENSITIVE_WORDS = /(^|[^a-z0-9])(authorization|cookie|token|secret|password|api[-_ ]?key)([^a-z0-9]|$)/i;

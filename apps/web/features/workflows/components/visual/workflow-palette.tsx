@@ -30,6 +30,7 @@ const GROUPS: Array<{ label: string; items: Array<{ type: StepType; name: string
   {
     label: "Data",
     items: [
+      { type: "transform", name: "Transform", description: "Shape data with safe expressions.", icon: "TX" },
       { type: "database_record", name: "Database Record", description: "Write a workflow record.", icon: "DB" },
       { type: "email_notification", name: "Email", description: "Send via SMTP connection.", icon: "MAIL" }
     ]

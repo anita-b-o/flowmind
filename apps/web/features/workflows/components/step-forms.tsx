@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useMemo, useState } from "react";
 import type { FieldErrors, UseFormGetValues, UseFormRegister, UseFormSetValue } from "react-hook-form";
 import { useConnections } from "../../connections/hooks";
 import type { WorkflowEditorFormValue } from "../workflow-builder";
@@ -30,6 +31,9 @@ export function StepForm({ index, type, register, errors, disabled, setValue, ge
   }
   if (type === "database_record") {
     return <DatabaseStepForm index={index} register={register} errors={errors} disabled={disabled} setValue={setValue} getValues={getValues} />;
+  }
+  if (type === "transform") {
+    return <TransformStepForm index={index} register={register} errors={errors} disabled={disabled} setValue={setValue} getValues={getValues} />;
   }
   if (type === "if") {
     return <IfStepForm index={index} register={register} errors={errors} disabled={disabled} setValue={setValue} getValues={getValues} />;
@@ -241,6 +245,230 @@ export function ConditionalStepForm({ index, register, errors, disabled, setValu
       </label>
     </div>
   );
+}
+
+export function TransformStepForm({ index, register, errors, disabled, setValue, getValues }: StepFormProps) {
+  const entries = catalogForSteps(getValues("steps"), index);
+  const previousKeys = getValues("steps").slice(0, index).map((step) => step.key);
+  const [mode, setMode] = useState(String(getValues(`steps.${index}.config.mode`) ?? "OBJECT"));
+  const [fieldRows, setFieldRows] = useState(() => fieldsFromText(String(getValues(`steps.${index}.config.fields`) ?? "{}"), String(getValues(`steps.${index}.config.fieldsUi`) ?? "")));
+  const fieldsText = useMemo(() => serializeFieldRows(fieldRows), [fieldRows]);
+  const modeField = register(`steps.${index}.config.mode`);
+  function updateFields(rows: FieldRow[]) {
+    setFieldRows(rows);
+    setValue(`steps.${index}.config.fieldsUi`, JSON.stringify(rows), { shouldDirty: true });
+    if (!hasDuplicateFieldKeys(rows)) {
+      setValue(`steps.${index}.config.fields`, serializeFieldRows(rows), { shouldDirty: true, shouldValidate: true });
+    }
+  }
+  return (
+    <div className="stack">
+      <div className="workflow-form-grid">
+        <label>
+          Mode
+          <select
+            disabled={disabled}
+            {...modeField}
+            onChange={(event) => {
+              void modeField.onChange(event);
+              setMode(event.target.value);
+            }}
+          >
+            <option value="OBJECT">Object</option>
+            <option value="PICK">Pick</option>
+            <option value="OMIT">Omit</option>
+            <option value="MAP_ARRAY">Map array</option>
+            <option value="FILTER_ARRAY">Filter array</option>
+            <option value="MERGE">Merge</option>
+          </select>
+          <FieldError message={configError(errors, index, "mode")} />
+        </label>
+        <label>
+          Output type
+          <select disabled={disabled} {...register(`steps.${index}.config.outputType`)}>
+            {["AUTO", "OBJECT", "ARRAY", "STRING", "NUMBER", "BOOLEAN"].map((type) => (
+              <option key={type} value={type}>
+                {type}
+              </option>
+            ))}
+          </select>
+          <FieldError message={configError(errors, index, "outputType")} />
+        </label>
+      </div>
+      {mode === "OBJECT" && (
+        <div className="stack" aria-label="Transform fields">
+          <strong>Fields</strong>
+          {fieldRows.map((row, rowIndex) => {
+            const duplicate = row.key.trim() && fieldRows.findIndex((entry) => entry.key.trim() === row.key.trim()) !== rowIndex;
+            const dangerous = ["__proto__", "prototype", "constructor"].includes(row.key.trim());
+            return (
+              <div className="workflow-form-grid" key={rowIndex}>
+                <label>
+                  Name
+                  <input
+                    aria-label="Field name"
+                    disabled={disabled}
+                    value={row.key}
+                    onChange={(event) => updateFields(fieldRows.map((entry, idx) => (idx === rowIndex ? { ...entry, key: event.target.value } : entry)))}
+                  />
+                  {duplicate && <FieldError message="Field names must be unique." />}
+                  {dangerous && <FieldError message="This field name is not allowed." />}
+                </label>
+                <label>
+                  Value type
+                  <select aria-label="Field value type" disabled={disabled} value={row.kind} onChange={(event) => updateFields(fieldRows.map((entry, idx) => (idx === rowIndex ? { ...entry, kind: event.target.value } : entry)))}>
+                    <option value="literal">Literal</option>
+                    <option value="expression">Expression</option>
+                  </select>
+                </label>
+                <label>
+                  Value
+                  <input
+                    aria-label="Field value"
+                    disabled={disabled}
+                    placeholder={row.kind === "expression" ? "{{trigger.body.name}}" : "text, 123, true, null"}
+                    value={row.value}
+                    onChange={(event) => updateFields(fieldRows.map((entry, idx) => (idx === rowIndex ? { ...entry, value: event.target.value } : entry)))}
+                  />
+                </label>
+                <button type="button" disabled={disabled || fieldRows.length <= 1} onClick={() => updateFields(fieldRows.filter((_, idx) => idx !== rowIndex))}>
+                  Remove
+                </button>
+              </div>
+            );
+          })}
+          <button type="button" disabled={disabled} onClick={() => updateFields([...fieldRows, { key: `field_${fieldRows.length + 1}`, kind: "expression", value: "{{trigger.body}}" }])}>
+            Add field
+          </button>
+          <input type="hidden" {...register(`steps.${index}.config.fields`)} value={fieldsText} />
+          <span className="muted">Use literal JSON scalars or safe expressions. For STRING, NUMBER, or BOOLEAN output, keep exactly one field named value. Nested objects can be restored from saved workflows.</span>
+          <FieldError message={configError(errors, index, "fields")} />
+        </div>
+      )}
+      {(mode === "PICK" || mode === "OMIT" || mode === "MAP_ARRAY" || mode === "FILTER_ARRAY") && (
+        <label>
+          Source
+          <input disabled={disabled} placeholder="{{trigger.body}}" {...register(`steps.${index}.config.source`)} />
+          <ExpressionTools field={`steps.${index}.config.source`} entries={entries} previousKeys={previousKeys} disabled={disabled} getValues={getValues} setValue={setValue} />
+          <FieldError message={configError(errors, index, "source")} />
+        </label>
+      )}
+      {(mode === "PICK" || mode === "OMIT") && (
+        <label>
+          Paths
+          <textarea rows={4} disabled={disabled} placeholder="id,name,profile.email" {...register(`steps.${index}.config.paths`)} />
+          <span className="muted">Comma or newline separated paths. Unsafe keys are blocked.</span>
+          <FieldError message={configError(errors, index, "paths")} />
+        </label>
+      )}
+      {mode === "MAP_ARRAY" && (
+        <label>
+          Template
+          <textarea rows={8} disabled={disabled} placeholder='{"id":"{{item.id}}","row":"{{index}}"}' {...register(`steps.${index}.config.template`)} />
+          <ExpressionTools field={`steps.${index}.config.template`} entries={entries} previousKeys={previousKeys} disabled={disabled} getValues={getValues} setValue={setValue} />
+          <span className="muted">Each item exposes item and index.</span>
+          <FieldError message={configError(errors, index, "template")} />
+        </label>
+      )}
+      {mode === "FILTER_ARRAY" && (
+        <label>
+          Condition
+          <input disabled={disabled} placeholder="{{item.active}}" {...register(`steps.${index}.config.condition`)} />
+          <ExpressionTools field={`steps.${index}.config.condition`} entries={entries} previousKeys={previousKeys} disabled={disabled} getValues={getValues} setValue={setValue} />
+          <span className="muted">Must resolve to true or false for each item. item and index are available.</span>
+          <FieldError message={configError(errors, index, "condition")} />
+        </label>
+      )}
+      {mode === "MERGE" && (
+        <>
+          <label>
+            Sources
+            <textarea rows={6} disabled={disabled} placeholder='["{{trigger.body}}","{{steps.lookup.output}}"]' {...register(`steps.${index}.config.mergeSources`)} />
+            <ExpressionTools field={`steps.${index}.config.mergeSources`} entries={entries} previousKeys={previousKeys} disabled={disabled} getValues={getValues} setValue={setValue} />
+            <FieldError message={configError(errors, index, "mergeSources")} />
+          </label>
+          <label>
+            Conflict policy
+            <select disabled={disabled} {...register(`steps.${index}.config.conflictPolicy`)}>
+              <option value="LAST_WINS">Last wins</option>
+              <option value="FIRST_WINS">First wins</option>
+              <option value="ERROR">Error</option>
+            </select>
+            <FieldError message={configError(errors, index, "conflictPolicy")} />
+          </label>
+        </>
+      )}
+      <pre className="workflow-config-preview" aria-label="Transform configuration preview">
+        {JSON.stringify({ mode, outputType: getValues(`steps.${index}.config.outputType`) ?? "AUTO" }, null, 2)}
+      </pre>
+    </div>
+  );
+}
+
+type FieldRow = { key: string; kind: string; value: string };
+
+function fieldsFromText(value: string, uiValue = ""): FieldRow[] {
+  const uiRows = rowsFromUiText(uiValue);
+  if (uiRows.length) return uiRows;
+  try {
+    const parsed = JSON.parse(value || "{}");
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return [{ key: "result", kind: "expression", value: "{{trigger.body}}" }];
+    const rows = Object.entries(parsed).map(([key, entry]) => ({
+      key,
+      kind: typeof entry === "string" && entry.includes("{{") ? "expression" : "literal",
+      value: typeof entry === "string" && entry.includes("{{") ? entry : JSON.stringify(entry)
+    }));
+    return rows.length ? rows : [{ key: "result", kind: "expression", value: "{{trigger.body}}" }];
+  } catch {
+    return [{ key: "result", kind: "expression", value: "{{trigger.body}}" }];
+  }
+}
+
+function rowsFromUiText(value: string): FieldRow[] {
+  try {
+    const parsed = JSON.parse(value || "[]");
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .map((row) => ({
+        key: typeof row?.key === "string" ? row.key : "",
+        kind: row?.kind === "literal" ? "literal" : "expression",
+        value: typeof row?.value === "string" ? row.value : ""
+      }))
+      .filter((row) => row.key || row.value);
+  } catch {
+    return [];
+  }
+}
+
+function serializeFieldRows(rows: FieldRow[]) {
+  return JSON.stringify(
+    Object.fromEntries(rows.filter((row) => row.key.trim()).map((row) => [row.key.trim(), row.kind === "expression" ? expressionValue(row.value) : literalValue(row.value)])),
+    null,
+    2
+  );
+}
+
+function hasDuplicateFieldKeys(rows: FieldRow[]) {
+  const seen = new Set<string>();
+  for (const row of rows) {
+    const key = row.key.trim();
+    if (!key) continue;
+    if (seen.has(key)) return true;
+    seen.add(key);
+  }
+  return false;
+}
+
+function expressionValue(value: string) {
+  return value.includes("{{") ? value : `{{${value.trim()}}}`;
+}
+
+function literalValue(value: string) {
+  try {
+    return JSON.parse(value);
+  } catch {
+    return value;
+  }
 }
 
 function ExpressionTools({

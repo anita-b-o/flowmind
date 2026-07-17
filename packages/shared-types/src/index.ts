@@ -54,7 +54,8 @@ export enum StepType {
   Delay = "delay",
   WaitUntil = "wait_until",
   EmailNotification = "email_notification",
-  DatabaseRecord = "database_record"
+  DatabaseRecord = "database_record",
+  Transform = "transform"
 }
 
 export enum ConnectionType {
@@ -181,3 +182,4 @@ export interface ScheduledTriggerJobPayload {
 export * from "./test-runs";
 export * from "./graph-validation";
 export * from "./execution-lifecycle";
+export * from "./transform-step";

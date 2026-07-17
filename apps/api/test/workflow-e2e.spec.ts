@@ -133,6 +133,51 @@ describe("workflow webhook execution e2e", () => {
     expect(await prisma.internalRecord.count({ where: { executionId: created.body.execution.id } })).toBe(1);
   }, 30_000);
 
+  it("runs Transform OBJECT output into a following step for manual and webhook executions", async () => {
+    const user = await register("transform-e2e@example.com", "Transform E2E");
+    const workflow = await createWorkflow(user, "Transform workflow");
+    const version = await createTransformVersion(user, workflow.id);
+    const trigger = await createTrigger(user, workflow.id);
+    await request(app.getHttpServer())
+      .patch(`/workflows/${workflow.id}/versions/${version.id}/activate`)
+      .set(authHeaders(user))
+      .expect(200);
+
+    const manual = await request(app.getHttpServer())
+      .post(`/workflows/${workflow.id}/executions`)
+      .set(authHeaders(user))
+      .set("Idempotency-Key", "transform-manual-1")
+      .send({
+        input: {
+          trigger: {
+            body: { name: "Nora", email: "nora@example.com", priority: "high" },
+            headers: { authorization: "Bearer should-not-leak" }
+          },
+          metadata: { source: "smoke" }
+        },
+        confirmRealEffects: true
+      })
+      .expect(201);
+    await expectTransformExecution(manual.body.execution.id, {
+      name: "Nora",
+      email: "nora@example.com",
+      priority: "high",
+      source: "transform"
+    });
+
+    const webhook = await request(app.getHttpServer())
+      .post(`/webhooks/${workflow.id}/${trigger.token}`)
+      .set("Idempotency-Key", "transform-webhook-1")
+      .send({ name: "Vera", email: "vera@example.com", priority: "low" })
+      .expect(202);
+    await expectTransformExecution(webhook.body.executionId, {
+      name: "Vera",
+      email: "vera@example.com",
+      priority: "low",
+      source: "transform"
+    });
+  }, 30_000);
+
   it("prevents cross-tenant trigger and execution access", async () => {
     const userA = await register("tenant-a@example.com", "Tenant A");
     const userB = await register("tenant-b@example.com", "Tenant B");
@@ -212,6 +257,48 @@ describe("workflow webhook execution e2e", () => {
     return response.body;
   }
 
+  async function createTransformVersion(user: TestUser, workflowId: string) {
+    const response = await request(app.getHttpServer())
+      .post(`/workflows/${workflowId}/versions`)
+      .set(authHeaders(user))
+      .send({
+        trigger: { key: "webhook", name: "Webhook", type: "webhook_trigger", config: {} },
+        steps: [
+          {
+            key: "shape",
+            name: "Shape lead",
+            type: "transform",
+            config: {
+              mode: "OBJECT",
+              fields: {
+                name: "{{trigger.body.name}}",
+                email: "{{trigger.body.email}}",
+                priority: "{{trigger.body.priority}}",
+                source: "transform"
+              },
+              outputType: "OBJECT"
+            }
+          },
+          {
+            key: "save_shape",
+            name: "Save shaped lead",
+            type: "database_record",
+            config: {
+              collection: "transformed_leads",
+              data: {
+                name: "{{steps.shape.output.name}}",
+                email: "{{steps.shape.output.email}}",
+                priority: "{{steps.shape.output.priority}}",
+                source: "{{steps.shape.output.source}}"
+              }
+            }
+          }
+        ]
+      })
+      .expect(201);
+    return response.body;
+  }
+
   async function createTrigger(user: TestUser, workflowId: string) {
     const response = await request(app.getHttpServer())
       .post(`/workflows/${workflowId}/triggers`)
@@ -232,6 +319,24 @@ describe("workflow webhook execution e2e", () => {
       await new Promise((resolve) => setTimeout(resolve, 250));
     }
     throw new Error(`Execution ${executionId} did not reach ${status}`);
+  }
+
+  async function expectTransformExecution(executionId: string, expected: Record<string, string>) {
+    const detail = await waitForExecution(executionId, "COMPLETED");
+    expect(detail.body.steps.map((step: any) => [step.stepKey, step.status])).toEqual([
+      ["shape", "COMPLETED"],
+      ["save_shape", "COMPLETED"]
+    ]);
+
+    const transformStep = await prisma.stepExecution.findFirstOrThrow({ where: { executionId, stepKey: "shape" } });
+    expect(transformStep.outputJson).toEqual(expected);
+
+    const records = await prisma.internalRecord.findMany({
+      where: { executionId, collection: "transformed_leads" },
+      orderBy: { createdAt: "asc" }
+    });
+    expect(records).toHaveLength(1);
+    expect(records[0].dataJson).toEqual(expected);
   }
 });
 

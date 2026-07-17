@@ -8,6 +8,7 @@ const STEP_BUCKETS = [0.01, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60, 120];
 export type WorkerErrorCategory = "retryable" | "non_retryable" | "ambiguous" | "unknown";
 export type LeaseOutcome = "acquired" | "conflict" | "expired_recovery" | "lost" | "released";
 export type StepOutcome = "completed" | "retry_scheduled" | "failed" | "skipped" | "ambiguous";
+export type TransformOutcome = "success" | "failure";
 export type ReconcilerReason = "run_completed" | "run_failed" | "execution_requeued" | "retry_recovered" | "expired_lease_recovered" | "queued_job_recovered";
 export type DlqReason = "non_retryable" | "attempts_exhausted" | "ambiguous_effect" | "inconsistent_state" | "invalid_wait" | "branch_resolution_failed" | "control_validation_failed";
 
@@ -141,6 +142,31 @@ export class WorkerMetricsService implements OnModuleInit, OnModuleDestroy {
     labelNames: ["reason_code"],
     registers: [this.registry]
   });
+  readonly transformExecutions = new Counter({
+    name: "flowmind_transform_executions_total",
+    help: "Transform step executions by mode and outcome.",
+    labelNames: ["mode", "outcome"],
+    registers: [this.registry]
+  });
+  readonly transformFailures = new Counter({
+    name: "flowmind_transform_failures_total",
+    help: "Transform step failures by mode and category.",
+    labelNames: ["mode", "category"],
+    registers: [this.registry]
+  });
+  readonly transformLimitExceeded = new Counter({
+    name: "flowmind_transform_limit_exceeded_total",
+    help: "Transform step limit exceeded failures by mode.",
+    labelNames: ["mode"],
+    registers: [this.registry]
+  });
+  readonly transformDuration = new Histogram({
+    name: "flowmind_transform_duration_seconds",
+    help: "Transform step execution duration.",
+    labelNames: ["mode", "outcome"],
+    buckets: [0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5],
+    registers: [this.registry]
+  });
 
   constructor() {
     this.registry.setDefaultLabels({ service: "worker" });
@@ -197,6 +223,17 @@ export class WorkerMetricsService implements OnModuleInit, OnModuleDestroy {
     this.branchSelected.inc({ step_type: safeStepType(stepType), branch: safeReason(branch) });
   }
 
+  recordTransform(mode: string | undefined, outcome: TransformOutcome, durationSeconds: number, category?: string) {
+    const safeMode = safeTransformMode(mode);
+    this.transformExecutions.inc({ mode: safeMode, outcome });
+    this.transformDuration.observe({ mode: safeMode, outcome }, durationSeconds);
+    if (outcome === "failure") {
+      const safeCategory = safeReason((category ?? "unknown").toLowerCase());
+      this.transformFailures.inc({ mode: safeMode, category: safeCategory });
+      if (safeCategory === "limit_exceeded") this.transformLimitExceeded.inc({ mode: safeMode });
+    }
+  }
+
   private hasCredential(authorization: string | undefined, header: string | string[] | undefined) {
     return Boolean(bearerToken(authorization) || headerValue(header));
   }
@@ -231,6 +268,10 @@ export function dlqReasonCode(reason: string | undefined): DlqReason {
 
 function safeReason(value: string) {
   return /^[a-z][a-z0-9_]{0,40}$/.test(value) ? value : "unknown";
+}
+
+function safeTransformMode(value: string | undefined) {
+  return ["OBJECT", "PICK", "OMIT", "MAP_ARRAY", "FILTER_ARRAY", "MERGE"].includes(value ?? "") ? String(value).toLowerCase() : "unknown";
 }
 
 function bearerToken(value: string | undefined) {

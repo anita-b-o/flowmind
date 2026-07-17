@@ -14,9 +14,14 @@ export function validateExpressionString(value: string, context: ExpressionValid
       if (part.type !== "expression") continue;
       const path = part.path;
       const namespace = path.namespace;
-      if (!NAMESPACES.has(namespace as ExpressionNamespace)) {
+      const localNamespaces = new Set(context.localNamespaces ?? []);
+      const isLocal = namespace === "item" || namespace === "index";
+      if (!NAMESPACES.has(namespace as ExpressionNamespace) && !(isLocal && localNamespaces.has(namespace as "item" | "index"))) {
         issues.push(issue(EXPRESSION_ERROR_CODES.namespaceUnknown, `Unknown expression namespace "${namespace}"`, path.raw, namespace));
         continue;
+      }
+      if (isLocal && !localNamespaces.has(namespace as "item" | "index")) {
+        issues.push(issue(EXPRESSION_ERROR_CODES.accessDenied, `Expression namespace "${namespace}" is not available here`, path.raw, namespace));
       }
       if (namespace === "metadata" && context.allowMetadata === false) {
         issues.push(issue(EXPRESSION_ERROR_CODES.accessDenied, "metadata.* is legacy-only and is not available here", path.raw, namespace));

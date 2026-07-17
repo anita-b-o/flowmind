@@ -58,5 +58,6 @@ function nodeKind(type: string) {
   if (type.startsWith("ai_")) return "AI";
   if (type === "if" || type === "switch" || type === "conditional") return "Logic";
   if (type === "delay" || type === "wait_until") return "Wait";
+  if (type === "transform" || type === "database_record") return "Data";
   return "Action";
 }

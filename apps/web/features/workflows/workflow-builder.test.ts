@@ -80,6 +80,78 @@ describe("workflow builder model", () => {
     );
   });
 
+  it("serializes and validates Transform configs", () => {
+    const values: WorkflowEditorFormValue = {
+      name: "Transform flow",
+      description: "",
+      steps: [
+        {
+          ...emptyStep(0, "transform"),
+          key: "shape",
+          name: "Shape",
+          config: { mode: "MAP_ARRAY", source: "{{trigger.body.items}}", template: "{\"id\":\"{{item.id}}\",\"row\":\"{{index}}\"}", outputType: "ARRAY" }
+        }
+      ]
+    };
+
+    expect(workflowEditorSchema.safeParse(values).success).toBe(true);
+    expect(toWorkflowDefinition(values).steps[0]).toMatchObject({
+      type: "transform",
+      config: {
+        configVersion: 1,
+        mode: "MAP_ARRAY",
+        source: "{{trigger.body.items}}",
+        template: { id: "{{item.id}}", row: "{{index}}" },
+        itemVariable: "item",
+        outputType: "ARRAY"
+      }
+    });
+  });
+
+  it("ignores Transform OBJECT editor metadata and serializes scalar output values", () => {
+    const values: WorkflowEditorFormValue = {
+      name: "Transform flow",
+      description: "",
+      steps: [
+        {
+          ...emptyStep(0, "transform"),
+          key: "shape",
+          name: "Shape",
+          config: {
+            mode: "OBJECT",
+            fields: "{\"value\":123}",
+            fieldsUi: "[{\"key\":\"value\",\"kind\":\"literal\",\"value\":\"123\"}]",
+            outputType: "NUMBER"
+          }
+        }
+      ]
+    };
+
+    expect(workflowEditorSchema.safeParse(values).success).toBe(true);
+    expect(toWorkflowDefinition(values).steps[0]).toMatchObject({
+      type: "transform",
+      config: {
+        configVersion: 1,
+        mode: "OBJECT",
+        fields: { value: 123 },
+        outputType: "NUMBER"
+      }
+    });
+    expect(toWorkflowDefinition(values).steps[0].config).not.toHaveProperty("fieldsUi");
+  });
+
+  it("rejects unsafe Transform paths inline", () => {
+    const invalid: WorkflowEditorFormValue = {
+      name: "Transform flow",
+      description: "",
+      steps: [{ ...emptyStep(0, "transform"), config: { mode: "PICK", source: "{{trigger.body}}", paths: "__proto__.polluted" } }]
+    };
+
+    const result = workflowEditorSchema.safeParse(invalid);
+    expect(result.success).toBe(false);
+    if (!result.success) expect(JSON.stringify(result.error.format())).toContain("Path is invalid or unsafe");
+  });
+
   it("drops incompatible config when type changes", () => {
     expect(keepCompatibleConfig("email_notification", { url: "https://example.com", subject: "Hello" })).toEqual({
       connectionId: "",

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { validateTransformStepConfig } from "@automation/shared-types";
 import type { RetryPolicyDto, StepType, WorkflowDefinitionDto, WorkflowStepDto, WorkflowVersion } from "./types";
 import { buildGraph } from "./graph-builder";
 
@@ -9,6 +10,7 @@ export const STEP_TYPES: Array<{ value: StepType; label: string }> = [
   { value: "ai_summary", label: "AI Summary" },
   { value: "email_notification", label: "Email" },
   { value: "database_record", label: "Database Record" },
+  { value: "transform", label: "Transform" },
   { value: "if", label: "If" },
   { value: "switch", label: "Switch" },
   { value: "delay", label: "Delay" },
@@ -57,6 +59,7 @@ export const workflowEditorSchema: z.ZodType<WorkflowEditorFormValue> = z
           "ai_summary",
           "email_notification",
           "database_record",
+          "transform",
           "conditional",
           "if",
           "switch",
@@ -115,6 +118,12 @@ function validateStepConfig(step: StepFormValue, index: number, ctx: z.Refinemen
       ctx.addIssue({ code: "custom", path: ["steps", index, "config", "collection"], message: "Use letters, numbers, _ or - only." });
     }
     requiredJsonObject(config.data, ctx, index, "data", "Data must be a JSON object.");
+  }
+  if (step.type === "transform") {
+    const issues = validateTransformStepConfig(safeSerializeStepConfig(step));
+    for (const issue of issues) {
+      ctx.addIssue({ code: "custom", path: ["steps", index, "config", fieldFromIssuePath(issue.path)], message: issue.message });
+    }
   }
   if (step.type === "conditional") {
     requiredString(config.left, ctx, index, "left", "Expression is required.");
@@ -242,6 +251,8 @@ export function defaultConfig(type: StepType): Record<string, unknown> {
       return { connectionId: "", to: "", subject: "", text: "" };
     case "database_record":
       return { collection: "", data: "{}" };
+    case "transform":
+      return { mode: "OBJECT", fields: "{\n  \"result\": \"{{trigger.body}}\"\n}", source: "{{trigger.body}}", paths: "id,name", template: "{\n  \"item\": \"{{item}}\",\n  \"index\": \"{{index}}\"\n}", condition: "{{item.active}}", mergeSources: "[\"{{trigger.body}}\", \"{{steps.previous.output}}\"]", conflictPolicy: "LAST_WINS", outputType: "AUTO" };
     case "conditional":
       return { left: "", operator: "equals", right: "", skipNextOnFalse: true };
     case "if":
@@ -298,6 +309,16 @@ function configToForm(type: StepType, config: Record<string, unknown>) {
   }
   if (type === "database_record") {
     return { ...defaults, ...config, data: JSON.stringify(config.data ?? {}, null, 2) };
+  }
+  if (type === "transform") {
+    return {
+      ...defaults,
+      ...config,
+      fields: JSON.stringify(config.fields ?? {}, null, 2),
+      paths: Array.isArray(config.paths) ? config.paths.join(",") : defaults.paths,
+      template: JSON.stringify(config.template ?? {}, null, 2),
+      mergeSources: JSON.stringify(config.mergeSources ?? [], null, 2)
+    };
   }
   if (type === "ai_structured_extraction") {
     return { ...defaults, ...config, schema: JSON.stringify(config.schema ?? {}, null, 2) };
@@ -380,6 +401,8 @@ export function serializeStepConfig(step: StepFormValue) {
       };
     case "database_record":
       return { collection: String(config.collection ?? ""), data: parseJsonObject(config.data, {}) };
+    case "transform":
+      return serializeTransformConfig(config);
     case "conditional":
       return {
         left: String(config.left ?? ""),
@@ -421,4 +444,55 @@ function parseJsonObject(value: unknown, fallback: Record<string, unknown>) {
   }
   const parsed = JSON.parse(String(value));
   return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : fallback;
+}
+
+function safeSerializeStepConfig(step: StepFormValue) {
+  try {
+    return serializeStepConfig(step);
+  } catch {
+    return {};
+  }
+}
+
+function serializeTransformConfig(config: Record<string, unknown>) {
+  const mode = String(config.mode ?? "OBJECT");
+  const base = {
+    configVersion: 1,
+    mode,
+    outputType: String(config.outputType ?? "AUTO")
+  };
+  if (mode === "OBJECT") return { ...base, fields: parseJsonObject(config.fields, {}) };
+  if (mode === "PICK" || mode === "OMIT") return { ...base, source: String(config.source ?? ""), paths: parsePaths(config.paths) };
+  if (mode === "MAP_ARRAY") return { ...base, source: String(config.source ?? ""), template: parseJson(config.template, {}), itemVariable: "item" };
+  if (mode === "FILTER_ARRAY") return { ...base, source: String(config.source ?? ""), condition: String(config.condition ?? ""), itemVariable: "item" };
+  if (mode === "MERGE") return { ...base, mergeSources: parseJsonArray(config.mergeSources, []), conflictPolicy: String(config.conflictPolicy ?? "LAST_WINS") };
+  return base;
+}
+
+function parseJson(value: unknown, fallback: unknown) {
+  if (value === undefined || value === null || value === "") return fallback;
+  return JSON.parse(String(value));
+}
+
+function parseJsonArray(value: unknown, fallback: unknown[]) {
+  const parsed = parseJson(value, fallback);
+  return Array.isArray(parsed) ? parsed : fallback;
+}
+
+function parsePaths(value: unknown) {
+  return String(value ?? "")
+    .split(/[,\n]/)
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+}
+
+function fieldFromIssuePath(path: string) {
+  if (path.includes("fields")) return "fields";
+  if (path.includes("paths")) return "paths";
+  if (path.includes("source")) return "source";
+  if (path.includes("template")) return "template";
+  if (path.includes("condition")) return "condition";
+  if (path.includes("mergeSources")) return "mergeSources";
+  if (path.includes("conflictPolicy")) return "conflictPolicy";
+  return "mode";
 }

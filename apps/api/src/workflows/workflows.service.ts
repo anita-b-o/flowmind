@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
-import { WorkflowStatus, WorkflowVersionStatus } from "@automation/shared-types";
+import { StepType, validateTransformStepConfig, WorkflowStatus, WorkflowVersionStatus } from "@automation/shared-types";
 import { PrismaService } from "../prisma/prisma.service";
 import { CreateWorkflowDto } from "./dto/create-workflow.dto";
 import { CreateWorkflowVersionDto } from "./dto/create-workflow-version.dto";
@@ -82,6 +82,7 @@ export class WorkflowsService {
     if (schemaVersion === 2) {
       validateWorkflowGraph(dto.steps, dto.graph);
     }
+    this.validateStepConfigs(dto.steps);
     await this.validateConnectionReferences(organizationId, [...dto.steps, dto.trigger]);
     this.validateExpressions(dto.steps, schemaVersion === 2 ? dto.graph : undefined);
     const versionNumber = (latest?.versionNumber ?? 0) + 1;
@@ -226,8 +227,16 @@ export class WorkflowsService {
     const previous: string[] = [];
     for (const step of steps) {
       const available = graph ? graphAvailableStepKeys(step.key, steps, graph) : previous;
-      this.expressions?.validateValue(step.config, available, step.key);
+      this.expressions?.validateValue(step.config, available, step.key, step.type === StepType.Transform ? ["item", "index"] : undefined);
       previous.push(step.key);
+    }
+  }
+
+  private validateStepConfigs(steps: Array<{ type: string; config: Record<string, unknown> }>) {
+    for (const step of steps) {
+      if (step.type !== StepType.Transform) continue;
+      const issues = validateTransformStepConfig(step.config);
+      if (issues.length) throw new BadRequestException(issues[0].message);
     }
   }
 

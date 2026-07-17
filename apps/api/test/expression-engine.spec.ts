@@ -34,4 +34,11 @@ describe("expression engine", () => {
     expect(validateExpressionString("{{steps.future.output.value}}", { availableStepKeys: ["first"] }).issues[0].code).toBe("EXPRESSION_STEP_NOT_AVAILABLE");
     expect(validateExpressionString("{{connection.secretValue}}", { allowConnection: true }).issues[0].code).toBe("EXPRESSION_ACCESS_DENIED");
   });
+
+  it("allows transform local item and index namespaces only when enabled", () => {
+    expect(validateExpressionString("{{item.id}}", { localNamespaces: ["item", "index"] }).valid).toBe(true);
+    expect(validateExpressionString("{{index}}", { localNamespaces: ["item", "index"] }).valid).toBe(true);
+    expect(validateExpressionString("{{item.id}}").issues[0].code).toBe("EXPRESSION_NAMESPACE_UNKNOWN");
+    expect(resolver.resolveValue({ id: "{{item.id}}", row: "{{index}}" }, { item: { id: "a" }, index: 0 }, { mode: "strict" })).toEqual({ id: "a", row: 0 });
+  });
 });

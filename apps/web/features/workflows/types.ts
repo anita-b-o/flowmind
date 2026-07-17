@@ -20,7 +20,8 @@ export type StepType =
   | "delay"
   | "wait_until"
   | "email_notification"
-  | "database_record";
+  | "database_record"
+  | "transform";
 
 export type WorkflowVersionStatus = "DRAFT" | "ACTIVE" | "ARCHIVED";
 

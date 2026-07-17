@@ -338,6 +338,7 @@ function stepSummary(step: StepFormValue) {
   if (step.type.startsWith("ai_")) return "Uses prompt and expressions";
   if (step.type === "email_notification") return `Email to ${String(step.config.to || "recipient missing")}`;
   if (step.type === "database_record") return `Record in ${String(step.config.collection || "collection missing")}`;
+  if (step.type === "transform") return `Transform ${String(step.config.mode ?? "OBJECT")}`;
   if (step.type === "if") return "Routes true / false";
   if (step.type === "switch") return `${Array.isArray(step.config.cases) ? step.config.cases.length : 0} cases + default`;
   if (step.type === "delay") return `Durable wait: ${String(step.config.duration ?? "")}`;

@@ -1,4 +1,4 @@
-import { graphAvailableStepKeys, validateGraphV2 } from "@automation/shared-types";
+import { graphAvailableStepKeys, validateGraphV2, validateTransformStepConfig } from "@automation/shared-types";
 import { validateExpressionsInValue } from "@automation/expression-engine";
 import type { DraftEdge, DraftValidationIssue, WorkflowDraftModel } from "./draft-model";
 import { caseKeyFromHandle, handleToGraphKind } from "./draft-model";
@@ -76,6 +76,12 @@ function validateStepConfig(step: NonNullable<WorkflowDraftModel["stepsByKey"][s
     if (typeof config.collection === "string" && config.collection && !COLLECTION_PATTERN.test(config.collection)) issues.push(error("invalid_collection", "Collection may only contain letters, numbers, _ or -.", step.key));
     requiredJsonObject(config.data, issues, step.key, "Data must be a JSON object.");
   }
+  if (step.type === "transform") {
+    const serialized = safeSerializeConfig(step);
+    for (const transformIssue of validateTransformStepConfig(serialized)) {
+      issues.push(error(transformIssue.code, transformIssue.message, step.key));
+    }
+  }
   if (step.type === "conditional" || step.type === "if") {
     requiredString(config.left, issues, step.key, "Expression is required.");
     if (!OPERATORS.has(String(config.operator ?? ""))) issues.push(error("invalid_operator", "Operator is invalid.", step.key));
@@ -99,7 +105,7 @@ function validateStepExpressions(stepKey: string, serializedConfig: Record<strin
     }),
     draftToGraphLike(draft)
   );
-  const result = validateExpressionsInValue(serializedConfig, { availableStepKeys: available, currentStepKey: stepKey, allowConnection: true, allowMetadata: true });
+  const result = validateExpressionsInValue(serializedConfig, { availableStepKeys: available, currentStepKey: stepKey, allowConnection: true, allowMetadata: true, localNamespaces: serializedConfig.mode ? ["item", "index"] : undefined });
   for (const expressionIssue of result.issues) {
     issues.push(error("invalid_expression", expressionIssue.message, stepKey));
   }
