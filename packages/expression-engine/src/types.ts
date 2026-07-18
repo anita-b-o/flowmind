@@ -2,7 +2,7 @@ export type ExpressionMode = "legacy" | "strict";
 
 export type ExpressionValueType = "string" | "number" | "boolean" | "object" | "array" | "null" | "unknown";
 
-export type ExpressionNamespace = "trigger" | "workflow" | "steps" | "execution" | "variables" | "system" | "timestamp" | "organization" | "connection" | "metadata" | "item" | "index";
+export type ExpressionNamespace = "trigger" | "workflow" | "steps" | "execution" | "variables" | "system" | "timestamp" | "organization" | "connection" | "metadata" | "item" | "index" | "error";
 
 export type ExpressionSegment = string;
 
@@ -36,6 +36,7 @@ export interface ExpressionScope {
   metadata?: Record<string, unknown>;
   item?: unknown;
   index?: number;
+  error?: Record<string, unknown>;
 }
 
 export interface ExpressionParseOptions {
@@ -54,7 +55,7 @@ export interface ExpressionValidationContext extends ExpressionParseOptions {
   currentStepKey?: string;
   allowMetadata?: boolean;
   allowConnection?: boolean;
-  localNamespaces?: Array<"item" | "index">;
+  localNamespaces?: Array<"item" | "index" | "error">;
 }
 
 export interface ExpressionValidationIssue {

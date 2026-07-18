@@ -7,7 +7,7 @@ export type RuntimeGraph = {
 export type RuntimeGraphEdge = {
   from: string;
   to: string;
-  kind: "next" | "if_true" | "if_false" | "switch_case" | "switch_default" | "for_each_body" | "for_each_done";
+  kind: "next" | "if_true" | "if_false" | "switch_case" | "switch_default" | "for_each_body" | "for_each_done" | "try_body" | "try_catch" | "try_finally" | "try_done";
   label?: string;
   caseKey?: string;
 };
@@ -29,7 +29,7 @@ export function parseRuntimeGraph(definition: unknown): RuntimeGraph | null {
             caseKey: typeof item.caseKey === "string" ? item.caseKey : undefined
           };
         })
-        .filter((edge) => edge.from && edge.to && ["next", "if_true", "if_false", "switch_case", "switch_default", "for_each_body", "for_each_done"].includes(edge.kind))
+        .filter((edge) => edge.from && edge.to && ["next", "if_true", "if_false", "switch_case", "switch_default", "for_each_body", "for_each_done", "try_body", "try_catch", "try_finally", "try_done"].includes(edge.kind))
     : [];
   const terminalStepKeys = Array.isArray(graph.terminalStepKeys) ? graph.terminalStepKeys.filter((key): key is string => typeof key === "string") : undefined;
   return entryStepKey ? { entryStepKey, edges, terminalStepKeys } : null;

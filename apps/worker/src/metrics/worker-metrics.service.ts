@@ -230,6 +230,12 @@ export class WorkerMetricsService implements OnModuleInit, OnModuleDestroy {
     buckets: STEP_BUCKETS,
     registers: [this.registry]
   });
+  readonly tryExecutions = new Counter({ name: "flowmind_try_executions_total", help: "TRY_CATCH executions by outcome and error category.", labelNames: ["outcome", "error_category"], registers: [this.registry] });
+  readonly tryCaughtErrors = new Counter({ name: "flowmind_try_caught_errors_total", help: "Errors caught by TRY_CATCH.", labelNames: ["error_category"], registers: [this.registry] });
+  readonly tryHandledErrors = new Counter({ name: "flowmind_try_handled_errors_total", help: "Errors handled by TRY_CATCH.", labelNames: ["error_category"], registers: [this.registry] });
+  readonly tryUnhandledErrors = new Counter({ name: "flowmind_try_unhandled_errors_total", help: "Errors left unhandled by TRY_CATCH.", labelNames: ["error_category"], registers: [this.registry] });
+  readonly tryFinallyFailures = new Counter({ name: "flowmind_try_finally_failures_total", help: "TRY_CATCH Finally failures.", labelNames: ["error_category"], registers: [this.registry] });
+  readonly tryDuration = new Histogram({ name: "flowmind_try_duration_seconds", help: "TRY_CATCH duration by outcome and error category.", labelNames: ["outcome", "error_category"], buckets: STEP_BUCKETS, registers: [this.registry] });
 
   constructor() {
     this.registry.setDefaultLabels({ service: "worker" });
@@ -295,6 +301,17 @@ export class WorkerMetricsService implements OnModuleInit, OnModuleDestroy {
     this.loopIterations.inc({ outcome, mode });
     if (outcome === "failed") this.loopIterationFailures.inc({ mode });
   }
+
+  recordTryExecution(outcome: "succeeded" | "handled" | "failed", category: string, durationSeconds: number) {
+    const error_category = safeReason(category);
+    this.tryExecutions.inc({ outcome, error_category });
+    this.tryDuration.observe({ outcome, error_category }, Math.max(0, durationSeconds));
+    if (outcome !== "succeeded") this.tryCaughtErrors.inc({ error_category });
+    if (outcome === "handled") this.tryHandledErrors.inc({ error_category });
+    if (outcome === "failed") this.tryUnhandledErrors.inc({ error_category });
+  }
+
+  recordTryFinallyFailure(category: string) { this.tryFinallyFailures.inc({ error_category: safeReason(category) }); }
 
   recordTransform(mode: string | undefined, outcome: TransformOutcome, durationSeconds: number, category?: string) {
     const safeMode = safeTransformMode(mode);

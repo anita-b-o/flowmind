@@ -1,4 +1,4 @@
-import { Injectable } from "@nestjs/common";
+import { forwardRef, Inject, Injectable, Optional } from "@nestjs/common";
 import {
   FOR_EACH_LIMITS,
   StepExecutionStatus,
@@ -16,6 +16,7 @@ import { branchSkipKeys, isDone, selectedNextStepKey } from "./graph/graph-plann
 import type { RuntimeGraph } from "./graph/graph-validator";
 import { StepExecutor, type StepExecutionRecord } from "./step-executor";
 import { NonRetryableStepError } from "./step-errors";
+import { TryCatchExecutionService } from "./try-catch-execution.service";
 
 export type ForEachStepRow = {
   id?: string | null;
@@ -51,7 +52,8 @@ export class ForEachExecutionService {
     private readonly stepExecutor: StepExecutor,
     private readonly expressionResolver: ExpressionResolver,
     private readonly logger?: WorkerLoggerService,
-    private readonly metrics?: WorkerMetricsService
+    private readonly metrics?: WorkerMetricsService,
+    @Optional() @Inject(forwardRef(() => TryCatchExecutionService)) private readonly tryCatch?: TryCatchExecutionService
   ) {}
 
   async execute(input: {
@@ -66,6 +68,8 @@ export class ForEachExecutionService {
     bodyStepKeys: Set<string>;
     stepRowsByKey: Map<string, ForEachStepRow>;
     runtimeContext: ExecutionRuntimeContext;
+    parentContext?: import("@automation/shared-types").ExecutionContext;
+    parentPath?: string;
   }): Promise<ForEachRunResult> {
     let state = readState(input.loopStepExecution.inputJson);
     const config = normalizeConfig(input.loopStep.config);
@@ -73,7 +77,7 @@ export class ForEachExecutionService {
       if (!state) state = await this.start(input, config);
       while (state.nextIndex < state.items.length) {
         const iterationIndex = state.nextIndex;
-        const executionPath = `root/${input.loopStep.key}[${iterationIndex}]`;
+        const executionPath = `${input.parentPath ?? "root"}/${input.loopStep.key}[${iterationIndex}]`;
         const persisted = await this.prisma.stepExecution.findMany({ where: { executionId: input.executionId, executionPath }, orderBy: { createdAt: "asc" } });
         const iterationSteps = Object.fromEntries(persisted.filter((row) => isDone(row.status)).map((row) => [row.stepKey, { status: row.status as StepExecutionStatus, output: row.outputJson }]));
         const frame = input.runtimeContext.createIterationFrame({
@@ -99,6 +103,21 @@ export class ForEachExecutionService {
             executionPath,
             iterationIndex
           });
+          if (step.type === "try_catch") {
+            if (!this.tryCatch) throw new NonRetryableStepError("TRY_CATCH runtime service is unavailable");
+            const doneEdge = input.graph.edges.find((edge) => edge.from === step.key && edge.kind === "try_done");
+            if (!doneEdge) throw new NonRetryableStepError("TRY_CATCH Done connection is missing");
+            if (stepExecution.status === StepExecutionStatus.Completed) { frame.steps[step.key] = { status: StepExecutionStatus.Completed, output: stepExecution.outputJson }; nextStepKey = doneEdge.to; continue; }
+            const result = await this.tryCatch.execute({ organizationId: input.organizationId, executionId: input.executionId, correlationId: input.correlationId, tryStep: step, tryStepExecution: stepExecution as any, graph: input.graph, stepRowsByKey: input.stepRowsByKey, runtimeContext: input.runtimeContext, parentContext: frame, parentPath: executionPath, iterationIndex });
+            if (result.outcome === "waiting") { state.currentStepKey = nextStepKey; await this.checkpoint(input.loopStepExecution.id, state, summary(state, config)); return result; }
+            frame.steps[step.key] = { status: StepExecutionStatus.Completed, output: result.output };
+            const selected = doneEdge.to;
+            if (!selected) throw new NonRetryableStepError(`FOR_EACH Body cannot resolve next step after ${step.key}`);
+            nextStepKey = selected;
+            state.currentStepKey = nextStepKey === input.doneStepKey ? undefined : nextStepKey;
+            await this.checkpoint(input.loopStepExecution.id, state, summary(state, config));
+            continue;
+          }
           if (stepExecution.status === StepExecutionStatus.Retrying && stepExecution.nextRetryAt && stepExecution.nextRetryAt > new Date()) {
             state.currentStepKey = nextStepKey;
             await this.checkpoint(input.loopStepExecution.id, state, summary(state, config));

@@ -25,6 +25,7 @@ export const STEP_TYPES: Array<{ value: StepType; label: string }> = [
   { value: "if", label: "If" },
   { value: "switch", label: "Switch" },
   { value: "for_each", label: "For Each" },
+  { value: "try_catch", label: "Try / Catch" },
   { value: "delay", label: "Delay" },
   { value: "wait_until", label: "Wait Until" },
   { value: "conditional", label: "Conditional" }
@@ -87,6 +88,7 @@ export const workflowEditorSchema: z.ZodType<WorkflowEditorFormValue> = z
           "if",
           "switch",
           "for_each",
+          "try_catch",
           "delay",
           "wait_until"
         ]),
@@ -184,6 +186,11 @@ function validateStepConfig(step: StepFormValue, index: number, ctx: z.Refinemen
     if (config.mode !== "SEQUENTIAL") ctx.addIssue({ code: "custom", path: ["steps", index, "config", "mode"], message: "Only sequential mode is supported." });
     if (Number(config.concurrency) !== 1) ctx.addIssue({ code: "custom", path: ["steps", index, "config", "concurrency"], message: "Concurrency must be 1." });
   }
+  if (step.type === "try_catch") {
+    requiredString(config.bodyStepKey, ctx, index, "bodyStepKey", "Body is required.");
+    requiredString(config.catchStepKey, ctx, index, "catchStepKey", "Catch is required.");
+    requiredString(config.doneStepKey, ctx, index, "doneStepKey", "Done is required.");
+  }
   if (step.type === "delay") {
     requiredString(config.duration, ctx, index, "duration", "Duration is required.");
     if (typeof config.duration === "string" && !config.duration.includes("{{") && !/^\s*[1-9][0-9]*\s+(second|seconds|minute|minutes|hour|hours)\s*$/i.test(config.duration)) {
@@ -220,6 +227,12 @@ function validateRouting(steps: StepFormValue[], step: StepFormValue, index: num
   }
   if (step.type === "for_each") {
     assertForward(step.config.bodyStepKey, "bodyStepKey");
+    assertForward(step.config.doneStepKey, "doneStepKey");
+  }
+  if (step.type === "try_catch") {
+    assertForward(step.config.bodyStepKey, "bodyStepKey");
+    assertForward(step.config.catchStepKey, "catchStepKey");
+    assertForward(step.config.finallyStepKey, "finallyStepKey");
     assertForward(step.config.doneStepKey, "doneStepKey");
   }
 }
@@ -325,6 +338,8 @@ export function defaultConfig(type: StepType): Record<string, unknown> {
       return { value: "", cases: [{ key: "case_1", label: "Case 1", match: "", stepKey: "" }], defaultStepKey: "" };
     case "for_each":
       return { source: "{{steps.previous.output}}", itemVariable: "", indexVariable: "", mode: "SEQUENTIAL", concurrency: 1, continueOnError: false, maxItems: 100, collectResults: true, maxResults: 20, bodyStepKey: "", doneStepKey: "" };
+    case "try_catch":
+      return { bodyStepKey: "", catchStepKey: "", finallyStepKey: "", doneStepKey: "" };
     case "delay":
       return { duration: "30 seconds" };
     case "wait_until":
@@ -546,6 +561,8 @@ export function serializeStepConfig(step: StepFormValue) {
         bodyStepKey: String(config.bodyStepKey ?? ""),
         doneStepKey: String(config.doneStepKey ?? "")
       };
+    case "try_catch":
+      return { bodyStepKey: String(config.bodyStepKey ?? ""), catchStepKey: String(config.catchStepKey ?? ""), ...(config.finallyStepKey ? { finallyStepKey: String(config.finallyStepKey) } : {}), doneStepKey: String(config.doneStepKey ?? "") };
     case "delay":
       return { duration: String(config.duration ?? "") };
     case "wait_until":

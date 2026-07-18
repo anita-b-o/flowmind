@@ -15,13 +15,16 @@ export function validateExpressionString(value: string, context: ExpressionValid
       const path = part.path;
       const namespace = path.namespace;
       const localNamespaces = new Set(context.localNamespaces ?? []);
-      const isLocal = namespace === "item" || namespace === "index";
-      if (!NAMESPACES.has(namespace as ExpressionNamespace) && !(isLocal && localNamespaces.has(namespace as "item" | "index"))) {
+      const isLocal = namespace === "item" || namespace === "index" || namespace === "error";
+      if (!NAMESPACES.has(namespace as ExpressionNamespace) && !(isLocal && localNamespaces.has(namespace as "item" | "index" | "error"))) {
         issues.push(issue(EXPRESSION_ERROR_CODES.namespaceUnknown, `Unknown expression namespace "${namespace}"`, path.raw, namespace));
         continue;
       }
-      if (isLocal && !localNamespaces.has(namespace as "item" | "index")) {
+      if (isLocal && !localNamespaces.has(namespace as "item" | "index" | "error")) {
         issues.push(issue(EXPRESSION_ERROR_CODES.accessDenied, `Expression namespace "${namespace}" is not available here`, path.raw, namespace));
+      }
+      if (namespace === "error" && (path.segments.length < 2 || !["message", "category", "code", "stepKey", "executionPath", "retryable", "attempts"].includes(path.segments[1] ?? "") || path.segments.length > 2)) {
+        issues.push(issue(EXPRESSION_ERROR_CODES.accessDenied, `Expression path "${path.raw}" is not allowed`, path.raw, namespace));
       }
       if (namespace === "metadata" && context.allowMetadata === false) {
         issues.push(issue(EXPRESSION_ERROR_CODES.accessDenied, "metadata.* is legacy-only and is not available here", path.raw, namespace));

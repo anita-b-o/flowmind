@@ -42,6 +42,13 @@ describe("expression engine", () => {
     expect(resolver.resolveValue({ id: "{{item.id}}", row: "{{index}}" }, { item: { id: "a" }, index: 0 }, { mode: "strict" })).toEqual({ id: "a", row: 0 });
   });
 
+  it("allows only safe error fields when the Catch scope enables them", () => {
+    expect(validateExpressionString("{{error.category}}", { localNamespaces: ["error"] }).valid).toBe(true);
+    expect(validateExpressionString("{{error.stepKey}}", { localNamespaces: ["error"] }).valid).toBe(true);
+    expect(validateExpressionString("{{error.stack}}", { localNamespaces: ["error"] }).issues[0].code).toBe("EXPRESSION_ACCESS_DENIED");
+    expect(validateExpressionString("{{error.message}}").valid).toBe(false);
+  });
+
   it("supports variable, execution, workflow, system and timestamp namespaces", () => {
     expect(validateExpressionString("{{variables.customerId}}").valid).toBe(true);
     expect(validateExpressionString("{{execution.variables.customerId}}").valid).toBe(true);

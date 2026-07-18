@@ -44,6 +44,7 @@ import { DataStoreCountRecordsHandler } from "./engine/handlers/data-store/count
 import { DataStoreListRecordsHandler } from "./engine/handlers/data-store/list-records.handler";
 import { AppendVariableHandler, DeleteVariableHandler, GetVariableHandler, IncrementVariableHandler, SetVariableHandler } from "./engine/handlers/variables.handler";
 import { ForEachExecutionService } from "./engine/for-each-execution.service";
+import { TryCatchExecutionService } from "./engine/try-catch-execution.service";
 
 const redisUrl = new URL(process.env.REDIS_URL ?? "redis://localhost:6379");
 
@@ -62,6 +63,7 @@ const redisUrl = new URL(process.env.REDIS_URL ?? "redis://localhost:6379");
     ExecutionsProcessor,
     WorkflowRunner,
     ForEachExecutionService,
+    TryCatchExecutionService,
     StepExecutor,
     StepRegistry,
     ExpressionResolver,

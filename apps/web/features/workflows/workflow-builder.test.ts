@@ -200,4 +200,18 @@ describe("workflow builder model", () => {
       { from: "body", to: "done", kind: "next" }
     ]));
   });
+
+  it("serializes TRY_CATCH with structured region handles", () => {
+    const values: WorkflowEditorFormValue = { name: "Try flow", description: "", steps: [
+      { ...emptyStep(0, "try_catch"), key: "try", name: "Try", config: { bodyStepKey: "body", catchStepKey: "catch", finallyStepKey: "finally", doneStepKey: "done" } },
+      { ...emptyStep(1, "transform"), key: "body", name: "Body", config: { mode: "OBJECT", fields: "{}", outputType: "OBJECT", nextStepKey: "finally" } },
+      { ...emptyStep(2, "set_variable"), key: "catch", name: "Catch", config: { scope: "execution", name: "category", valueKind: "expression", expression: "{{error.category}}", nextStepKey: "finally" } },
+      { ...emptyStep(3, "database_record"), key: "finally", name: "Finally", config: { collection: "audit", data: "{}", nextStepKey: "done" } },
+      { ...emptyStep(4, "database_record"), key: "done", name: "Done", config: { collection: "result", data: "{}" } }
+    ] };
+    expect(toWorkflowDefinition(values).graph?.edges).toEqual(expect.arrayContaining([
+      { from: "try", to: "body", kind: "try_body", label: "body" }, { from: "try", to: "catch", kind: "try_catch", label: "catch" },
+      { from: "try", to: "finally", kind: "try_finally", label: "finally" }, { from: "try", to: "done", kind: "try_done", label: "done" }
+    ]));
+  });
 });

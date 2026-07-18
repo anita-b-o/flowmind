@@ -426,6 +426,7 @@ function inspector(step: any): DebugStepInspector {
     executionPath: step.executionPath ?? "root",
     iterationIndex: step.iterationIndex ?? null,
     status: step.status,
+    errorHandled: step.errorHandled ?? false,
     input: step.stepType === "for_each" ? loopDebugInput(input) : sanitizePublic(input),
     resolvedVariables: (Array.isArray(debug.resolvedVariables) ? sanitizePublic(debug.resolvedVariables) : []) as DebugStepInspector["resolvedVariables"],
     expressions: (Array.isArray(debug.expressions) ? sanitizePublic(debug.expressions) : []) as DebugStepInspector["expressions"],

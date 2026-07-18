@@ -1,4 +1,4 @@
-import { assertVariableName, assertVariableValue, forEachRegions, graphAvailableStepKeys, validateGraphV2, validateTransformStepConfig } from "@automation/shared-types";
+import { assertVariableName, assertVariableValue, forEachRegions, tryCatchRegions, graphAvailableStepKeys, validateGraphV2, validateTransformStepConfig } from "@automation/shared-types";
 import { validateExpressionsInValue } from "@automation/expression-engine";
 import type { DraftEdge, DraftValidationIssue, WorkflowDraftModel } from "./draft-model";
 import { caseKeyFromHandle, handleToGraphKind } from "./draft-model";
@@ -140,9 +140,17 @@ function validateStepExpressions(stepKey: string, serializedConfig: Record<strin
   );
   const steps = draft.stepOrder.map((key) => draft.stepsByKey[key]).filter(Boolean).map((step) => ({ id: step.id, key: step.key, type: step.type, config: safeSerializeConfig(step) }));
   const regions = forEachRegions(steps, draftToGraphLike(draft));
+  const tries = tryCatchRegions(steps, draftToGraphLike(draft));
   const inLoopBody = regions.some((region) => region.bodyStepKeys.has(stepKey));
   for (const region of regions) if (!region.bodyStepKeys.has(stepKey)) available = available.filter((key) => !region.bodyStepKeys.has(key));
-  const result = validateExpressionsInValue(serializedConfig, { availableStepKeys: available, currentStepKey: stepKey, allowConnection: true, allowMetadata: true, localNamespaces: inLoopBody || serializedConfig.mode ? ["item", "index"] : undefined });
+  for (const region of tries) {
+    if (!region.catchStepKeys.has(stepKey)) available = available.filter((key) => !region.catchStepKeys.has(key));
+    if (!region.finallyStepKeys.has(stepKey)) available = available.filter((key) => !region.finallyStepKeys.has(key));
+  }
+  const locals: Array<"item" | "index" | "error"> = [];
+  if (inLoopBody || serializedConfig.mode) locals.push("item", "index");
+  if (tries.some((region) => region.catchStepKeys.has(stepKey))) locals.push("error");
+  const result = validateExpressionsInValue(serializedConfig, { availableStepKeys: available, currentStepKey: stepKey, allowConnection: true, allowMetadata: true, localNamespaces: locals.length ? locals : undefined });
   for (const expressionIssue of result.issues) {
     issues.push(error("invalid_expression", expressionIssue.message, stepKey));
   }
@@ -152,7 +160,7 @@ function draftToGraphLike(draft: WorkflowDraftModel) {
   return {
     entryStepKey: draft.stepOrder[0] ?? "",
     edges: draft.edges.map((edge) => {
-      const kind = handleToGraphKind(edge.sourceHandle);
+      const kind = handleToGraphKind(edge.sourceHandle, draft.stepsByKey[edge.source]?.type);
       return {
         from: edge.source,
         to: edge.target,

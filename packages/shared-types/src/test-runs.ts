@@ -43,6 +43,7 @@ export interface DebugStepInspector {
   executionPath: string;
   iterationIndex: number | null;
   status: StepExecutionStatus | "PENDING";
+  errorHandled: boolean;
   input: unknown;
   resolvedVariables: Array<{ path: string; original?: unknown; resolved: unknown; origin: string }>;
   expressions: Array<{ expression: string; result: unknown; type: string }>;

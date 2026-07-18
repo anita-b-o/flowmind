@@ -13,6 +13,7 @@ import { WorkerMetricsService } from "../metrics/worker-metrics.service";
 import { branchSkipKeys, isDone, isTerminal, selectedNextStepKey } from "./graph/graph-planner";
 import { parseRuntimeGraph, validateRuntimeGraph, type RuntimeGraph } from "./graph/graph-validator";
 import { ForEachExecutionService } from "./for-each-execution.service";
+import { TryCatchExecutionService } from "./try-catch-execution.service";
 
 export type WorkflowRunResult = { status: "completed" | "skipped" | "lost_lease" } | { status: "waiting"; nextRetryAt: Date };
 
@@ -37,7 +38,8 @@ export class WorkflowRunner {
     private readonly deadLetterService: DeadLetterService,
     private readonly logger?: WorkerLoggerService,
     private readonly metrics?: WorkerMetricsService,
-    private readonly forEach?: ForEachExecutionService
+    private readonly forEach?: ForEachExecutionService,
+    private readonly tryCatch?: TryCatchExecutionService
   ) {}
 
   async run(payload: ExecutionJobPayload): Promise<WorkflowRunResult> {
@@ -313,6 +315,7 @@ export class WorkflowRunner {
         const bodyEdge = graph.edges.find((edge) => edge.from === step.key && edge.kind === "for_each_body");
         const doneEdge = graph.edges.find((edge) => edge.from === step.key && edge.kind === "for_each_done");
         if (!bodyEdge || !doneEdge || bodyEdge.to === doneEdge.to) throw new Error("FOR_EACH graph connections are invalid");
+        if (stepExecution.status === StepExecutionStatus.Completed) { runtimeContext.setStepResult(step.key, StepExecutionStatus.Completed, stepExecution.outputJson); nextStepKey = doneEdge.to; continue; }
         const bodyStepKeys = bodyRegion(graph, bodyEdge.to, doneEdge.to);
         const outcome = await this.forEach.execute({
           organizationId: current.organizationId,
@@ -326,6 +329,7 @@ export class WorkflowRunner {
           bodyStepKeys,
           stepRowsByKey,
           runtimeContext
+          , parentContext: runtimeContext.context, parentPath: "root"
         });
         await this.updateContextCache(current.id, runtimeContext);
         if (outcome.outcome === "waiting") {
@@ -334,6 +338,21 @@ export class WorkflowRunner {
           await this.leaseService.release(current.id);
           return { status: "waiting", nextRetryAt: outcome.nextRetryAt };
         }
+        runtimeContext.setStepResult(step.key, StepExecutionStatus.Completed, outcome.output);
+        current = await this.reload(payload);
+        nextStepKey = doneEdge.to;
+        continue;
+      }
+
+      if (step.type === "try_catch") {
+        if (!this.tryCatch) throw new Error("TRY_CATCH runtime service is unavailable");
+        const required = ["try_body", "try_catch", "try_done"].every((kind) => graph.edges.some((edge) => edge.from === step.key && edge.kind === kind));
+        if (!required) throw new Error("TRY_CATCH graph connections are invalid");
+        const doneEdge = graph.edges.find((edge) => edge.from === step.key && edge.kind === "try_done")!;
+        if (stepExecution.status === StepExecutionStatus.Completed) { runtimeContext.setStepResult(step.key, StepExecutionStatus.Completed, stepExecution.outputJson); nextStepKey = doneEdge.to; continue; }
+        const outcome = await this.tryCatch.execute({ organizationId: current.organizationId, executionId: current.id, correlationId: (current as any).correlationId, tryStep: step, tryStepExecution: stepExecution as any, graph, stepRowsByKey, runtimeContext, parentContext: runtimeContext.context, parentPath: "root" });
+        await this.updateContextCache(current.id, runtimeContext);
+        if (outcome.outcome === "waiting") { await this.markWaiting(current.id); stopHeartbeat(); await this.leaseService.release(current.id); return { status: "waiting", nextRetryAt: outcome.nextRetryAt }; }
         runtimeContext.setStepResult(step.key, StepExecutionStatus.Completed, outcome.output);
         current = await this.reload(payload);
         nextStepKey = doneEdge.to;

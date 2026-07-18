@@ -30,13 +30,14 @@ export type GraphLike = {
   terminalStepKeys?: unknown;
 };
 
-const EDGE_KINDS = new Set(["next", "if_true", "if_false", "switch_case", "switch_default", "for_each_body", "for_each_done"]);
+const EDGE_KINDS = new Set(["next", "if_true", "if_false", "switch_case", "switch_default", "for_each_body", "for_each_done", "try_body", "try_catch", "try_finally", "try_done"]);
 const STEP_TYPES = {
   If: "if",
   Switch: "switch",
   Delay: "delay",
   WaitUntil: "wait_until",
-  ForEach: "for_each"
+  ForEach: "for_each",
+  TryCatch: "try_catch"
 } as const;
 const DURATION_PATTERN = /^\s*([1-9][0-9]*)\s+(second|seconds|minute|minutes|hour|hours)\s*$/i;
 
@@ -105,6 +106,7 @@ export function validateGraphV2(steps: GraphStepLike[], graph: GraphLike | undef
     if (step.type === STEP_TYPES.If) validateIf(step, stepKeySet, edges, issues);
     else if (step.type === STEP_TYPES.Switch) validateSwitch(step, stepKeySet, edges, issues);
     else if (step.type === STEP_TYPES.ForEach) validateForEach(step, steps, stepKeySet, edges, issues);
+    else if (step.type === STEP_TYPES.TryCatch) validateTryCatch(step, steps, stepKeySet, edges, issues);
     else {
       validateNonControl(step, edges, issues);
     }
@@ -116,6 +118,7 @@ export function validateGraphV2(steps: GraphStepLike[], graph: GraphLike | undef
 }
 
 export type ForEachRegion = { loopStepKey: string; bodyEntryStepKey: string; doneStepKey: string; bodyStepKeys: Set<string> };
+export type TryCatchRegion = { tryStepKey: string; bodyEntryStepKey: string; catchEntryStepKey: string; finallyEntryStepKey?: string; doneStepKey: string; bodyStepKeys: Set<string>; catchStepKeys: Set<string>; finallyStepKeys: Set<string> };
 
 export function forEachRegions(steps: GraphStepLike[], graph: GraphLike | undefined): ForEachRegion[] {
   const edges = graph ? normalizedEdges(graph) : [];
@@ -127,6 +130,21 @@ export function forEachRegions(steps: GraphStepLike[], graph: GraphLike | undefi
     if (!bodyEntryStepKey || !doneStepKey || bodyEntryStepKey === doneStepKey) return [];
     const bodyStepKeys = descendantsUntil(bodyEntryStepKey, doneStepKey, edges);
     return [{ loopStepKey: step.key, bodyEntryStepKey, doneStepKey, bodyStepKeys }];
+  });
+}
+
+export function tryCatchRegions(steps: GraphStepLike[], graph: GraphLike | undefined): TryCatchRegion[] {
+  const edges = graph ? normalizedEdges(graph) : [];
+  return steps.filter((step) => step.type === STEP_TYPES.TryCatch).flatMap((step) => {
+    const outgoing = outgoingEdges(step.key, edges);
+    const bodyEntryStepKey = stringValue(outgoing.find((edge) => stringValue(edge.kind) === "try_body")?.to);
+    const catchEntryStepKey = stringValue(outgoing.find((edge) => stringValue(edge.kind) === "try_catch")?.to);
+    const finallyEntryStepKey = stringValue(outgoing.find((edge) => stringValue(edge.kind) === "try_finally")?.to);
+    const doneStepKey = stringValue(outgoing.find((edge) => stringValue(edge.kind) === "try_done")?.to);
+    if (!bodyEntryStepKey || !catchEntryStepKey || !doneStepKey) return [];
+    const bodyStop = finallyEntryStepKey ?? doneStepKey;
+    const catchStop = finallyEntryStepKey ?? doneStepKey;
+    return [{ tryStepKey: step.key, bodyEntryStepKey, catchEntryStepKey, finallyEntryStepKey, doneStepKey, bodyStepKeys: descendantsUntil(bodyEntryStepKey, bodyStop, edges), catchStepKeys: descendantsUntil(catchEntryStepKey, catchStop, edges), finallyStepKeys: finallyEntryStepKey ? descendantsUntil(finallyEntryStepKey, doneStepKey, edges) : new Set<string>() }];
   });
 }
 
@@ -253,6 +271,52 @@ function validateForEachConfig(step: GraphStepLike, issues: GraphValidationIssue
   }
 }
 
+function validateTryCatch(step: GraphStepLike, steps: GraphStepLike[], stepKeys: Set<string>, edges: GraphEdgeLike[], issues: GraphValidationIssue[]) {
+  const outgoing = outgoingEdges(step.key, edges);
+  const one = (kind: string, label: string, required: boolean) => {
+    const found = outgoing.filter((edge) => stringValue(edge.kind) === kind);
+    if ((required && found.length !== 1) || (!required && found.length > 1)) issues.push(issue(`invalid_try_${label}`, `TRY_CATCH must have ${required ? "exactly one" : "at most one"} ${label[0].toUpperCase()}${label.slice(1)} connection.`, step.key, undefined, label));
+    return found[0];
+  };
+  const bodyEdge = one("try_body", "body", true);
+  const catchEdge = one("try_catch", "catch", true);
+  const finallyEdge = one("try_finally", "finally", false);
+  const doneEdge = one("try_done", "done", true);
+  for (const edge of outgoing) if (!["try_body", "try_catch", "try_finally", "try_done"].includes(stringValue(edge.kind) ?? "")) issues.push(issue("invalid_try_edge", "TRY_CATCH may only use Body, Catch, Finally and Done edges.", step.key, edgeId(edge), handleForKind(stringValue(edge.kind), edge)));
+  const bodyEntry = stringValue(bodyEdge?.to), catchEntry = stringValue(catchEdge?.to), finallyEntry = stringValue(finallyEdge?.to), done = stringValue(doneEdge?.to);
+  if (!bodyEntry || !catchEntry || !done || !stepKeys.has(bodyEntry) || !stepKeys.has(catchEntry) || !stepKeys.has(done)) return;
+  if (new Set([bodyEntry, catchEntry, finallyEntry, done].filter(Boolean)).size !== [bodyEntry, catchEntry, finallyEntry, done].filter(Boolean).length) {
+    issues.push(issue("try_region_overlap", "TRY_CATCH region entries and Done must be distinct.", step.key));
+    return;
+  }
+  const boundary = finallyEntry ?? done;
+  const body = descendantsUntil(bodyEntry, boundary, edges), caught = descendantsUntil(catchEntry, boundary, edges), finalized = finallyEntry ? descendantsUntil(finallyEntry, done, edges) : new Set<string>();
+  for (const [name, region, target] of [["Body", body, boundary], ["Catch", caught, boundary], ["Finally", finalized, done]] as const) {
+    if (!region.size) issues.push(issue(`empty_try_${name.toLowerCase()}`, `TRY_CATCH ${name} must contain at least one step.`, step.key, undefined, name.toLowerCase()));
+    for (const key of region) {
+      if (steps.find((candidate) => candidate.key === key)?.type === STEP_TYPES.TryCatch) issues.push(issue("nested_try_catch", "Nested TRY_CATCH regions are not supported.", key));
+      if (!canReach(key, target, edges)) issues.push(issue("try_region_escape", `Every TRY_CATCH ${name} path must converge on ${finallyEntry && name !== "Finally" ? "Finally" : "Done"}.`, key));
+      for (const edge of outgoingEdges(key, edges)) {
+        const to = stringValue(edge.to);
+        if (to && to !== target && !region.has(to)) issues.push(issue("try_region_escape", `TRY_CATCH ${name} edges cannot escape the controlled region.`, key, edgeId(edge)));
+      }
+    }
+  }
+  const memberships = new Map<string, number>();
+  for (const region of [body, caught, finalized]) for (const key of region) memberships.set(key, (memberships.get(key) ?? 0) + 1);
+  for (const [key, count] of memberships) if (count > 1) issues.push(issue("try_region_overlap", "TRY_CATCH regions must be disjoint.", key));
+  for (const edge of edges) {
+    const from = stringValue(edge.from), to = stringValue(edge.to);
+    if (!from || !to) continue;
+    for (const [region, entry, kind] of [[body, bodyEntry, "try_body"], [caught, catchEntry, "try_catch"], [finalized, finallyEntry, "try_finally"]] as const) {
+      if (!entry || !region.has(to) || region.has(from)) continue;
+      const structuredEntry = from === step.key && to === entry && stringValue(edge.kind) === kind;
+      const finallyConvergence = entry === finallyEntry && to === finallyEntry && (body.has(from) || caught.has(from));
+      if (!structuredEntry && !finallyConvergence) issues.push(issue("try_external_entry", "TRY_CATCH regions cannot receive external connections.", to, edgeId(edge)));
+    }
+  }
+}
+
 function validateNonControl(step: GraphStepLike, edges: GraphEdgeLike[], issues: GraphValidationIssue[]) {
   for (const edge of outgoingEdges(step.key, edges)) {
     if (stringValue(edge.kind) !== "next") issues.push(issue("invalid_non_control_edge", "This step can only use next edges.", step.key, edgeId(edge), handleForKind(stringValue(edge.kind), edge)));
@@ -365,6 +429,10 @@ function handleForKind(kind: string | undefined, edge: GraphEdgeLike) {
   if (kind === "switch_case") return `case:${stringValue(edge.caseKey) ?? ""}`;
   if (kind === "for_each_body") return "body";
   if (kind === "for_each_done") return "done";
+  if (kind === "try_body") return "body";
+  if (kind === "try_catch") return "catch";
+  if (kind === "try_finally") return "finally";
+  if (kind === "try_done") return "done";
   return "next";
 }
 

@@ -45,6 +45,7 @@ export interface StepExecutionDetail {
   executionPath: string;
   iterationIndex: number | null;
   status: StepStatus;
+  errorHandled: boolean;
   publicStatus?: string;
   attempt: number;
   attemptCount: number;

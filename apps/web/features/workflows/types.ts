@@ -33,7 +33,8 @@ export type StepType =
   | "delete_variable"
   | "increment_variable"
   | "append_variable"
-  | "for_each";
+  | "for_each"
+  | "try_catch";
 
 export type WorkflowVersionStatus = "DRAFT" | "ACTIVE" | "ARCHIVED";
 
@@ -94,7 +95,7 @@ export interface WorkflowDefinitionDto {
 
 export interface WorkflowGraphDto {
   entryStepKey: string;
-  edges: Array<{ from: string; to: string; kind: "next" | "if_true" | "if_false" | "switch_case" | "switch_default" | "for_each_body" | "for_each_done"; label?: string; caseKey?: string }>;
+  edges: Array<{ from: string; to: string; kind: "next" | "if_true" | "if_false" | "switch_case" | "switch_default" | "for_each_body" | "for_each_done" | "try_body" | "try_catch" | "try_finally" | "try_done"; label?: string; caseKey?: string }>;
   terminalStepKeys?: string[];
 }
 
@@ -145,6 +146,7 @@ export interface DebugStepInspector {
   executionPath: string;
   iterationIndex: number | null;
   status: string;
+  errorHandled: boolean;
   input: unknown;
   resolvedVariables: Array<{ path: string; original?: unknown; resolved: unknown; origin: string }>;
   expressions: Array<{ expression: string; result: unknown; type: string }>;

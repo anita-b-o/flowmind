@@ -110,4 +110,25 @@ describe("workflow graph validator", () => {
       { from: "inner", to: "done", kind: "for_each_done" }
     ] })).toThrow(BadRequestException);
   });
+
+  it("accepts structured TRY_CATCH regions with optional Finally", () => {
+    const steps = [
+      { key: "try", type: "try_catch", config: {} }, { key: "body", type: "http_request", config: {} },
+      { key: "catch", type: "set_variable", config: {} }, { key: "finally", type: "database_record", config: {} },
+      { key: "done", type: "database_record", config: {} }
+    ];
+    expect(() => validateWorkflowGraph(steps, { entryStepKey: "try", edges: [
+      { from: "try", to: "body", kind: "try_body" }, { from: "try", to: "catch", kind: "try_catch" },
+      { from: "try", to: "finally", kind: "try_finally" }, { from: "try", to: "done", kind: "try_done" },
+      { from: "body", to: "finally", kind: "next" }, { from: "catch", to: "finally", kind: "next" }, { from: "finally", to: "done", kind: "next" }
+    ] })).not.toThrow();
+  });
+
+  it("rejects TRY_CATCH without Catch and with an external Body entry", () => {
+    const steps = [{ key: "before", type: "transform", config: {} }, { key: "try", type: "try_catch", config: {} }, { key: "body", type: "transform", config: {} }, { key: "done", type: "database_record", config: {} }];
+    expect(() => validateWorkflowGraph(steps, { entryStepKey: "before", edges: [
+      { from: "before", to: "try", kind: "next" }, { from: "before", to: "body", kind: "next" },
+      { from: "try", to: "body", kind: "try_body" }, { from: "try", to: "done", kind: "try_done" }, { from: "body", to: "done", kind: "next" }
+    ] })).toThrow(BadRequestException);
+  });
 });

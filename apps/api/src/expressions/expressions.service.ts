@@ -28,7 +28,7 @@ export class ExpressionsService {
     return { entries: buildVariableCatalog({ steps }) };
   }
 
-  validateValue(value: unknown, availableStepKeys: string[] = [], currentStepKey?: string, localNamespaces?: Array<"item" | "index">) {
+  validateValue(value: unknown, availableStepKeys: string[] = [], currentStepKey?: string, localNamespaces?: Array<"item" | "index" | "error">) {
     const result = validateExpressionsInValue(value, { availableStepKeys, currentStepKey, allowMetadata: true, allowConnection: true, localNamespaces });
     if (!result.valid) {
       throw new BadRequestException({ message: "Workflow contains invalid expressions", issues: result.issues });

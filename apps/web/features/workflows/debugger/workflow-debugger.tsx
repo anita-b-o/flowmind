@@ -244,13 +244,14 @@ function Inspector({ detail, selectedStepKey, onSkipWait }: { detail?: WorkflowT
           <div className="workflow-badges">
             <span className="status-badge">{step.status}</span>
             <span className="status-badge">{step.stepType}</span>
+            {step.errorHandled && <span className="status-badge">handled</span>}
             {step.connection && <span className="status-badge">{step.connection.name ?? step.connection.type}</span>}
           </div>
-          {matches.some(([, entry]) => entry.iterationIndex !== null) && (
+          {matches.some(([, entry]) => entry.iterationIndex !== null || entry.executionPath !== "root") && (
             <label>
               Iteration
               <select value={selected?.[0] ?? ""} onChange={(event) => setIterationKey(event.target.value)}>
-                {matches.map(([key, entry]) => <option key={key} value={key}>{entry.iterationIndex === null ? "Root" : `#${entry.iterationIndex}`} · {entry.executionPath}</option>)}
+                {matches.map(([key, entry]) => <option key={key} value={key}>{entry.iterationIndex === null ? (entry.executionPath === "root" ? "Root" : "Region") : `#${entry.iterationIndex}`} · {entry.executionPath}</option>)}
               </select>
             </label>
           )}

@@ -313,6 +313,23 @@ describe("workflow webhook execution e2e", () => {
     expect((execution.contextJson as any).index).toBeUndefined();
   }, 30_000);
 
+  it("handles a structured TRY_CATCH failure, runs Finally and reaches Done once", async () => {
+    const user = await register("try-smoke@example.com", "Try Smoke");
+    const workflow = await createWorkflow(user, "Try workflow");
+    const store = await prisma.dataStore.create({ data: { organizationId: user.organizationId, name: "Try records", description: "TRY smoke" } });
+    const version = await createTryVersion(user, workflow.id, store.id);
+    const trigger = await createTrigger(user, workflow.id);
+    await request(app.getHttpServer()).patch(`/workflows/${workflow.id}/versions/${version.id}/activate`).set(authHeaders(user)).expect(200);
+    const webhook = await request(app.getHttpServer()).post(`/webhooks/${workflow.id}/${trigger.token}`).set("Idempotency-Key", "try-webhook-1").send({ event: "try" }).expect(202);
+    const detail = await waitForExecution(webhook.body.executionId, "COMPLETED");
+    const failed = detail.body.steps.find((step: any) => step.stepKey === "missing");
+    expect(failed).toMatchObject({ status: "FAILED", executionPath: "root/try[guard]/body" });
+    expect((await prisma.stepExecution.findFirstOrThrow({ where: { executionId: webhook.body.executionId, stepKey: "missing" } })).errorHandled).toBe(true);
+    expect(detail.body.steps.find((step: any) => step.stepKey === "guard").output).toMatchObject({ status: "handled", errorHandled: true, bodyStatus: "failed", catchStatus: "succeeded", finallyStatus: "succeeded" });
+    expect(await prisma.internalRecord.count({ where: { executionId: webhook.body.executionId, collection: "try_finally" } })).toBe(1);
+    expect(await prisma.stepExecution.count({ where: { executionId: webhook.body.executionId, stepKey: "done", executionPath: "root" } })).toBe(1);
+  }, 30_000);
+
   it("prevents cross-tenant trigger and execution access", async () => {
     const userA = await register("tenant-a@example.com", "Tenant A");
     const userB = await register("tenant-b@example.com", "Tenant B");
@@ -460,6 +477,26 @@ describe("workflow webhook execution e2e", () => {
         { from: "low", to: "count_done", kind: "next" },
         { from: "count_done", to: "summary", kind: "next" }
       ], terminalStepKeys: ["summary"] }
+    }).expect(201);
+    return response.body;
+  }
+
+  async function createTryVersion(user: TestUser, workflowId: string, dataStoreId: string) {
+    const response = await request(app.getHttpServer()).post(`/workflows/${workflowId}/versions`).set(authHeaders(user)).send({
+      workflowDefinitionSchemaVersion: 2, expressionMode: "strict",
+      trigger: { key: "webhook", name: "Webhook", type: "webhook_trigger", config: {} },
+      steps: [
+        { key: "guard", name: "Guard", type: "try_catch", config: {} },
+        { key: "missing", name: "Missing", type: "data_store_get_record", config: { dataStoreId, key: "missing", failIfMissing: true } },
+        { key: "caught", name: "Caught", type: "set_variable", config: { scope: "execution", name: "lastErrorCategory", expression: "{{error.category}}" } },
+        { key: "cleanup", name: "Cleanup", type: "database_record", config: { collection: "try_finally", data: { cleaned: true } } },
+        { key: "done", name: "Done", type: "get_variable", config: { scope: "execution", name: "lastErrorCategory" } }
+      ],
+      graph: { entryStepKey: "guard", edges: [
+        { from: "guard", to: "missing", kind: "try_body" }, { from: "guard", to: "caught", kind: "try_catch" },
+        { from: "guard", to: "cleanup", kind: "try_finally" }, { from: "guard", to: "done", kind: "try_done" },
+        { from: "missing", to: "cleanup", kind: "next" }, { from: "caught", to: "cleanup", kind: "next" }, { from: "cleanup", to: "done", kind: "next" }
+      ], terminalStepKeys: ["done"] }
     }).expect(201);
     return response.body;
   }

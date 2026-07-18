@@ -255,6 +255,7 @@ export class ExecutionsService {
         executionPath: step.executionPath,
         iterationIndex: step.iterationIndex,
         status: step.status,
+        errorHandled: step.errorHandled,
         publicStatus: step.status === StepExecutionStatus.Retrying ? "waiting" : publicStepStatus(step.status),
         attempt: step.attempt,
         attemptCount: step.attemptCount,

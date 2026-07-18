@@ -16,6 +16,7 @@ import {
   ttlSecondsToExpiresAt,
   validateTransformStepConfig,
   forEachRegions,
+  tryCatchRegions,
   WorkflowStatus,
   WorkflowVariableValidationError,
   WorkflowVersionStatus
@@ -247,14 +248,23 @@ export class WorkflowsService {
 
   private validateExpressions(steps: Array<{ key: string; type: string; config: Record<string, unknown> }>, graph?: Record<string, unknown>) {
     const loopRegions = graph ? forEachRegions(steps, graph) : [];
+    const tryRegions = graph ? tryCatchRegions(steps, graph) : [];
     const previous: string[] = [];
     for (const step of steps) {
       let available = graph ? graphAvailableStepKeys(step.key, steps, graph) : previous;
       for (const region of loopRegions) {
         if (!region.bodyStepKeys.has(step.key)) available = available.filter((key) => !region.bodyStepKeys.has(key));
       }
+      for (const region of tryRegions) {
+        if (!region.catchStepKeys.has(step.key)) available = available.filter((key) => !region.catchStepKeys.has(key));
+        if (!region.finallyStepKeys.has(step.key)) available = available.filter((key) => !region.finallyStepKeys.has(key));
+      }
       const inLoopBody = loopRegions.some((region) => region.bodyStepKeys.has(step.key));
-      this.expressions?.validateValue(step.config, available, step.key, step.type === StepType.Transform || inLoopBody ? ["item", "index"] : undefined);
+      const inCatch = tryRegions.some((region) => region.catchStepKeys.has(step.key));
+      const locals: Array<"item" | "index" | "error"> = [];
+      if (step.type === StepType.Transform || inLoopBody) locals.push("item", "index");
+      if (inCatch) locals.push("error");
+      this.expressions?.validateValue(step.config, available, step.key, locals.length ? locals : undefined);
       previous.push(step.key);
     }
   }

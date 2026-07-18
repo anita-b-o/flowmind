@@ -179,6 +179,20 @@ export function ForEachStepForm({ index, register, errors, disabled, setValue, g
   );
 }
 
+export function TryCatchStepForm({ index, register, errors, disabled, getValues }: Props) {
+  return (
+    <div className="stack">
+      <div className="workflow-form-grid">
+        <TargetSelect label="Body" field="bodyStepKey" index={index} register={register} getValues={getValues} disabled={disabled} error={configError(errors, index, "bodyStepKey")} />
+        <TargetSelect label="Catch" field="catchStepKey" index={index} register={register} getValues={getValues} disabled={disabled} error={configError(errors, index, "catchStepKey")} />
+        <TargetSelect label="Finally (optional)" field="finallyStepKey" index={index} register={register} getValues={getValues} disabled={disabled} error={configError(errors, index, "finallyStepKey")} />
+        <TargetSelect label="Done" field="doneStepKey" index={index} register={register} getValues={getValues} disabled={disabled} error={configError(errors, index, "doneStepKey")} />
+      </div>
+      <p className="muted">Catch expressions can use <code>{"{{error.message}}"}</code>, <code>{"{{error.category}}"}</code>, <code>{"{{error.code}}"}</code>, and <code>{"{{error.stepKey}}"}</code>.</p>
+    </div>
+  );
+}
+
 function TargetSelect({
   label,
   field,

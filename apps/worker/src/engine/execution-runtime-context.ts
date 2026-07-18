@@ -77,6 +77,17 @@ export class ExecutionRuntimeContext {
     return context;
   }
 
+  createErrorFrame(parent: ExecutionContext, error: Record<string, unknown>, steps?: ExecutionContext["steps"]) {
+    const context: ExecutionContext = {
+      ...parent,
+      steps: steps ?? parent.steps,
+      error: deepFreeze(cloneRecord(error))
+    };
+    const binding = runtimeContexts.get(parent) ?? runtimeContexts.get(this.context);
+    runtimeContexts.set(context, { runtime: this, aliases: binding?.aliases ?? {} });
+    return context;
+  }
+
   get(scope: VariableScope, name: string): { exists: boolean; value?: unknown; type: string } {
     const target = this.target(scope);
     const exists = Object.prototype.hasOwnProperty.call(target, name);

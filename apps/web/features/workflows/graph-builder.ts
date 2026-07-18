@@ -25,6 +25,13 @@ export function buildGraph(steps: StepFormValue[]): WorkflowGraphDto | undefined
       addEdge(edges, key, String(step.config.doneStepKey ?? ""), "for_each_done", "done", undefined, stepKeys);
       return;
     }
+    if (step.type === "try_catch") {
+      addEdge(edges, key, String(step.config.bodyStepKey ?? ""), "try_body", "body", undefined, stepKeys);
+      addEdge(edges, key, String(step.config.catchStepKey ?? ""), "try_catch", "catch", undefined, stepKeys);
+      addEdge(edges, key, String(step.config.finallyStepKey ?? ""), "try_finally", "finally", undefined, stepKeys);
+      addEdge(edges, key, String(step.config.doneStepKey ?? ""), "try_done", "done", undefined, stepKeys);
+      return;
+    }
     addEdge(edges, key, String(step.config.nextStepKey ?? nextLinearKey(index) ?? ""), "next", undefined, undefined, stepKeys);
   });
   const targets = new Set(edges.map((edge) => edge.from));
