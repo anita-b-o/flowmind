@@ -11,6 +11,14 @@ The platform starts as a pragmatic modular monorepo:
 
 PostgreSQL is the source of truth. Redis powers BullMQ queues and operational locks.
 
+## Durable Internal Events
+
+Internal Event Triggers reuse the workflow `Trigger` lifecycle with `type=event`. Data Store record mutations, real execution terminal transitions, and Approval outcomes write a sanitized, immutable `InternalEvent` in the same PostgreSQL transaction as the business change. The event envelope is available to a new execution as `trigger.event`; it never inherits producer steps, variables, errors, secrets, or execution context.
+
+The worker-hosted event dispatcher polls the PostgreSQL outbox with short `FOR UPDATE SKIP LOCKED` claims. It snapshots matching tenant-scoped triggers into `InternalEventDelivery`, materializes at most one execution per `(event, trigger)`, pins the workflow's active version, and then enqueues a deterministic BullMQ job. Redis failure cannot lose the execution: `ExecutionReconcilerService` republishes durable `QUEUED` rows. Expired dispatcher leases, partial delivery batches, duplicate dispatch and process restarts are safe through leases and unique constraints.
+
+Event chains carry root, causation, correlation and depth metadata. Defaults limit a chain to depth 8 and 100 persisted events; exceeding either limit suppresses only the descendant event and records a bounded audit/metric reason. Event payloads are capped and recursively redact sensitive keys. Filters are closed, typed AND predicates—no JavaScript, regex, JSONPath or `eval`.
+
 The workflow engine supports ordered workflows and persisted DAG routing through Graph v2 for If/Switch branches, skipped paths, Delay, and Wait Until.
 
 ## AI Service

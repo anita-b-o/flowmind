@@ -11,6 +11,8 @@ import { CreateWebhookTriggerDto, UpdateWebhookTriggerDto } from "./dto/create-w
 import { CreateScheduledTriggerDto, PreviewScheduledTriggerDto, UpdateScheduledTriggerDto } from "./dto/scheduled-trigger.dto";
 import { ScheduledTriggersService } from "./scheduled-triggers.service";
 import { TriggersService } from "./triggers.service";
+import { EventTriggersService } from "./event-triggers.service";
+import { CreateEventTriggerDto, UpdateEventTriggerDto } from "./dto/event-trigger.dto";
 
 @ApiTags("triggers")
 @ApiBearerAuth()
@@ -19,7 +21,8 @@ import { TriggersService } from "./triggers.service";
 export class TriggersController {
   constructor(
     private readonly triggersService: TriggersService,
-    private readonly scheduledTriggersService: ScheduledTriggersService
+    private readonly scheduledTriggersService: ScheduledTriggersService,
+    private readonly eventTriggersService: EventTriggersService
   ) {}
 
   @Post()
@@ -42,6 +45,28 @@ export class TriggersController {
     @Body() dto: CreateScheduledTriggerDto
   ) {
     return this.scheduledTriggersService.create(org.organizationId, user.userId, workflowId, dto);
+  }
+
+  @Post("event")
+  @Roles(OrganizationRole.Editor)
+  createEvent(@OrganizationContext() org: OrganizationContext, @CurrentUser() user: CurrentUserType, @Param("workflowId") workflowId: string, @Body() dto: CreateEventTriggerDto) {
+    return this.eventTriggersService.create(org.organizationId, user.userId, workflowId, dto);
+  }
+
+  @Get("event")
+  listEvents(@OrganizationContext() org: OrganizationContext, @Param("workflowId") workflowId: string) {
+    return this.eventTriggersService.list(org.organizationId, workflowId);
+  }
+
+  @Get(":triggerId/event")
+  getEvent(@OrganizationContext() org: OrganizationContext, @Param("workflowId") workflowId: string, @Param("triggerId") triggerId: string) {
+    return this.eventTriggersService.get(org.organizationId, workflowId, triggerId);
+  }
+
+  @Patch(":triggerId/event")
+  @Roles(OrganizationRole.Editor)
+  updateEvent(@OrganizationContext() org: OrganizationContext, @CurrentUser() user: CurrentUserType, @Param("workflowId") workflowId: string, @Param("triggerId") triggerId: string, @Body() dto: UpdateEventTriggerDto) {
+    return this.eventTriggersService.update(org.organizationId, user.userId, workflowId, triggerId, dto);
   }
 
   @Post("scheduled/preview")
@@ -160,7 +185,12 @@ export class TriggersController {
       return await this.scheduledTriggersService.setEnabled(organizationId, userId, workflowId, triggerId, enabled);
     } catch (error) {
       if (!(error instanceof NotFoundException)) throw error;
-      return this.triggersService.setEnabled(organizationId, userId, workflowId, triggerId, enabled);
+      try {
+        return await this.eventTriggersService.setEnabled(organizationId, userId, workflowId, triggerId, enabled);
+      } catch (eventError) {
+        if (!(eventError instanceof NotFoundException)) throw eventError;
+        return this.triggersService.setEnabled(organizationId, userId, workflowId, triggerId, enabled);
+      }
     }
   }
 
@@ -169,7 +199,12 @@ export class TriggersController {
       return await this.scheduledTriggersService.get(organizationId, workflowId, triggerId);
     } catch (error) {
       if (!(error instanceof NotFoundException)) throw error;
-      return this.triggersService.get(organizationId, workflowId, triggerId);
+      try {
+        return await this.eventTriggersService.get(organizationId, workflowId, triggerId);
+      } catch (eventError) {
+        if (!(eventError instanceof NotFoundException)) throw eventError;
+        return this.triggersService.get(organizationId, workflowId, triggerId);
+      }
     }
   }
 
@@ -178,7 +213,12 @@ export class TriggersController {
       return await this.scheduledTriggersService.delete(organizationId, userId, workflowId, triggerId);
     } catch (error) {
       if (!(error instanceof NotFoundException)) throw error;
-      return this.triggersService.delete(organizationId, userId, workflowId, triggerId);
+      try {
+        return await this.eventTriggersService.delete(organizationId, userId, workflowId, triggerId);
+      } catch (eventError) {
+        if (!(eventError instanceof NotFoundException)) throw eventError;
+        return this.triggersService.delete(organizationId, userId, workflowId, triggerId);
+      }
     }
   }
 }

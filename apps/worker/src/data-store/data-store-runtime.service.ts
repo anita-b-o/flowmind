@@ -20,19 +20,24 @@ import { Prisma } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import { NonRetryableStepError } from "../engine/step-errors";
 import { WorkerMetricsService } from "../metrics/worker-metrics.service";
+import { InternalEventEmitter } from "../internal-events/internal-event-emitter.service";
 
 export type DataStoreRuntimeContext = {
   organizationId: string;
   executionId?: string;
   stepExecutionId?: string;
   correlationId?: string | null;
+  eventRootId?: string | null;
+  eventCausationId?: string | null;
+  eventDepth?: number;
 };
 
 @Injectable()
 export class DataStoreRuntimeService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly metrics?: WorkerMetricsService
+    private readonly metrics?: WorkerMetricsService,
+    private readonly events?: InternalEventEmitter
   ) {}
 
   async get(context: DataStoreRuntimeContext, input: DataStoreSelector & { key: unknown; failIfMissing?: unknown }) {
@@ -181,6 +186,7 @@ export class DataStoreRuntimeService {
           data: { organizationId: context.organizationId, dataStoreId: store.id, key, valueJson: toJson(incoming), metadataJson: toJson(metadata), expiresAt, version: 1 }
         });
         await this.audit(context, "datastore.record.created", created.id, { dataStoreId: store.id, key, version: 1 }, tx);
+        await this.events?.emit(tx, { organizationId: context.organizationId, type: "DATA_STORE_RECORD_CREATED", source: { type: "execution", id: context.executionId }, subject: { type: "data_store_record", id: created.id }, data: { dataStoreId: store.id, recordId: created.id, key, version: 1, value: created.valueJson }, causality: causal(context) });
         this.record("upsert", "created", started);
         return { created: true, updated: false, version: created.version, value: created.valueJson };
       }
@@ -191,6 +197,7 @@ export class DataStoreRuntimeService {
         data: { valueJson: toJson(value), metadataJson: toJson(metadata), expiresAt, version: { increment: 1 } }
       });
       await this.audit(context, "datastore.record.updated", updated.id, { dataStoreId: store.id, key, version: updated.version, previousVersion: active.version, mode }, tx);
+      await this.events?.emit(tx, { organizationId: context.organizationId, type: "DATA_STORE_RECORD_UPDATED", source: { type: "execution", id: context.executionId }, subject: { type: "data_store_record", id: updated.id }, data: { dataStoreId: store.id, recordId: updated.id, key, version: updated.version, previousVersion: active.version, value: updated.valueJson }, causality: causal(context) });
       this.record("upsert", "updated", started);
       return { created: false, updated: true, version: updated.version, value: updated.valueJson };
     });
@@ -218,6 +225,7 @@ export class DataStoreRuntimeService {
     await this.prisma.$transaction(async (tx) => {
       await tx.dataStoreRecord.update({ where: { id: record.id }, data: { deletedAt: new Date() } });
       await this.audit(context, "datastore.record.deleted", record.id, { dataStoreId: store.id, key, version: record.version }, tx);
+      await this.events?.emit(tx, { organizationId: context.organizationId, type: "DATA_STORE_RECORD_DELETED", source: { type: "execution", id: context.executionId }, subject: { type: "data_store_record", id: record.id }, data: { dataStoreId: store.id, recordId: record.id, key, version: record.version, value: record.valueJson }, causality: causal(context) });
     });
     this.record("delete", "deleted", started);
     return { deleted: true, existed: true };
@@ -296,3 +304,5 @@ function errorCategory(error: unknown) {
   if (message.includes("prisma") || message.includes("database")) return "database";
   return "unknown";
 }
+
+function causal(context: DataStoreRuntimeContext) { return context.eventRootId ? { rootEventId: context.eventRootId, causationId: context.eventCausationId, depth: context.eventDepth, correlationId: context.correlationId } : { correlationId: context.correlationId }; }

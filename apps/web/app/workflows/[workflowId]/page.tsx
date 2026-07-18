@@ -10,6 +10,7 @@ import { useAuth } from "../../../features/auth/use-auth";
 import { RunWorkflowDialog } from "../../../features/executions/components/run-workflow-dialog";
 import { ScheduledTriggersPanel } from "../../../features/triggers/scheduled-triggers-panel";
 import { WebhookTriggersPanel } from "../../../features/triggers/webhook-triggers-panel";
+import { EventTriggersPanel } from "../../../features/triggers/event-triggers-panel";
 import { useWorkflow } from "../../../features/workflows/hooks";
 import { WorkflowEditor } from "../../../features/workflows/components/workflow-editor";
 
@@ -43,6 +44,7 @@ export default function WorkflowDetailPage({ params }: { params: Promise<{ workf
 
         <WebhookTriggersPanel workflowId={workflowId} canManage={role === "owner" || role === "admin" || role === "editor"} onSecret={setSecret} />
         <ScheduledTriggersPanel workflowId={workflowId} canManage={role === "owner" || role === "admin" || role === "editor"} />
+        <EventTriggersPanel workflowId={workflowId} canManage={role === "owner" || role === "admin" || role === "editor"} />
       </main>
       <OneTimeSecretPanel secret={secret} onClose={() => setSecret(null)} />
       {workflow.data && (

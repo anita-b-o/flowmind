@@ -32,6 +32,7 @@ export class ExecutionsProcessor extends WorkerHost {
       return;
     }
     this.metrics.jobsReceived.inc({ queue: WORKFLOW_EXECUTIONS_QUEUE });
+    if (job.data.origin) this.metrics.executionQueueLatency.observe({ origin: job.data.origin }, Math.max(0, (Date.now() - Date.parse(job.data.enqueuedAt)) / 1000));
     this.metrics.activeJobs.inc({ queue: WORKFLOW_EXECUTIONS_QUEUE });
     return this.jobContext.run(this.jobContext.create(job, this.identity.id), async () => {
       try {

@@ -18,6 +18,7 @@ import { ForEachExecutionService } from "./for-each-execution.service";
 import { TryCatchExecutionService } from "./try-catch-execution.service";
 import { ExecuteWorkflowExecutionService } from "./execute-workflow-execution.service";
 import { EXECUTION_RUN_JOB, WORKFLOW_EXECUTIONS_QUEUE } from "../queues/queue.constants";
+import { InternalEventEmitter } from "../internal-events/internal-event-emitter.service";
 
 export type WorkflowRunResult = { status: "completed" | "skipped" | "lost_lease" } | { status: "waiting"; nextRetryAt: Date | null; waitReason?: string };
 
@@ -45,6 +46,7 @@ export class WorkflowRunner {
     private readonly forEach?: ForEachExecutionService,
     private readonly tryCatch?: TryCatchExecutionService,
     private readonly executeWorkflow?: ExecuteWorkflowExecutionService,
+    private readonly internalEvents?: InternalEventEmitter,
     @Optional() @InjectQueue(WORKFLOW_EXECUTIONS_QUEUE) private readonly executionQueue?: Queue
   ) {}
 
@@ -182,10 +184,7 @@ export class WorkflowRunner {
       await this.leaseService.assertOwned(execution.id);
       const context = runtimeContext.snapshot({ includeRuntime: false });
       await this.assertNoFailedSteps(execution.id);
-      const completed = await this.prisma.execution.updateMany({
-        where: { id: execution.id, status: { in: ACTIVE_EXECUTION_STATUSES as any } },
-        data: { status: ExecutionStatus.Completed, completedAt: new Date(), contextJson: toJson(context), errorJson: undefined, waitReason: null }
-      });
+      const completed = await this.transitionTerminal(execution, ExecutionStatus.Completed, context);
       if (heartbeat) clearInterval(heartbeat);
       await this.leaseService.release(execution.id);
       if (completed.count !== 1) return { status: "completed" };
@@ -213,16 +212,7 @@ export class WorkflowRunner {
         where: { executionId: execution.id, status: StepExecutionStatus.Failed },
         orderBy: { updatedAt: "desc" }
       });
-      const failed = await this.prisma.execution.updateMany({
-        where: { id: execution.id, status: { in: ACTIVE_EXECUTION_STATUSES as any } },
-        data: {
-          status: ExecutionStatus.Failed,
-          waitReason: null,
-          completedAt: new Date(),
-          contextJson: toJson(context),
-          errorJson: { message: error instanceof Error ? error.message : String(error) }
-        }
-      });
+      const failed = await this.transitionTerminal(execution, ExecutionStatus.Failed, context, error instanceof Error ? error.message : String(error));
       if (failed.count !== 1) {
         await this.leaseService.release(execution.id).catch(() => undefined);
         return { status: "completed" };
@@ -467,10 +457,8 @@ export class WorkflowRunner {
     await this.leaseService.assertOwned(initialExecution.id);
     const context = runtimeContext.snapshot({ includeRuntime: false });
     await this.assertNoFailedSteps(initialExecution.id);
-    const completed = await this.prisma.execution.updateMany({
-      where: { id: initialExecution.id, status: { in: ACTIVE_EXECUTION_STATUSES as any } },
-      data: { status: ExecutionStatus.Completed, completedAt: new Date(), contextJson: toJson(context), errorJson: undefined, waitReason: null }
-    });
+    const terminalExecution = await this.prisma.execution.findUniqueOrThrow({ where: { id: initialExecution.id } });
+    const completed = await this.transitionTerminal(terminalExecution, ExecutionStatus.Completed, context);
     stopHeartbeat();
     await this.leaseService.release(initialExecution.id);
     if (completed.count !== 1) return { status: "completed" };
@@ -613,6 +601,25 @@ export class WorkflowRunner {
     if (failed > 0) throw new Error("Execution cannot complete with failed steps");
   }
 
+  private async transitionTerminal(execution: any, status: typeof ExecutionStatus.Completed | typeof ExecutionStatus.Failed, context: unknown, errorMessage?: string) {
+    const completedAt = new Date();
+    return this.prisma.$transaction(async (tx) => {
+      const changed = await tx.execution.updateMany({
+        where: { id: execution.id, organizationId: execution.organizationId, status: { in: ACTIVE_EXECUTION_STATUSES as any } },
+        data: { status, waitReason: null, completedAt, contextJson: toJson(context), ...(status === ExecutionStatus.Failed ? { errorJson: toJson({ message: errorMessage ?? "Execution failed" }) } : { errorJson: Prisma.JsonNull }) }
+      });
+      if (changed.count === 1 && execution.executionMode !== "TEST") {
+        const type = status === ExecutionStatus.Completed ? "EXECUTION_COMPLETED" : "EXECUTION_FAILED";
+        await this.internalEvents?.emit(tx, {
+          organizationId: execution.organizationId, type, source: { type: "execution", id: execution.id }, subject: { type: "execution", id: execution.id },
+          data: { executionId: execution.id, workflowId: execution.workflowId, workflowVersionId: execution.workflowVersionId, status, origin: executionOrigin(execution), startedAt: execution.startedAt?.toISOString() ?? null, completedAt: completedAt.toISOString(), durationMs: execution.startedAt ? completedAt.getTime() - execution.startedAt.getTime() : null, parentExecutionId: execution.parentExecutionId ?? null },
+          causality: execution.eventRootId ? { rootEventId: execution.eventRootId, causationId: execution.eventCausationId, depth: execution.eventDepth, correlationId: execution.correlationId } : { correlationId: execution.correlationId }
+        });
+      }
+      return changed;
+    });
+  }
+
   private async recordAudit(organizationId: string, action: string, resourceType: string, resourceId: string, correlationId: string | null | undefined, metadata: Record<string, unknown>) {
     await this.prisma.auditLog.create({
       data: {
@@ -637,6 +644,7 @@ export class WorkflowRunner {
 }
 
 function randomCorrelationId() { return `subworkflow-${Date.now()}-${Math.random().toString(16).slice(2)}`; }
+function executionOrigin(execution: any) { if (execution.eventDeliveryId) return "event"; if (execution.parentExecutionId) return "subworkflow"; if (execution.retryOfExecutionId) return "retry"; if (execution.scheduledTriggerId) return "scheduled"; if (execution.webhookEventId) return "webhook"; return "manual"; }
 
 function toStepDefinition(dbStep: RuntimeStepRow): WorkflowStepDefinition {
   return {

@@ -32,6 +32,11 @@ Core endpoints:
 - `POST /workflows/:workflowId/triggers`
 - `GET /workflows/:workflowId/triggers`
 - `PATCH /workflows/:workflowId/triggers/:triggerId/rotate`
+- `POST /workflows/:workflowId/triggers/event`
+- `GET /workflows/:workflowId/triggers/event`
+- `GET /workflows/:workflowId/triggers/:triggerId/event`
+- `PATCH /workflows/:workflowId/triggers/:triggerId/event`
+- `PUT /data-stores/:dataStoreId/records/:key`
 - `POST /webhooks/:workflowId/:token`
 - `GET /executions`
 - `GET /executions/:executionId`

@@ -8,6 +8,7 @@ import { EXECUTION_RUN_JOB, WORKFLOW_EXECUTIONS_QUEUE } from "../queues/queue.co
 import { ShutdownStateService } from "../runtime/shutdown-state.service";
 import { WorkerLoggerService } from "../observability/worker-logger.service";
 import { WorkerMetricsService, type ReconcilerReason } from "../metrics/worker-metrics.service";
+import { InternalEventEmitter } from "../internal-events/internal-event-emitter.service";
 
 @Injectable()
 export class ExecutionReconcilerService implements OnModuleInit, OnModuleDestroy {
@@ -19,7 +20,8 @@ export class ExecutionReconcilerService implements OnModuleInit, OnModuleDestroy
     private readonly shutdown: ShutdownStateService,
     @InjectQueue(WORKFLOW_EXECUTIONS_QUEUE) private readonly queue: Queue,
     private readonly logger?: WorkerLoggerService,
-    private readonly metrics?: WorkerMetricsService
+    private readonly metrics?: WorkerMetricsService,
+    private readonly events?: InternalEventEmitter
   ) {}
 
   onModuleInit() {
@@ -59,13 +61,14 @@ export class ExecutionReconcilerService implements OnModuleInit, OnModuleDestroy
 
   private async recoverApprovals() {
     const now = new Date();
-    const expired = await this.prisma.approvalRequest.findMany({ where: { status: "PENDING", expiresAt: { lte: now } }, orderBy: { expiresAt: "asc" }, take: 100, include: { execution: { select: { correlationId: true } } } });
+    const expired = await this.prisma.approvalRequest.findMany({ where: { status: "PENDING", expiresAt: { lte: now } }, orderBy: { expiresAt: "asc" }, take: 100, include: { execution: { select: { correlationId: true, eventRootId: true, eventCausationId: true, eventDepth: true } } } });
     for (const approval of expired) {
       const won = await this.prisma.$transaction(async (tx) => {
         const changed = await tx.approvalRequest.updateMany({ where: { id: approval.id, status: "PENDING", expiresAt: { lte: now } }, data: { status: "EXPIRED", decidedAt: now, version: { increment: 1 } } });
         if (!changed.count) return false;
         await tx.execution.updateMany({ where: { id: approval.executionId, status: "RETRYING", waitReason: "approval" }, data: { status: "QUEUED", waitReason: null } });
         await tx.auditLog.create({ data: { organizationId: approval.organizationId, actorUserId: null, action: "approval.expired", resourceType: "ApprovalRequest", resourceId: approval.id, correlationId: approval.execution.correlationId, metadataJson: { workflowId: approval.workflowId, executionId: approval.executionId, stepKey: approval.stepKey, outcome: "expired" } } });
+        await this.events?.emit(tx, { organizationId: approval.organizationId, type: "APPROVAL_EXPIRED", source: { type: "approval", id: approval.id }, subject: { type: "approval_request", id: approval.id }, data: { approvalId: approval.id, executionId: approval.executionId, workflowId: approval.workflowId, workflowVersionId: approval.workflowVersionId, stepKey: approval.stepKey, outcome: "EXPIRED", requestedAt: approval.requestedAt.toISOString(), decidedAt: now.toISOString() }, causality: approval.execution.eventRootId ? { rootEventId: approval.execution.eventRootId, causationId: approval.execution.eventCausationId, depth: approval.execution.eventDepth, correlationId: approval.execution.correlationId } : { correlationId: approval.execution.correlationId } });
         return true;
       });
       if (won) {

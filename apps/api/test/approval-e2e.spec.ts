@@ -90,6 +90,7 @@ describe("APPROVAL PostgreSQL integration", () => {
     expect(await prisma.internalRecord.count({ where: { executionId: started.executionId } })).toBe(1);
     expect(await prisma.stepExecution.count({ where: { executionId: started.executionId, stepKey: terminal.status === "APPROVED" ? "approved" : "rejected" } })).toBe(1);
     expect(await prisma.auditLog.count({ where: { resourceId: terminal.id, action: { in: ["approval.approved", "approval.rejected"] } } })).toBe(1);
+    expect(await prisma.internalEvent.count({ where: { organizationId: owner.organizationId, eventType: terminal.status === "APPROVED" ? "APPROVAL_APPROVED" : "APPROVAL_REJECTED", envelopeJson: { path: ["data", "approvalId"], equals: terminal.id } } })).toBe(1);
   }, 40_000);
 
   it("recovers a terminal approval without a Redis resume job idempotently", async () => {
@@ -114,6 +115,7 @@ describe("APPROVAL PostgreSQL integration", () => {
     expect(approval.status).toBe("EXPIRED"); expect(approval.version).toBe(1);
     expect(await prisma.internalRecord.findMany({ where: { executionId: started.executionId }, select: { collection: true } })).toEqual([{ collection: "approval_expired" }]);
     expect(await prisma.auditLog.count({ where: { resourceId: approval.id, action: "approval.expired" } })).toBe(1);
+    expect(await prisma.internalEvent.count({ where: { organizationId: owner.organizationId, eventType: "APPROVAL_EXPIRED", envelopeJson: { path: ["data", "approvalId"], equals: approval.id } } })).toBe(1);
   }, 40_000);
 
   it("allows exactly one terminal transition when approval races expiration", async () => {
@@ -350,7 +352,7 @@ async function registerUser(app: INestApplication, email: string, organizationNa
 function headers(user: User, organizationId = user.organizationId) { return { authorization: `Bearer ${user.accessToken}`, "x-organization-id": organizationId }; }
 function delay(ms: number) { return new Promise((resolve) => setTimeout(resolve, ms)); }
 
-async function cleanDatabase() { await prisma.approvalRequest.deleteMany(); await prisma.internalRecord.deleteMany(); await prisma.stepExecution.deleteMany(); await prisma.execution.deleteMany(); await prisma.webhookEvent.deleteMany(); await prisma.idempotencyKey.deleteMany(); await prisma.trigger.deleteMany(); await prisma.workflowStep.deleteMany(); await prisma.workflow.updateMany({ data: { activeVersionId: null } }); await prisma.workflowVersion.deleteMany(); await prisma.workflow.deleteMany(); await prisma.refreshTokenSession.deleteMany(); await prisma.organizationMember.deleteMany(); await prisma.user.deleteMany(); await prisma.organization.deleteMany(); }
+async function cleanDatabase() { await prisma.approvalRequest.deleteMany(); await prisma.internalRecord.deleteMany(); await prisma.stepExecution.deleteMany(); await prisma.execution.deleteMany(); await prisma.webhookEvent.deleteMany(); await prisma.idempotencyKey.deleteMany(); await prisma.internalEventDelivery.deleteMany(); await prisma.internalEvent.deleteMany(); await prisma.internalEventChain.deleteMany(); await prisma.trigger.deleteMany(); await prisma.workflowStep.deleteMany(); await prisma.workflow.updateMany({ data: { activeVersionId: null } }); await prisma.workflowVersion.deleteMany(); await prisma.workflow.deleteMany(); await prisma.refreshTokenSession.deleteMany(); await prisma.organizationMember.deleteMany(); await prisma.user.deleteMany(); await prisma.organization.deleteMany(); }
 
 // Bound to the application instance inside the suite to keep helpers concise.
 let activeApp: INestApplication;

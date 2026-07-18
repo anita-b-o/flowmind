@@ -73,6 +73,7 @@ describe("workflow webhook execution e2e", () => {
     expect(records).toHaveLength(1);
     expect(records[0].collection).toBe("leads");
     expect(records[0].dataJson).toMatchObject({ name: "Ada", email: "ada@example.com", priority: "low" });
+    expect(await prisma.internalEvent.count({ where: { eventType: "EXECUTION_COMPLETED", envelopeJson: { path: ["data", "executionId"], equals: executionId } } })).toBe(1);
 
     const list = await request(app.getHttpServer()).get("/executions").set(authHeaders(user)).expect(200);
     expect(list.body.total).toBe(1);
@@ -761,6 +762,9 @@ async function cleanDatabase() {
   await prisma.execution.deleteMany();
   await prisma.webhookEvent.deleteMany();
   await prisma.idempotencyKey.deleteMany();
+  await prisma.internalEventDelivery.deleteMany();
+  await prisma.internalEvent.deleteMany();
+  await prisma.internalEventChain.deleteMany();
   await prisma.trigger.deleteMany();
   await prisma.workflowStep.deleteMany();
   await prisma.workflow.updateMany({ data: { activeVersionId: null } });

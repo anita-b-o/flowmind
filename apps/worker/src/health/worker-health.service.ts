@@ -4,6 +4,7 @@ import Redis from "ioredis";
 import { PrismaService } from "../prisma/prisma.service";
 import { ShutdownStateService } from "../runtime/shutdown-state.service";
 import { ExecutionReconcilerService } from "../recovery/execution-reconciler.service";
+import { EventDispatcherService } from "../internal-events/event-dispatcher.service";
 
 @Injectable()
 export class WorkerHealthService implements OnModuleInit, OnModuleDestroy {
@@ -12,7 +13,8 @@ export class WorkerHealthService implements OnModuleInit, OnModuleDestroy {
   constructor(
     private readonly prisma: PrismaService,
     private readonly shutdown: ShutdownStateService,
-    private readonly reconciler: ExecutionReconcilerService
+    private readonly reconciler: ExecutionReconcilerService,
+    private readonly eventDispatcher: EventDispatcherService
   ) {}
 
   onModuleInit() {
@@ -55,6 +57,7 @@ export class WorkerHealthService implements OnModuleInit, OnModuleDestroy {
     const checks: Record<string, string> = {
       shutdown: this.shutdown.isShuttingDown() ? "draining" : "ok",
       reconciler: this.reconciler.isActive() ? "up" : "down"
+      ,eventDispatcher: this.eventDispatcher.isActive() ? "up" : "down"
     };
     checks.database = await this.checkDatabase();
     checks.redis = await this.checkRedis();

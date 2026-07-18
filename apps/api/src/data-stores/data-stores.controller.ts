@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, Patch, Post, Put, Query, UseGuards } from "@nestjs/common";
 import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
 import { OrganizationRole } from "@automation/shared-types";
 import { CurrentUser, type CurrentUser as CurrentUserType } from "../auth/current-user.decorator";
@@ -8,7 +8,7 @@ import { OrganizationGuard } from "../organizations/organization.guard";
 import { Roles } from "../rbac/roles.decorator";
 import { RolesGuard } from "../rbac/roles.guard";
 import { DataStoresService } from "./data-stores.service";
-import { CreateDataStoreDto, ListDataStoreRecordsQueryDto, UpdateDataStoreDto } from "./dto/data-store.dto";
+import { CreateDataStoreDto, ListDataStoreRecordsQueryDto, UpdateDataStoreDto, UpsertDataStoreRecordDto } from "./dto/data-store.dto";
 
 @ApiTags("data-stores")
 @ApiBearerAuth()
@@ -56,5 +56,10 @@ export class DataStoresController {
   @Delete(":dataStoreId/records/:key")
   deleteRecord(@OrganizationContext() org: OrganizationContext, @CurrentUser() user: CurrentUserType, @Param("dataStoreId") dataStoreId: string, @Param("key") key: string) {
     return this.dataStores.deleteRecord(org.organizationId, user.userId, dataStoreId, key);
+  }
+
+  @Put(":dataStoreId/records/:key")
+  upsertRecord(@OrganizationContext() org: OrganizationContext, @CurrentUser() user: CurrentUserType, @Param("dataStoreId") dataStoreId: string, @Param("key") key: string, @Body() dto: UpsertDataStoreRecordDto) {
+    return this.dataStores.upsertRecord(org.organizationId, user.userId, dataStoreId, key, dto);
   }
 }

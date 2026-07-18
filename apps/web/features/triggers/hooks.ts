@@ -2,7 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "../../lib/api-client";
-import type { ScheduledTriggerInput, ScheduledTriggerPreview, ScheduledTriggerSummary, TriggerSecret, TriggerSummary, UpdateWebhookTriggerInput } from "./types";
+import type { EventTriggerInput, EventTriggerSummary, ScheduledTriggerInput, ScheduledTriggerPreview, ScheduledTriggerSummary, TriggerSecret, TriggerSummary, UpdateWebhookTriggerInput } from "./types";
 
 export function useTriggers(workflowId: string) {
   return useQuery({
@@ -156,3 +156,11 @@ export function usePreviewScheduledTrigger(workflowId: string) {
     mutationFn: (input: ScheduledTriggerInput) => apiClient.post<ScheduledTriggerPreview>(`/workflows/${workflowId}/triggers/scheduled/preview`, input)
   });
 }
+
+export function useEventTriggers(workflowId: string) { return useQuery({ queryKey: ["event-triggers", workflowId], queryFn: () => apiClient.get<EventTriggerSummary[]>(`/workflows/${workflowId}/triggers/event`), enabled: Boolean(workflowId) }); }
+function useEventMutation(workflowId: string, fn: (input: any) => Promise<unknown>) { const client = useQueryClient(); return useMutation({ mutationFn: fn, onSuccess: () => { void client.invalidateQueries({ queryKey: ["event-triggers", workflowId] }); } }); }
+export function useCreateEventTrigger(workflowId: string) { return useEventMutation(workflowId, (input: EventTriggerInput) => apiClient.post<EventTriggerSummary>(`/workflows/${workflowId}/triggers/event`, input)); }
+export function useUpdateEventTrigger(workflowId: string) { return useEventMutation(workflowId, ({ triggerId, input }: { triggerId: string; input: Partial<EventTriggerInput> }) => apiClient.patch<EventTriggerSummary>(`/workflows/${workflowId}/triggers/${triggerId}/event`, input)); }
+export function useEnableEventTrigger(workflowId: string) { return useEventMutation(workflowId, (id: string) => apiClient.patch(`/workflows/${workflowId}/triggers/${id}/enable`, {})); }
+export function useDisableEventTrigger(workflowId: string) { return useEventMutation(workflowId, (id: string) => apiClient.patch(`/workflows/${workflowId}/triggers/${id}/disable`, {})); }
+export function useDeleteEventTrigger(workflowId: string) { return useEventMutation(workflowId, (id: string) => apiClient.delete(`/workflows/${workflowId}/triggers/${id}`)); }

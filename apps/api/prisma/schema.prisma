@@ -88,6 +88,19 @@ enum IdempotencyStatus {
   FAILED
 }
 
+enum InternalEventStatus {
+  PENDING
+  PROCESSING
+  PROCESSED
+  DEAD
+}
+
+enum InternalEventDeliveryStatus {
+  PENDING
+  MATERIALIZED
+  SKIPPED
+}
+
 enum ConnectionType {
   smtp
   http_api_key
@@ -180,6 +193,9 @@ model Organization {
   dataStores           DataStore[]
   dataStoreRecords     DataStoreRecord[]
   approvalRequests     ApprovalRequest[]
+  internalEvents       InternalEvent[]
+  internalEventChains  InternalEventChain[]
+  internalEventDeliveries InternalEventDelivery[]
 
   @@map("organizations")
 }
@@ -281,6 +297,7 @@ model Trigger {
   organizationId  String    @map("organization_id")
   workflowId      String    @map("workflow_id")
   type            String
+  eventType       String?   @map("event_type")
   httpMethod      String    @default("POST") @map("http_method")
   tokenHash       String?   @map("token_hash")
   tokenPreview    String?   @map("token_preview")
@@ -305,12 +322,14 @@ model Trigger {
   scheduledExecutions Execution[]           @relation("ScheduledTriggerExecutions")
   webhookEvents       WebhookEvent[]
   webhookReplayNonces WebhookReplayNonce[]
+  internalEventDeliveries InternalEventDelivery[]
 
   @@index([id, enabled, deletedAt])
   @@index([tokenHash])
   @@index([organizationId, workflowId])
   @@index([workflowId, enabled])
   @@index([type, enabled, paused, deletedAt, nextRunAt])
+  @@index([organizationId, type, eventType, enabled, deletedAt])
   @@map("triggers")
 }
 
@@ -328,6 +347,10 @@ model Execution {
   parentStepExecutionId  String?         @map("parent_step_execution_id")
   rootExecutionId        String?         @map("root_execution_id")
   depth                  Int             @default(0)
+  eventDeliveryId        String?         @unique @map("event_delivery_id")
+  eventRootId            String?         @map("event_root_id")
+  eventCausationId       String?         @map("event_causation_id")
+  eventDepth             Int             @default(0) @map("event_depth")
   retryRequestedByUserId String?         @map("retry_requested_by_user_id")
   retryRequestedAt       DateTime?       @map("retry_requested_at")
   retryReason            String?         @map("retry_reason")
@@ -375,6 +398,7 @@ model Execution {
   testRun          WorkflowTestRun?
   triggerLastFor   Trigger[]              @relation("TriggerLastExecution")
   approvalRequests ApprovalRequest[]
+  eventDelivery    InternalEventDelivery? @relation("EventDeliveryExecution", fields: [eventDeliveryId], references: [id], onDelete: SetNull)
 
   @@index([organizationId, workflowId, status])
   @@index([organizationId, workflowId, executionMode, createdAt])
@@ -386,7 +410,77 @@ model Execution {
   @@index([parentExecutionId])
   @@index([parentStepExecutionId])
   @@index([rootExecutionId])
+  @@index([organizationId, eventRootId])
   @@map("executions")
+}
+
+model InternalEvent {
+  id                  String              @id @default(uuid())
+  organizationId      String              @map("organization_id")
+  eventType           String              @map("event_type")
+  schemaVersion       Int                 @default(1) @map("schema_version")
+  envelopeJson        Json                @map("envelope_json")
+  occurredAt          DateTime            @map("occurred_at")
+  rootEventId         String              @map("root_event_id")
+  causationId         String?             @map("causation_id")
+  correlationId       String              @map("correlation_id")
+  depth               Int                 @default(0)
+  status              InternalEventStatus @default(PENDING)
+  attempts            Int                 @default(0)
+  nextAttemptAt       DateTime?           @map("next_attempt_at")
+  lockedBy            String?             @map("locked_by")
+  lockedUntil         DateTime?           @map("locked_until")
+  matchingCompletedAt DateTime?           @map("matching_completed_at")
+  processedAt         DateTime?           @map("processed_at")
+  deadLetteredAt      DateTime?           @map("dead_lettered_at")
+  lastErrorCode       String?             @map("last_error_code")
+  createdAt           DateTime            @default(now()) @map("created_at")
+  updatedAt           DateTime            @updatedAt @map("updated_at")
+
+  organization Organization             @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  deliveries  InternalEventDelivery[]
+
+  @@index([status, nextAttemptAt, lockedUntil, occurredAt])
+  @@index([organizationId, eventType, occurredAt])
+  @@index([organizationId, rootEventId])
+  @@map("internal_events")
+}
+
+model InternalEventChain {
+  rootEventId    String   @id @map("root_event_id")
+  organizationId String  @map("organization_id")
+  eventCount     Int      @default(1) @map("event_count")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, updatedAt])
+  @@map("internal_event_chains")
+}
+
+model InternalEventDelivery {
+  id              String                      @id @default(uuid())
+  organizationId  String                      @map("organization_id")
+  internalEventId String                      @map("internal_event_id")
+  triggerId       String                      @map("trigger_id")
+  executionId     String?                     @unique @map("execution_id")
+  status          InternalEventDeliveryStatus @default(PENDING)
+  attempts        Int                         @default(0)
+  lastErrorCode   String?                     @map("last_error_code")
+  materializedAt  DateTime?                   @map("materialized_at")
+  enqueuedAt      DateTime?                   @map("enqueued_at")
+  createdAt       DateTime                    @default(now()) @map("created_at")
+  updatedAt       DateTime                    @updatedAt @map("updated_at")
+
+  organization  Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  internalEvent InternalEvent @relation(fields: [internalEventId], references: [id], onDelete: Cascade)
+  trigger       Trigger       @relation(fields: [triggerId], references: [id], onDelete: Cascade)
+  execution     Execution?    @relation("EventDeliveryExecution")
+
+  @@unique([internalEventId, triggerId])
+  @@index([organizationId, status, createdAt])
+  @@map("internal_event_deliveries")
 }
 
 model StepExecution {

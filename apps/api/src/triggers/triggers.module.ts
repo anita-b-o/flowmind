@@ -10,11 +10,12 @@ import { ScheduledTriggersService } from "./scheduled-triggers.service";
 import { TriggersController } from "./triggers.controller";
 import { TriggersService } from "./triggers.service";
 import { WebhookTokenService } from "./webhook-token.service";
+import { EventTriggersService } from "./event-triggers.service";
 
 @Module({
   imports: [AuditLogsModule, SecretsModule, QueuesModule],
   controllers: [TriggersController],
-  providers: [TriggersService, ScheduledTriggersService, ScheduledCronService, ScheduledTriggersProcessor, WebhookTokenService, OrganizationGuard, RolesGuard],
-  exports: [TriggersService, ScheduledTriggersService, WebhookTokenService]
+  providers: [TriggersService, EventTriggersService, ScheduledTriggersService, ScheduledCronService, ScheduledTriggersProcessor, WebhookTokenService, OrganizationGuard, RolesGuard],
+  exports: [TriggersService, EventTriggersService, ScheduledTriggersService, WebhookTokenService]
 })
 export class TriggersModule {}

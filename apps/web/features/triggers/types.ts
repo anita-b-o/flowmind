@@ -84,3 +84,11 @@ export interface ScheduledTriggerPreview {
   timezone: string;
   nextRuns: string[];
 }
+
+export type InternalEventType = "DATA_STORE_RECORD_CREATED" | "DATA_STORE_RECORD_UPDATED" | "DATA_STORE_RECORD_DELETED" | "EXECUTION_COMPLETED" | "EXECUTION_FAILED" | "APPROVAL_APPROVED" | "APPROVAL_REJECTED" | "APPROVAL_EXPIRED";
+export interface EventTriggerSummary {
+  id: string; type: "event"; workflowId: string; eventType: InternalEventType; enabled: boolean; name: string;
+  filters: { dataStoreId?: string; keyPrefix?: string; workflowId?: string; origin?: "manual" | "webhook" | "scheduled" | "event" | "subworkflow" | "retry" };
+  createdAt: string; updatedAt: string; lastReceivedAt: string | null; lastExecutionId: string | null;
+}
+export interface EventTriggerInput { name: string; eventType: InternalEventType; enabled?: boolean; filters?: EventTriggerSummary["filters"]; }

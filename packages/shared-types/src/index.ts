@@ -197,6 +197,7 @@ export interface ExecutionJobPayload {
   enqueuedAt: string;
   executionMode?: ExecutionMode | "REAL" | "TEST";
   testRunId?: string;
+  origin?: "manual" | "webhook" | "scheduled" | "event" | "subworkflow" | "retry";
 }
 
 export interface ScheduledTriggerJobPayload {
@@ -214,3 +215,4 @@ export * from "./for-each";
 export * from "./try-catch";
 export * from "./subworkflow";
 export * from "./approval";
+export * from "./internal-events";

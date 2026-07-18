@@ -1,4 +1,4 @@
-import { IsInt, IsOptional, IsString, Max, MaxLength, Min } from "class-validator";
+import { IsBoolean, IsDefined, IsIn, IsInt, IsOptional, IsString, Max, MaxLength, Min } from "class-validator";
 import { Type } from "class-transformer";
 
 export class CreateDataStoreDto {
@@ -42,4 +42,13 @@ export class ListDataStoreRecordsQueryDto {
   @Min(1)
   @Max(100)
   pageSize = 20;
+}
+
+export class UpsertDataStoreRecordDto {
+  @IsDefined() value!: unknown;
+  @IsOptional() metadata?: Record<string, unknown>;
+  @IsOptional() ttlSeconds?: number;
+  @IsOptional() @IsIn(["replace", "merge"]) mode?: "replace" | "merge";
+  @IsOptional() @IsBoolean() optimisticConcurrency?: boolean;
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) expectedVersion?: number;
 }

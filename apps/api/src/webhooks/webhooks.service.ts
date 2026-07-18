@@ -24,6 +24,7 @@ import { classifyError } from "../metrics/metrics-catalog";
 import { AuditLogsService } from "../audit-logs/audit-logs.service";
 import { ConnectionCryptoService } from "../secrets/connection-crypto.service";
 import { validateWorkflowGraph } from "../workflows/workflow-graph-validator";
+import { InternalEventEmitter } from "../internal-events/internal-event-emitter.service";
 
 const IDEMPOTENCY_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
@@ -49,7 +50,8 @@ export class WebhooksService {
     private readonly logger: StructuredLoggerService,
     private readonly metrics: ApiMetricsService,
     private readonly crypto: ConnectionCryptoService,
-    private readonly auditLogs?: AuditLogsService
+    private readonly auditLogs?: AuditLogsService,
+    private readonly internalEvents?: InternalEventEmitter
   ) {}
 
   async receive(input: ReceiveWebhookInput) {
@@ -191,16 +193,12 @@ export class WebhooksService {
       this.metrics.recordWebhookEnqueueLatency((Date.now() - startedAt) / 1000);
       return response;
     } catch (error) {
-      await this.prisma.$transaction([
-        this.prisma.execution.update({
-          where: { id: created.execution.id },
-          data: { status: ExecutionStatus.Failed, errorJson: toPrismaJson({ message: "Failed to enqueue execution" }) }
-        }),
-        this.prisma.idempotencyKey.update({
-          where: { organizationId_scope_key: { organizationId: workflow.organizationId, scope, key: idempotencyKey } },
-          data: { status: "FAILED", responseJson: toPrismaJson({ accepted: false, executionId: created.execution.id, correlationId }), lockedUntil: null }
-        })
-      ]);
+      const completedAt = new Date();
+      await this.prisma.$transaction(async (tx) => {
+        const changed = await tx.execution.updateMany({ where: { id: created.execution.id, status: { in: [ExecutionStatus.Pending, ExecutionStatus.Queued] } }, data: { status: ExecutionStatus.Failed, completedAt, errorJson: toPrismaJson({ message: "Failed to enqueue execution" }) } });
+        await tx.idempotencyKey.update({ where: { organizationId_scope_key: { organizationId: workflow.organizationId, scope, key: idempotencyKey } }, data: { status: "FAILED", responseJson: toPrismaJson({ accepted: false, executionId: created.execution.id, correlationId }), lockedUntil: null } });
+        if (changed.count) await this.internalEvents?.emit(tx, { organizationId: workflow.organizationId, type: "EXECUTION_FAILED", source: { type: "execution", id: created.execution.id }, subject: { type: "execution", id: created.execution.id }, data: { executionId: created.execution.id, workflowId: workflow.id, workflowVersionId: activeVersion.id, status: "FAILED", origin: "webhook", startedAt: null, completedAt: completedAt.toISOString(), durationMs: null, parentExecutionId: null }, causality: { correlationId } });
+      });
       this.logger.error("api.execution.enqueue_failed", {
         organizationId: workflow.organizationId,
         workflowId: workflow.id,

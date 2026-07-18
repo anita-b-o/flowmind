@@ -14,6 +14,10 @@ pnpm db:generate
 pnpm test:integration
 ```
 
+The root `test`, `test:integration`, and `test:e2e` commands run workspace packages
+sequentially. Database-backed suites share the local PostgreSQL schema and Redis DB,
+and their tenant-safe cleanup helpers must never run concurrently across packages.
+
 ## API
 
 - Unit test auth, RBAC and services.

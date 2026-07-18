@@ -48,9 +48,12 @@ export function validateExpressionString(value: string, context: ExpressionValid
       }
       if (
         namespace === "trigger" &&
-        !["trigger.body", "trigger.input", "trigger.headers", "trigger.query", "trigger.method", "trigger.receivedAt"].some((prefix) => path.raw === prefix || path.raw.startsWith(`${prefix}.`))
+        !["trigger.body", "trigger.input", "trigger.headers", "trigger.query", "trigger.method", "trigger.receivedAt", "trigger.event"].some((prefix) => path.raw === prefix || path.raw.startsWith(`${prefix}.`))
       ) {
-        issues.push(issue(EXPRESSION_ERROR_CODES.accessDenied, "trigger expressions must use trigger.body.*, trigger.input.*, trigger.headers.*, trigger.query.*, trigger.method, or trigger.receivedAt", path.raw, namespace));
+        issues.push(issue(EXPRESSION_ERROR_CODES.accessDenied, "trigger expressions must use an allowed webhook, input, or event path", path.raw, namespace));
+      }
+      if (namespace === "trigger" && path.segments[1] === "event" && path.segments[2] && !["id", "schemaVersion", "type", "occurredAt", "source", "subject", "correlationId", "rootEventId", "causationId", "depth", "data"].includes(path.segments[2])) {
+        issues.push(issue(EXPRESSION_ERROR_CODES.accessDenied, `Internal event path "${path.raw}" is not allowed`, path.raw, namespace));
       }
     }
   } catch (error) {

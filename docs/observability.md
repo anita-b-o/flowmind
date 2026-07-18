@@ -61,6 +61,8 @@ API:
 - `flowmind_manual_retries_total`
 - `flowmind_enqueue_failures_total`
 - `flowmind_readiness_failures_total`
+- `flowmind_internal_events_emitted_total`
+- `flowmind_internal_event_chain_limit_exceeded_total`
 
 Worker:
 
@@ -89,6 +91,16 @@ Worker:
 - `flowmind_reconciler_runs_total`
 - `flowmind_reconciler_reenqueued_total`
 - `flowmind_reconciler_duration_seconds`
+- `flowmind_internal_events_emitted_total`
+- `flowmind_internal_events_dispatched_total`
+- `flowmind_internal_event_dispatch_failures_total`
+- `flowmind_internal_event_trigger_matches_total`
+- `flowmind_internal_event_executions_created_total`
+- `flowmind_internal_event_duplicates_prevented_total`
+- `flowmind_internal_event_dispatch_latency_seconds`
+- `flowmind_internal_event_chain_limit_exceeded_total`
+- `flowmind_internal_event_backlog`
+- `flowmind_execution_queue_latency_seconds`
 
 AI:
 

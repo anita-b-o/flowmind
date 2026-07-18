@@ -11,6 +11,9 @@ export function runtimeContext(context: ExecutionContext): DataStoreRuntimeConte
     executionId: runtime.executionId ?? metadata.executionId,
     stepExecutionId: runtime.stepExecutionId,
     correlationId: runtime.correlationId ?? metadata.correlationId ?? null
+    ,eventRootId: metadata.eventRootId ?? null
+    ,eventCausationId: metadata.eventCausationId ?? null
+    ,eventDepth: Number(metadata.eventDepth ?? 0)
   };
 }
 

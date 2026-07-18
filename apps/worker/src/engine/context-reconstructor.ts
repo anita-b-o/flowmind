@@ -9,6 +9,9 @@ type ExecutionLike = {
   correlationId?: string | null;
   retryOfExecutionId?: string | null;
   startedAt?: Date | null;
+  eventRootId?: string | null;
+  eventCausationId?: string | null;
+  eventDepth?: number;
   inputJson: unknown;
   workflow?: { name: string; organization?: { id: string; slug?: string | null } } | null;
   workflowVersion?: { definitionJson: unknown; workflow?: { name: string; organization?: { id: string; slug?: string | null } } | null } | null;
@@ -56,6 +59,9 @@ export class ContextReconstructor {
         workflowVersionId: execution.workflowVersionId ?? null,
         executionId: execution.id,
         expressionMode: definition.expressionMode === "strict" ? "strict" : "legacy"
+        ,eventRootId: execution.eventRootId ?? null
+        ,eventCausationId: execution.eventCausationId ?? null
+        ,eventDepth: execution.eventDepth ?? 0
       }
     };
 

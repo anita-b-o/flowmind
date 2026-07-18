@@ -48,6 +48,8 @@ import { TryCatchExecutionService } from "./engine/try-catch-execution.service";
 import { ExecuteWorkflowExecutionService } from "./engine/execute-workflow-execution.service";
 import { ReturnWorkflowOutputHandler } from "./engine/handlers/return-workflow-output.handler";
 import { ApprovalHandler } from "./engine/handlers/approval.handler";
+import { InternalEventEmitter } from "./internal-events/internal-event-emitter.service";
+import { EventDispatcherService } from "./internal-events/event-dispatcher.service";
 
 const redisUrl = new URL(process.env.REDIS_URL ?? "redis://localhost:6379");
 
@@ -112,6 +114,8 @@ const redisUrl = new URL(process.env.REDIS_URL ?? "redis://localhost:6379");
     EmailNotificationHandler
     ,ReturnWorkflowOutputHandler,
     ApprovalHandler
+    ,InternalEventEmitter
+    ,EventDispatcherService
   ]
 })
 export class WorkerModule {}

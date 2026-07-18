@@ -102,6 +102,8 @@ export class ApiMetricsService implements OnModuleInit, OnModuleDestroy {
   });
   readonly approvalDecisions = new Counter({ name: "flowmind_approval_decisions_total", help: "Approval terminal decisions.", labelNames: ["outcome", "assignee_policy"], registers: [this.registry] });
   readonly approvalDecisionLatency = new Histogram({ name: "flowmind_approval_decision_latency_seconds", help: "Approval decision latency.", labelNames: ["outcome", "assignee_policy"], buckets: [1, 10, 60, 300, 3600, 86400, 604800], registers: [this.registry] });
+  readonly internalEventsEmitted = new Counter({ name: "flowmind_internal_events_emitted_total", help: "Durable internal events emitted by the API.", labelNames: ["event_type"], registers: [this.registry] });
+  readonly internalEventChainLimit = new Counter({ name: "flowmind_internal_event_chain_limit_exceeded_total", help: "Internal event chains suppressed by API safety limits.", labelNames: ["limit_type"], registers: [this.registry] });
   readonly scheduledTriggers = new Gauge({
     name: "flowmind_scheduled_triggers",
     help: "Scheduled triggers by state.",

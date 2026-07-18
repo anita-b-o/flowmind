@@ -3,6 +3,11 @@ import {
   assertDataStoreDescription,
   assertDataStoreKey,
   assertDataStoreName,
+  assertDataStoreMetadata,
+  assertDataStoreValue,
+  mergeJsonObjects,
+  normalizeUpsertMode,
+  ttlSecondsToExpiresAt,
   dataStorePreview,
   DATA_STORE_LIMITS,
   DataStoreValidationError
@@ -11,12 +16,15 @@ import { Prisma } from "@prisma/client";
 import { AuditLogsService } from "../audit-logs/audit-logs.service";
 import { PrismaService } from "../prisma/prisma.service";
 import { CreateDataStoreDto, ListDataStoreRecordsQueryDto, UpdateDataStoreDto } from "./dto/data-store.dto";
+import { UpsertDataStoreRecordDto } from "./dto/data-store.dto";
+import { InternalEventEmitter } from "../internal-events/internal-event-emitter.service";
 
 @Injectable()
 export class DataStoresService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly auditLogs?: AuditLogsService
+    private readonly auditLogs?: AuditLogsService,
+    private readonly events?: InternalEventEmitter
   ) {}
 
   async list(organizationId: string) {
@@ -181,8 +189,37 @@ export class DataStoresService {
         },
         tx
       );
+      await this.events?.emit(tx, { organizationId, type: "DATA_STORE_RECORD_DELETED", source: { type: "api" }, subject: { type: "data_store_record", id: record.id }, data: { dataStoreId, recordId: record.id, key: safeKey, version: record.version, value: record.valueJson } });
     });
     return { deleted: true, existed: true };
+  }
+
+  async upsertRecord(organizationId: string, actorUserId: string, dataStoreId: string, rawKey: string, dto: UpsertDataStoreRecordDto) {
+    await this.assertStore(organizationId, dataStoreId);
+    const key = mapValidation(() => assertDataStoreKey(rawKey));
+    const incoming = mapValidation(() => assertDataStoreValue(dto.value));
+    const metadata = mapValidation(() => assertDataStoreMetadata(dto.metadata));
+    const expiresAt = mapValidation(() => ttlSecondsToExpiresAt(dto.ttlSeconds));
+    const mode = normalizeUpsertMode(dto.mode);
+    if (dto.optimisticConcurrency && !dto.expectedVersion) throw new BadRequestException("expectedVersion is required with optimisticConcurrency");
+    return this.prisma.$transaction(async (tx) => {
+      const existing = await tx.dataStoreRecord.findFirst({ where: { organizationId, dataStoreId, key, deletedAt: null } });
+      const active = existing && !isExpired(existing) ? existing : null;
+      if (active && dto.optimisticConcurrency && active.version !== dto.expectedVersion) throw new ConflictException("Data Store version conflict");
+      if (!active) {
+        const count = await tx.dataStoreRecord.count({ where: { organizationId, dataStoreId, deletedAt: null } });
+        if (count >= DATA_STORE_LIMITS.maxRecordsPerStore) throw new ConflictException("Data Store record limit exceeded");
+        const created = await tx.dataStoreRecord.create({ data: { organizationId, dataStoreId, key, valueJson: toJson(incoming), metadataJson: toJson(metadata), expiresAt } });
+        await this.auditLogs?.record({ organizationId, actorUserId, action: "datastore.record.created", resourceType: "DataStoreRecord", resourceId: created.id, metadata: { dataStoreId, key, version: created.version } }, tx);
+        await this.events?.emit(tx, { organizationId, type: "DATA_STORE_RECORD_CREATED", source: { type: "api" }, subject: { type: "data_store_record", id: created.id }, data: { dataStoreId, recordId: created.id, key, version: created.version, value: created.valueJson } });
+        return this.toRecordDto(created, false);
+      }
+      const value = mode === "merge" ? mapValidation(() => mergeJsonObjects(active.valueJson, incoming)) : incoming;
+      const updated = await tx.dataStoreRecord.update({ where: { id: active.id }, data: { valueJson: toJson(value), metadataJson: toJson(metadata), expiresAt, version: { increment: 1 } } });
+      await this.auditLogs?.record({ organizationId, actorUserId, action: "datastore.record.updated", resourceType: "DataStoreRecord", resourceId: updated.id, metadata: { dataStoreId, key, version: updated.version, previousVersion: active.version, mode } }, tx);
+      await this.events?.emit(tx, { organizationId, type: "DATA_STORE_RECORD_UPDATED", source: { type: "api" }, subject: { type: "data_store_record", id: updated.id }, data: { dataStoreId, recordId: updated.id, key, version: updated.version, previousVersion: active.version, value: updated.valueJson } });
+      return this.toRecordDto(updated, false);
+    });
   }
 
   private async assertStore(organizationId: string, dataStoreId: string) {
@@ -274,3 +311,5 @@ function mapValidation<T>(fn: () => T): T {
     throw error;
   }
 }
+
+function toJson(value: unknown): Prisma.InputJsonValue { return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue; }

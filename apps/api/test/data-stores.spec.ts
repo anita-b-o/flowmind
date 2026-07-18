@@ -51,25 +51,19 @@ describe("data stores API", () => {
 
     const storeId = created.body.id;
     await request(app.getHttpServer()).get(`/data-stores/${storeId}`).set(authHeaders(otherEditor, otherOrganization.id)).expect(404);
-    await prisma.dataStoreRecord.create({
-      data: {
-        organizationId: organization.id,
-        dataStoreId: storeId,
-        key: "session-1",
-        valueJson: { status: "active" },
-        metadataJson: { source: "test" },
-        version: 1
-      }
-    });
+    await request(app.getHttpServer()).put(`/data-stores/${storeId}/records/session-1`).set(authHeaders(editor, organization.id)).send({ value: { status: "active" }, metadata: { source: "test" } }).expect(200);
+    await request(app.getHttpServer()).put(`/data-stores/${storeId}/records/session-1`).set(authHeaders(editor, organization.id)).send({ value: { status: "updated" }, metadata: { source: "test" }, optimisticConcurrency: true, expectedVersion: 1 }).expect(200);
+    expect(await prisma.internalEvent.count({ where: { organizationId: organization.id, eventType: { in: ["DATA_STORE_RECORD_CREATED", "DATA_STORE_RECORD_UPDATED"] } } })).toBe(2);
 
     const records = await request(app.getHttpServer()).get(`/data-stores/${storeId}/records?page=1&pageSize=10`).set(authHeaders(editor, organization.id)).expect(200);
     expect(records.body.total).toBe(1);
-    expect(records.body.items[0]).toMatchObject({ key: "session-1", version: 1, metadata: { source: "test" } });
+    expect(records.body.items[0]).toMatchObject({ key: "session-1", version: 2, metadata: { source: "test" } });
     expect(records.body.items[0].organizationId).toBeUndefined();
 
     await request(app.getHttpServer()).get(`/data-stores/${storeId}/records`).set(authHeaders(otherEditor, otherOrganization.id)).expect(404);
 
     await request(app.getHttpServer()).delete(`/data-stores/${storeId}/records/session-1`).set(authHeaders(editor, organization.id)).expect(200);
+    expect(await prisma.internalEvent.count({ where: { organizationId: organization.id, eventType: "DATA_STORE_RECORD_DELETED" } })).toBe(1);
     expect(await prisma.dataStoreRecord.count({ where: { dataStoreId: storeId, deletedAt: null } })).toBe(0);
     await prisma.dataStoreRecord.create({ data: { organizationId: organization.id, dataStoreId: storeId, key: "session-1", valueJson: { status: "recreated" }, metadataJson: {}, version: 1 } });
     expect(await prisma.dataStoreRecord.count({ where: { dataStoreId: storeId, key: "session-1", deletedAt: null } })).toBe(1);
@@ -105,6 +99,9 @@ async function cleanDatabase() {
   await prisma.execution.deleteMany();
   await prisma.webhookEvent.deleteMany();
   await prisma.idempotencyKey.deleteMany();
+  await prisma.internalEventDelivery.deleteMany();
+  await prisma.internalEvent.deleteMany();
+  await prisma.internalEventChain.deleteMany();
   await prisma.trigger.deleteMany();
   await prisma.workflowStep.deleteMany();
   await prisma.workflow.updateMany({ data: { activeVersionId: null } });

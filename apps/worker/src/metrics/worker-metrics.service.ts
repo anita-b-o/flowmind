@@ -19,6 +19,16 @@ export class WorkerMetricsService implements OnModuleInit, OnModuleDestroy {
   readonly approvalRequests = new Counter({ name: "flowmind_approval_requests_total", help: "Approval requests created.", labelNames: ["assignee_policy"], registers: [this.registry] });
   readonly approvalOutcomes = new Counter({ name: "flowmind_approval_outcomes_total", help: "Approval outcomes processed.", labelNames: ["outcome", "assignee_policy"], registers: [this.registry] });
   readonly approvalLatency = new Histogram({ name: "flowmind_approval_decision_latency_seconds", help: "Approval decision latency.", labelNames: ["outcome", "assignee_policy"], buckets: [1, 10, 60, 300, 3600, 86400, 604800], registers: [this.registry] });
+  readonly internalEventsDispatched = new Counter({ name: "flowmind_internal_events_dispatched_total", help: "Internal events dispatched.", labelNames: ["event_type", "outcome"], registers: [this.registry] });
+  readonly internalEventsEmitted = new Counter({ name: "flowmind_internal_events_emitted_total", help: "Durable internal events emitted by the worker.", labelNames: ["event_type"], registers: [this.registry] });
+  readonly internalEventDispatchFailures = new Counter({ name: "flowmind_internal_event_dispatch_failures_total", help: "Internal event dispatch failures.", labelNames: ["error_category"], registers: [this.registry] });
+  readonly internalEventTriggerMatches = new Counter({ name: "flowmind_internal_event_trigger_matches_total", help: "Event trigger matches.", labelNames: ["event_type"], registers: [this.registry] });
+  readonly internalEventExecutionsCreated = new Counter({ name: "flowmind_internal_event_executions_created_total", help: "Executions materialized by event triggers.", labelNames: ["event_type"], registers: [this.registry] });
+  readonly internalEventDuplicates = new Counter({ name: "flowmind_internal_event_duplicates_prevented_total", help: "Persistent internal event duplicates prevented.", labelNames: ["stage"], registers: [this.registry] });
+  readonly internalEventDispatchLatency = new Histogram({ name: "flowmind_internal_event_dispatch_latency_seconds", help: "Internal event dispatch latency.", labelNames: ["event_type"], buckets: [0.01, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60, 300], registers: [this.registry] });
+  readonly executionQueueLatency = new Histogram({ name: "flowmind_execution_queue_latency_seconds", help: "Execution queue latency by bounded origin.", labelNames: ["origin"], buckets: [0.01, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60, 300], registers: [this.registry] });
+  readonly internalEventChainLimit = new Counter({ name: "flowmind_internal_event_chain_limit_exceeded_total", help: "Internal event chains suppressed by a safety limit.", labelNames: ["limit_type"], registers: [this.registry] });
+  readonly internalEventBacklog = new Gauge({ name: "flowmind_internal_event_backlog", help: "Internal event durable backlog.", labelNames: ["state"], registers: [this.registry] });
 
   readonly jobsReceived = new Counter({
     name: "flowmind_workflow_jobs_received_total",

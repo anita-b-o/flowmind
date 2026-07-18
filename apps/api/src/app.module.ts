@@ -20,6 +20,7 @@ import { ExpressionsModule } from "./expressions/expressions.module";
 import { VariablesModule } from "./variables/variables.module";
 import { DataStoresModule } from "./data-stores/data-stores.module";
 import { ApprovalsModule } from "./approvals/approvals.module";
+import { InternalEventsModule } from "./internal-events/internal-events.module";
 
 const redisUrl = new URL(process.env.REDIS_URL ?? "redis://localhost:6379");
 
@@ -35,6 +36,7 @@ const redisUrl = new URL(process.env.REDIS_URL ?? "redis://localhost:6379");
     ObservabilityModule,
     MetricsModule,
     PrismaModule,
+    InternalEventsModule,
     HealthModule,
     AuditLogsModule,
     AuthModule,

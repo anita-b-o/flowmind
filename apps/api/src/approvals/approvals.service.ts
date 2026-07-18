@@ -6,10 +6,11 @@ import { PrismaService } from "../prisma/prisma.service";
 import { QueueService } from "../queues/queue.service";
 import { ApiMetricsService } from "../metrics/metrics.service";
 import type { ListApprovalsQueryDto } from "./dto/approval.dto";
+import { InternalEventEmitter } from "../internal-events/internal-event-emitter.service";
 
 @Injectable()
 export class ApprovalsService {
-  constructor(private readonly prisma: PrismaService, private readonly queues: QueueService, private readonly metrics: ApiMetricsService) {}
+  constructor(private readonly prisma: PrismaService, private readonly queues: QueueService, private readonly metrics: ApiMetricsService, private readonly events: InternalEventEmitter) {}
 
   async list(organizationId: string, query: ListApprovalsQueryDto) {
     const where: Prisma.ApprovalRequestWhereInput = { organizationId, ...(query.status ? { status: query.status as ApprovalStatus } : {}), ...(query.workflowId ? { workflowId: query.workflowId } : {}), ...(query.executionId ? { executionId: query.executionId } : {}), ...((query.from || query.to) ? { requestedAt: { ...(query.from ? { gte: new Date(query.from) } : {}), ...(query.to ? { lte: new Date(query.to) } : {}) } } : {}) };
@@ -27,7 +28,7 @@ export class ApprovalsService {
   }
 
   async decide(organizationId: string, userId: string, id: string, decision: "APPROVED" | "REJECTED", rawComment?: string) {
-    const current = await this.prisma.approvalRequest.findFirst({ where: { id, organizationId }, include: { execution: { select: { status: true, workflowVersionId: true, correlationId: true } } } });
+    const current = await this.prisma.approvalRequest.findFirst({ where: { id, organizationId }, include: { execution: { select: { status: true, workflowVersionId: true, correlationId: true, eventRootId: true, eventCausationId: true, eventDepth: true } } } });
     if (!current) throw new NotFoundException("Approval request not found");
     const membership = await this.prisma.organizationMember.findFirst({ where: { organizationId, userId, status: "ACTIVE" }, select: { role: true } });
     if (!membership || !canDecideApproval(membership.role, current.allowedRoles)) throw new ForbiddenException("You are not allowed to decide this approval");
@@ -39,6 +40,7 @@ export class ApprovalsService {
       if (updated.count !== 1) return false;
       await tx.execution.updateMany({ where: { id: current.executionId, organizationId, status: ExecutionStatus.RETRYING, waitReason: "approval" }, data: { status: ExecutionStatus.QUEUED, waitReason: null } });
       await tx.auditLog.create({ data: { organizationId, actorUserId: userId, action: `approval.${decision.toLowerCase()}`, resourceType: "ApprovalRequest", resourceId: id, correlationId: current.execution.correlationId, metadataJson: json({ workflowId: current.workflowId, executionId: current.executionId, stepKey: current.stepKey, outcome: decision.toLowerCase() }) } });
+      await this.events.emit(tx, { organizationId, type: decision === "APPROVED" ? "APPROVAL_APPROVED" : "APPROVAL_REJECTED", source: { type: "approval", id }, subject: { type: "approval_request", id }, data: { approvalId: id, executionId: current.executionId, workflowId: current.workflowId, workflowVersionId: current.workflowVersionId, stepKey: current.stepKey, outcome: decision, requestedAt: current.requestedAt.toISOString(), decidedAt: now.toISOString() }, causality: current.execution.eventRootId ? { rootEventId: current.execution.eventRootId, causationId: current.execution.eventCausationId, depth: current.execution.eventDepth, correlationId: current.execution.correlationId } : { correlationId: current.execution.correlationId } });
       return true;
     });
     if (!won) throw new ConflictException("Approval request is no longer pending");
