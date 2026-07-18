@@ -18,6 +18,7 @@ import { DataStoreExistsRecordHandler } from "./handlers/data-store/exists-recor
 import { DataStoreCountRecordsHandler } from "./handlers/data-store/count-records.handler";
 import { DataStoreListRecordsHandler } from "./handlers/data-store/list-records.handler";
 import { AppendVariableHandler, DeleteVariableHandler, GetVariableHandler, IncrementVariableHandler, SetVariableHandler } from "./handlers/variables.handler";
+import { ReturnWorkflowOutputHandler } from "./handlers/return-workflow-output.handler";
 
 @Injectable()
 export class StepRegistry implements OnModuleInit {
@@ -44,7 +45,8 @@ export class StepRegistry implements OnModuleInit {
     private readonly incrementVariableHandler: IncrementVariableHandler,
     private readonly appendVariableHandler: AppendVariableHandler,
     private readonly aiHandler: AiHandler,
-    private readonly emailNotificationHandler: EmailNotificationHandler
+    private readonly emailNotificationHandler: EmailNotificationHandler,
+    private readonly returnWorkflowOutputHandler: ReturnWorkflowOutputHandler
   ) {}
 
   onModuleInit() {
@@ -69,6 +71,7 @@ export class StepRegistry implements OnModuleInit {
       this.incrementVariableHandler,
       this.appendVariableHandler,
       this.emailNotificationHandler
+      ,this.returnWorkflowOutputHandler
     ].forEach(
       (handler) => this.handlers.set(handler.type, handler)
     );

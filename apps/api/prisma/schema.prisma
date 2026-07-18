@@ -307,6 +307,10 @@ model Execution {
   scheduledFor           DateTime?       @map("scheduled_for")
   correlationId          String?         @map("correlation_id")
   retryOfExecutionId     String?         @map("retry_of_execution_id")
+  parentExecutionId      String?         @map("parent_execution_id")
+  parentStepExecutionId  String?         @map("parent_step_execution_id")
+  rootExecutionId        String?         @map("root_execution_id")
+  depth                  Int             @default(0)
   retryRequestedByUserId String?         @map("retry_requested_by_user_id")
   retryRequestedAt       DateTime?       @map("retry_requested_at")
   retryReason            String?         @map("retry_reason")
@@ -320,6 +324,7 @@ model Execution {
   executionMode          ExecutionMode   @default(REAL) @map("execution_mode")
   inputJson              Json            @map("input_json")
   contextJson            Json            @map("context_json")
+  outputJson             Json?           @map("output_json")
   errorJson              Json?           @map("error_json")
   lockedBy               String?         @map("locked_by")
   lockedUntil            DateTime?       @map("locked_until")
@@ -337,6 +342,11 @@ model Execution {
   scheduledTrigger Trigger?              @relation("ScheduledTriggerExecutions", fields: [scheduledTriggerId], references: [id], onDelete: SetNull)
   retryOfExecution Execution?            @relation("ExecutionRetries", fields: [retryOfExecutionId], references: [id])
   retryExecutions  Execution[]           @relation("ExecutionRetries")
+  parentExecution  Execution?            @relation("ExecutionChildren", fields: [parentExecutionId], references: [id], onDelete: SetNull)
+  childExecutions  Execution[]           @relation("ExecutionChildren")
+  rootExecution    Execution?            @relation("ExecutionRoot", fields: [rootExecutionId], references: [id], onDelete: SetNull)
+  descendantExecutions Execution[]       @relation("ExecutionRoot")
+  parentStepExecution StepExecution?     @relation("StepExecutionChildren", fields: [parentStepExecutionId], references: [id], onDelete: SetNull)
   retryRequestedBy User?                 @relation("ExecutionRetryRequestedBy", fields: [retryRequestedByUserId], references: [id])
   startedBy        User?                 @relation("ExecutionStartedBy", fields: [startedByUserId], references: [id])
   cancelRequestedBy User?                @relation("ExecutionCancelRequestedBy", fields: [cancelRequestedByUserId], references: [id])
@@ -354,6 +364,9 @@ model Execution {
   @@index([organizationId, scheduledTriggerId, scheduledFor])
   @@index([status, lockedUntil])
   @@index([retryOfExecutionId, status])
+  @@index([parentExecutionId])
+  @@index([parentStepExecutionId])
+  @@index([rootExecutionId])
   @@map("executions")
 }
 
@@ -390,6 +403,7 @@ model StepExecution {
   workflowStep    WorkflowStep?         @relation(fields: [workflowStepId], references: [id], onDelete: SetNull)
   internalRecords InternalRecord[]
   deadLetters     DeadLetterExecution[] @relation("DeadLetterFailedStep")
+  childExecutions Execution[]           @relation("StepExecutionChildren")
 
   @@unique([executionId, stepKey, executionPath])
   @@index([organizationId, executionId])

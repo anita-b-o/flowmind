@@ -10,6 +10,7 @@ import { isDone, selectedNextStepKey } from "./graph/graph-planner";
 import type { RuntimeGraph } from "./graph/graph-validator";
 import { StepExecutor, type StepExecutionRecord } from "./step-executor";
 import { StructuredStepFailure } from "./structured-step-failure";
+import { ExecuteWorkflowExecutionService } from "./execute-workflow-execution.service";
 
 type RegionResult = { outcome: "completed" } | { outcome: "waiting"; nextRetryAt: Date };
 type Region = { name: "body" | "catch" | "finally"; entry: string; exit: string; keys: Set<string> };
@@ -20,7 +21,8 @@ export class TryCatchExecutionService {
     private readonly prisma: PrismaService,
     private readonly stepExecutor: StepExecutor,
     @Inject(forwardRef(() => ForEachExecutionService)) private readonly forEach: ForEachExecutionService,
-    private readonly metrics?: WorkerMetricsService
+    private readonly metrics?: WorkerMetricsService,
+    private readonly executeWorkflow?: ExecuteWorkflowExecutionService
   ) {}
 
   async execute(input: {
@@ -118,6 +120,16 @@ export class TryCatchExecutionService {
         const result = await this.forEach.execute({ organizationId: input.organizationId, executionId: input.executionId, correlationId: input.correlationId, loopStep: step, loopStepExecution: execution as any, graph: input.graph, bodyEntryStepKey: body.to, doneStepKey: done.to, bodyStepKeys: regionKeys(input.graph, body.to, done.to), stepRowsByKey: input.stepRowsByKey, runtimeContext: input.runtimeContext, parentContext: context, parentPath: executionPath });
         if (result.outcome === "waiting") { state.currentStepKey = next; await this.checkpoint(input, state); return result; }
         context.steps[step.key] = { status: StepExecutionStatus.Completed, output: result.output }; next = done.to; continue;
+      }
+      if (step.type === "execute_workflow") {
+        if (!this.executeWorkflow) throw new Error("EXECUTE_WORKFLOW runtime service is unavailable");
+        try {
+          const result = await this.executeWorkflow.execute({ organizationId: input.organizationId, executionId: input.executionId, correlationId: input.correlationId, step, stepExecution: execution as any, context, executionPath, iterationIndex: input.iterationIndex });
+          if (result.outcome === "waiting") { state.currentStepKey = next; await this.checkpoint(input, state); return result; }
+          context.steps[step.key] = { status: StepExecutionStatus.Completed, output: result.output };
+          next = selectedNextStepKey(input.graph, step.key, result.output) ?? region.exit;
+          state.currentStepKey = next === region.exit ? undefined : next; await this.checkpoint(input, state); continue;
+        } catch (error) { throw await this.asFailure(input, error, execution.id); }
       }
       if (execution.status === StepExecutionStatus.Retrying && execution.nextRetryAt && execution.nextRetryAt > new Date()) { state.currentStepKey = next; await this.checkpoint(input, state); return { outcome: "waiting", nextRetryAt: execution.nextRetryAt }; }
       if (execution.status === StepExecutionStatus.Retrying && isIntentionalWait(execution)) {

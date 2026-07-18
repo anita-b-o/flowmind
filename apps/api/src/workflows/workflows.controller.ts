@@ -23,6 +23,12 @@ export class WorkflowsController {
     return this.workflowsService.list(org.organizationId);
   }
 
+  @Get("invocable")
+  @Roles(OrganizationRole.Editor)
+  listInvocable(@OrganizationContext() org: OrganizationContext) {
+    return this.workflowsService.listInvocable(org.organizationId);
+  }
+
   @Get(":workflowId")
   detail(@OrganizationContext() org: OrganizationContext, @Param("workflowId") workflowId: string) {
     return this.workflowsService.detail(org.organizationId, workflowId);

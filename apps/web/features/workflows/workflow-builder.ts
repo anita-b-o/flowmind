@@ -26,6 +26,8 @@ export const STEP_TYPES: Array<{ value: StepType; label: string }> = [
   { value: "switch", label: "Switch" },
   { value: "for_each", label: "For Each" },
   { value: "try_catch", label: "Try / Catch" },
+  { value: "execute_workflow", label: "Execute Workflow" },
+  { value: "return_workflow_output", label: "Return Workflow Output" },
   { value: "delay", label: "Delay" },
   { value: "wait_until", label: "Wait Until" },
   { value: "conditional", label: "Conditional" }
@@ -89,6 +91,8 @@ export const workflowEditorSchema: z.ZodType<WorkflowEditorFormValue> = z
           "switch",
           "for_each",
           "try_catch",
+          "execute_workflow",
+          "return_workflow_output",
           "delay",
           "wait_until"
         ]),
@@ -190,6 +194,11 @@ function validateStepConfig(step: StepFormValue, index: number, ctx: z.Refinemen
     requiredString(config.bodyStepKey, ctx, index, "bodyStepKey", "Body is required.");
     requiredString(config.catchStepKey, ctx, index, "catchStepKey", "Catch is required.");
     requiredString(config.doneStepKey, ctx, index, "doneStepKey", "Done is required.");
+  }
+  if (step.type === "execute_workflow") {
+    requiredString(config.workflowId, ctx, index, "workflowId", "Workflow is required.");
+    if (!["PUBLISHED", "PINNED_VERSION"].includes(String(config.versionPolicy ?? ""))) ctx.addIssue({ code: "custom", path: ["steps", index, "config", "versionPolicy"], message: "Version policy is invalid." });
+    if (config.versionPolicy === "PINNED_VERSION") requiredString(config.workflowVersionId, ctx, index, "workflowVersionId", "Version is required.");
   }
   if (step.type === "delay") {
     requiredString(config.duration, ctx, index, "duration", "Duration is required.");
@@ -340,6 +349,10 @@ export function defaultConfig(type: StepType): Record<string, unknown> {
       return { source: "{{steps.previous.output}}", itemVariable: "", indexVariable: "", mode: "SEQUENTIAL", concurrency: 1, continueOnError: false, maxItems: 100, collectResults: true, maxResults: 20, bodyStepKey: "", doneStepKey: "" };
     case "try_catch":
       return { bodyStepKey: "", catchStepKey: "", finallyStepKey: "", doneStepKey: "" };
+    case "execute_workflow":
+      return { workflowId: "", versionPolicy: "PUBLISHED", workflowVersionId: "", input: "{}", timeoutSeconds: 120 };
+    case "return_workflow_output":
+      return { output: "{}" };
     case "delay":
       return { duration: "30 seconds" };
     case "wait_until":
@@ -413,6 +426,8 @@ function configToForm(type: StepType, config: Record<string, unknown>) {
   if (type === "email_notification") {
     return { ...defaults, ...config, legacyConnectionMode: !config.connectionId };
   }
+  if (type === "execute_workflow") return { ...defaults, ...config, input: JSON.stringify(config.input ?? {}, null, 2) };
+  if (type === "return_workflow_output") return { ...defaults, ...config, output: JSON.stringify(config.output ?? null, null, 2) };
   return { ...defaults, ...config };
 }
 
@@ -433,7 +448,9 @@ export function toWorkflowDefinition(values: WorkflowEditorFormValue): WorkflowD
     ...(graph ? { graph } : {}),
     workflowVariables: {},
     environmentVariables: {},
-    trigger: { key: "webhook", name: "Webhook", type: "webhook_trigger", config: {} },
+    trigger: values.steps.some((step) => step.type === "return_workflow_output")
+      ? { key: "subworkflow", name: "Subworkflow Input", type: "subworkflow_trigger", config: {} }
+      : { key: "webhook", name: "Webhook", type: "webhook_trigger", config: {} },
     steps: values.steps.map((step, index) => stepFormToDto(step, index))
   };
 }
@@ -563,6 +580,10 @@ export function serializeStepConfig(step: StepFormValue) {
       };
     case "try_catch":
       return { bodyStepKey: String(config.bodyStepKey ?? ""), catchStepKey: String(config.catchStepKey ?? ""), ...(config.finallyStepKey ? { finallyStepKey: String(config.finallyStepKey) } : {}), doneStepKey: String(config.doneStepKey ?? "") };
+    case "execute_workflow":
+      return { workflowId: String(config.workflowId ?? ""), versionPolicy: String(config.versionPolicy ?? "PUBLISHED"), ...(config.versionPolicy === "PINNED_VERSION" ? { workflowVersionId: String(config.workflowVersionId ?? "") } : {}), input: parseJsonOrExpression(config.input, null), timeoutSeconds: Number(config.timeoutSeconds ?? 120) };
+    case "return_workflow_output":
+      return { output: parseJsonOrExpression(config.output, null) };
     case "delay":
       return { duration: String(config.duration ?? "") };
     case "wait_until":
@@ -604,6 +625,11 @@ function serializeTransformConfig(config: Record<string, unknown>) {
 function parseJson(value: unknown, fallback: unknown) {
   if (value === undefined || value === null || value === "") return fallback;
   return JSON.parse(String(value));
+}
+
+function parseJsonOrExpression(value: unknown, fallback: unknown) {
+  try { return parseJson(value, fallback); }
+  catch (error) { if (typeof value === "string" && value.includes("{{")) return value; throw error; }
 }
 
 function parseJsonArray(value: unknown, fallback: unknown[]) {

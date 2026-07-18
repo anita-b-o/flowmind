@@ -4,6 +4,10 @@ import type { StepType } from "../../types";
 
 const GROUPS: Array<{ label: string; items: Array<{ type: StepType; name: string; description: string; icon: string }> }> = [
   { label: "Actions", items: [{ type: "http_request", name: "HTTP Request", description: "Call an API connection.", icon: "HTTP" }] },
+  { label: "Workflows", items: [
+    { type: "execute_workflow", name: "Execute Workflow", description: "Invoke a published workflow.", icon: "FLOW" },
+    { type: "return_workflow_output", name: "Return Output", description: "Return a controlled child output.", icon: "RET" }
+  ] },
   {
     label: "AI",
     items: [

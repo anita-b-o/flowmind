@@ -37,6 +37,9 @@ export default function ExecutionDetailPage({ params }: { params: Promise<{ exec
               <p>Workflow: {detail.workflow.name}</p>
               <p>Version: {detail.workflowVersion?.versionNumber ?? "-"}</p>
               <p>Mode: {detail.mode ?? "REAL"}</p>
+              <p>Subworkflow depth: {detail.depth}</p>
+              {detail.parentExecution && <p>Parent: <Link href={`/executions/${detail.parentExecution.id}`}>{detail.parentExecution.id}</Link>{detail.parentStepExecution ? ` · ${detail.parentStepExecution.stepKey}` : ""}</p>}
+              {detail.rootExecutionId !== detail.id && <p>Root: <Link href={`/executions/${detail.rootExecutionId}`}>{detail.rootExecutionId}</Link></p>}
               <p>Started by: {detail.initiator?.display ?? "-"}</p>
               <p>Duration: {formatDuration(detail.durationMs, detail.startedAt, detail.completedAt)}</p>
               <p>Created: {formatDate(detail.createdAt)}</p>
@@ -93,6 +96,10 @@ export default function ExecutionDetailPage({ params }: { params: Promise<{ exec
                 ))}
               </section>
             )}
+
+            {!!detail.childExecutions.length && <section className="panel stack"><h2>Child workflows</h2>{detail.childExecutions.map((child) => <p key={child.id}><StatusBadge status={child.status} /> <Link href={`/executions/${child.id}`}>{child.id}</Link> · depth {child.depth}</p>)}</section>}
+
+            {detail.output !== null && detail.output !== undefined && <section className="panel stack"><h2>Workflow output</h2><JsonViewer value={detail.output} /></section>}
 
             {!!detail.deadLetters.length && (
               <section className="panel stack">

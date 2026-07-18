@@ -330,6 +330,42 @@ describe("workflow webhook execution e2e", () => {
     expect(await prisma.stepExecution.count({ where: { executionId: webhook.body.executionId, stepKey: "done", executionPath: "root" } })).toBe(1);
   }, 30_000);
 
+  it("executes a published child workflow with isolated executions and explicit output", async () => {
+    const user = await register("subworkflow@example.com", "SubworkflowCo");
+    const child = await createWorkflow(user, "Reusable child");
+    const childVersionResponse = await request(app.getHttpServer()).post(`/workflows/${child.id}/versions`).set(authHeaders(user)).send({
+      workflowDefinitionSchemaVersion: 2, expressionMode: "strict",
+      trigger: { key: "subworkflow", name: "Subworkflow Input", type: "subworkflow_trigger", config: {} },
+      steps: [
+        { key: "shape", name: "Shape", type: "transform", config: { mode: "OBJECT", fields: { customerId: "{{trigger.input.customerId}}", processed: true }, outputType: "OBJECT" } },
+        { key: "return", name: "Return", type: "return_workflow_output", config: { output: "{{steps.shape.output}}" } }
+      ],
+      graph: { entryStepKey: "shape", edges: [{ from: "shape", to: "return", kind: "next" }], terminalStepKeys: ["return"] }
+    });
+    if (childVersionResponse.status !== 201) throw new Error(JSON.stringify(childVersionResponse.body));
+    const childVersion = childVersionResponse.body;
+    await request(app.getHttpServer()).patch(`/workflows/${child.id}/versions/${childVersion.id}/activate`).set(authHeaders(user)).expect(200);
+
+    const parent = await createWorkflow(user, "Parent workflow");
+    const parentVersion = await request(app.getHttpServer()).post(`/workflows/${parent.id}/versions`).set(authHeaders(user)).send({
+      workflowDefinitionSchemaVersion: 2, expressionMode: "strict",
+      trigger: { key: "webhook", name: "Webhook", type: "webhook_trigger", config: {} },
+      steps: [
+        { key: "call", name: "Call child", type: "execute_workflow", config: { workflowId: child.id, versionPolicy: "PUBLISHED", input: "{{trigger.body}}", timeoutSeconds: 30 } },
+        { key: "save", name: "Save", type: "database_record", config: { collection: "subworkflow_smoke", data: { customerId: "{{steps.call.output.output.customerId}}", processed: "{{steps.call.output.output.processed}}" } } }
+      ],
+      graph: { entryStepKey: "call", edges: [{ from: "call", to: "save", kind: "next" }], terminalStepKeys: ["save"] }
+    }).expect(201);
+    await request(app.getHttpServer()).patch(`/workflows/${parent.id}/versions/${parentVersion.body.id}/activate`).set(authHeaders(user)).expect(200);
+    const started = await request(app.getHttpServer()).post(`/workflows/${parent.id}/executions`).set(authHeaders(user)).send({ confirmRealEffects: true, input: { trigger: { body: { customerId: "customer-1" } } } }).expect(201);
+    const detail = await waitForExecution(started.body.execution.id, "COMPLETED");
+    expect(detail.body.childExecutions).toHaveLength(1);
+    const childExecution = await prisma.execution.findUniqueOrThrow({ where: { id: detail.body.childExecutions[0].id }, include: { steps: true } });
+    expect(childExecution).toMatchObject({ parentExecutionId: started.body.execution.id, rootExecutionId: started.body.execution.id, depth: 1, status: "COMPLETED", outputJson: { customerId: "customer-1", processed: true } });
+    expect(childExecution.steps.map((step) => step.stepKey).sort()).toEqual(["return", "shape"]);
+    expect((await prisma.execution.findUniqueOrThrow({ where: { id: started.body.execution.id }, include: { steps: true } })).steps.map((step) => step.stepKey).sort()).toEqual(["call", "save"]);
+  }, 30_000);
+
   it("prevents cross-tenant trigger and execution access", async () => {
     const userA = await register("tenant-a@example.com", "Tenant A");
     const userB = await register("tenant-b@example.com", "Tenant B");

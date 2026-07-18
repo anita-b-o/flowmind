@@ -201,6 +201,9 @@ export class ExecutionsService {
         steps: { orderBy: [{ workflowStep: { position: "asc" } }, { createdAt: "asc" }] },
         retryOfExecution: { select: { id: true, status: true, createdAt: true, completedAt: true, correlationId: true } },
         retryExecutions: { select: { id: true, status: true, createdAt: true, completedAt: true, correlationId: true }, orderBy: { createdAt: "desc" } },
+        parentExecution: { select: { id: true, status: true, workflowId: true, completedAt: true } },
+        parentStepExecution: { select: { id: true, stepKey: true, executionPath: true } },
+        childExecutions: { select: { id: true, status: true, workflowId: true, workflowVersionId: true, depth: true, createdAt: true, startedAt: true, completedAt: true }, orderBy: { createdAt: "asc" } },
         deadLetters: {
           select: {
             id: true,
@@ -275,6 +278,14 @@ export class ExecutionsService {
       retryOfExecutionId: execution.retryOfExecutionId,
       retryOfExecution: relation(execution.retryOfExecution),
       retryExecutions: execution.retryExecutions.map(relation),
+      output: sanitizePayload(execution.outputJson),
+      parentExecutionId: execution.parentExecutionId,
+      parentStepExecutionId: execution.parentStepExecutionId,
+      rootExecutionId: execution.rootExecutionId ?? execution.id,
+      depth: execution.depth,
+      parentExecution: execution.parentExecution,
+      parentStepExecution: execution.parentStepExecution,
+      childExecutions: execution.childExecutions,
       deadLetter: execution.deadLetters.find((item) => !item.resolvedAt)
         ? formatDeadLetter(execution.deadLetters.find((item) => !item.resolvedAt)!)
         : null,
@@ -312,6 +323,11 @@ export class ExecutionsService {
     });
     const updated = await this.prisma.execution.findUniqueOrThrow({ where: { id: executionId } });
     if (result.count === 1) {
+      const rootId = (updated as any).rootExecutionId ?? updated.id;
+      await this.prisma.execution.updateMany({
+        where: { organizationId, rootExecutionId: rootId, status: { in: ACTIVE_EXECUTION_STATUSES as any } },
+        data: { status: ExecutionStatus.Cancelled, completedAt: now, cancelledAt: now, cancelRequestedAt: now, cancelRequestedByUserId: userId, cancelReason: reason ?? "Parent execution cancelled", lockedBy: null, lockedUntil: null, lastHeartbeatAt: null }
+      });
       this.metrics?.recordExecutionCancel("success");
       await this.auditLogs?.record({
         organizationId,

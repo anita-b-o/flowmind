@@ -1,4 +1,6 @@
-import { Injectable } from "@nestjs/common";
+import { Injectable, Optional } from "@nestjs/common";
+import { InjectQueue } from "@nestjs/bullmq";
+import { Queue } from "bullmq";
 import { ACTIVE_EXECUTION_STATUSES, ExecutionJobPayload, ExecutionStatus, StepExecutionStatus, WorkflowStepDefinition } from "@automation/shared-types";
 import { Prisma } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
@@ -14,6 +16,8 @@ import { branchSkipKeys, isDone, isTerminal, selectedNextStepKey } from "./graph
 import { parseRuntimeGraph, validateRuntimeGraph, type RuntimeGraph } from "./graph/graph-validator";
 import { ForEachExecutionService } from "./for-each-execution.service";
 import { TryCatchExecutionService } from "./try-catch-execution.service";
+import { ExecuteWorkflowExecutionService } from "./execute-workflow-execution.service";
+import { EXECUTION_RUN_JOB, WORKFLOW_EXECUTIONS_QUEUE } from "../queues/queue.constants";
 
 export type WorkflowRunResult = { status: "completed" | "skipped" | "lost_lease" } | { status: "waiting"; nextRetryAt: Date };
 
@@ -39,7 +43,9 @@ export class WorkflowRunner {
     private readonly logger?: WorkerLoggerService,
     private readonly metrics?: WorkerMetricsService,
     private readonly forEach?: ForEachExecutionService,
-    private readonly tryCatch?: TryCatchExecutionService
+    private readonly tryCatch?: TryCatchExecutionService,
+    private readonly executeWorkflow?: ExecuteWorkflowExecutionService,
+    @Optional() @InjectQueue(WORKFLOW_EXECUTIONS_QUEUE) private readonly executionQueue?: Queue
   ) {}
 
   async run(payload: ExecutionJobPayload): Promise<WorkflowRunResult> {
@@ -189,6 +195,7 @@ export class WorkflowRunner {
         workflowVersionId: execution.workflowVersionId
       });
       if ((execution as any).executionMode !== "TEST") this.metrics?.executionsCompleted.inc();
+      await this.wakeParent(execution.id);
       return { status: "completed" };
     } catch (error) {
       if (heartbeat) clearInterval(heartbeat);
@@ -241,6 +248,7 @@ export class WorkflowRunner {
         workflowVersionId: execution.workflowVersionId,
         failedStepKey: failedStep?.stepKey
       });
+      await this.wakeParent(execution.id);
       this.logger?.error("worker.execution.failed", {
         failedStepKey: failedStep?.stepKey,
         stepExecutionId: failedStep?.id,
@@ -359,6 +367,17 @@ export class WorkflowRunner {
         continue;
       }
 
+      if (step.type === "execute_workflow") {
+        if (!this.executeWorkflow) throw new Error("EXECUTE_WORKFLOW runtime service is unavailable");
+        const outcome = await this.executeWorkflow.execute({ organizationId: current.organizationId, executionId: current.id, correlationId: (current as any).correlationId, step, stepExecution: stepExecution as any, context: runtimeContext.context });
+        await this.updateContextCache(current.id, runtimeContext);
+        if (outcome.outcome === "waiting") { await this.markWaiting(current.id); stopHeartbeat(); await this.leaseService.release(current.id); return { status: "waiting", nextRetryAt: outcome.nextRetryAt }; }
+        runtimeContext.setStepResult(step.key, StepExecutionStatus.Completed, outcome.output);
+        current = await this.reload(payload);
+        nextStepKey = selectedNextStepKey(graph, step.key, outcome.output);
+        continue;
+      }
+
       if (stepExecution.status === StepExecutionStatus.Retrying && stepExecution.nextRetryAt && stepExecution.nextRetryAt > new Date()) {
         await this.markWaiting(current.id);
         stopHeartbeat();
@@ -410,6 +429,13 @@ export class WorkflowRunner {
           return { status: "waiting", nextRetryAt: outcome.nextRetryAt };
         }
 
+        if (step.type === "return_workflow_output") {
+          await this.prisma.execution.update({ where: { id: current.id }, data: { outputJson: toJson(outcome.result.output) } });
+          nextStepKey = undefined;
+          current = await this.reload(payload);
+          break;
+        }
+
         const selected = selectedNextStepKey(graph, step.key, outcome.result.output);
         if (selected && isControlStep(step.type)) {
           this.logger?.info(step.type === "switch" ? "worker.flow.switch_case_selected" : "worker.flow.branch_selected", {
@@ -457,6 +483,7 @@ export class WorkflowRunner {
       });
     }
     if (fullExecution?.executionMode !== "TEST") this.metrics?.executionsCompleted.inc();
+    await this.wakeParent(initialExecution.id);
     return { status: "completed" };
   }
 
@@ -598,7 +625,17 @@ export class WorkflowRunner {
       }
     }).catch(() => undefined);
   }
+
+  private async wakeParent(executionId: string) {
+    if (!this.executionQueue) return;
+    const child = await this.prisma.execution.findUnique({ where: { id: executionId }, select: { parentExecution: { select: { id: true, organizationId: true, workflowId: true, workflowVersionId: true, correlationId: true, executionMode: true } } } });
+    const parent = child?.parentExecution;
+    if (!parent) return;
+    await this.executionQueue.add(EXECUTION_RUN_JOB, { organizationId: parent.organizationId, executionId: parent.id, workflowId: parent.workflowId, workflowVersionId: parent.workflowVersionId ?? undefined, requestId: `subworkflow-wake-${executionId}`, correlationId: parent.correlationId ?? randomCorrelationId(), enqueuedAt: new Date().toISOString(), executionMode: parent.executionMode }, { jobId: `execution-${parent.id}-child-${executionId}`, attempts: 1, removeOnComplete: 1000, removeOnFail: false }).catch(() => undefined);
+  }
 }
+
+function randomCorrelationId() { return `subworkflow-${Date.now()}-${Math.random().toString(16).slice(2)}`; }
 
 function toStepDefinition(dbStep: RuntimeStepRow): WorkflowStepDefinition {
   return {

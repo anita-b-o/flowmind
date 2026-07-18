@@ -47,7 +47,7 @@ export type DraftValidationResult = {
 export type WorkflowNodeData = {
   label: string;
   stepKey: string;
-  type: StepType | "webhook_trigger";
+  type: StepType | "webhook_trigger" | "subworkflow_trigger";
   summary: string;
   issues: DraftValidationIssue[];
   readOnly: boolean;

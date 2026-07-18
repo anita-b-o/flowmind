@@ -48,9 +48,9 @@ export function validateExpressionString(value: string, context: ExpressionValid
       }
       if (
         namespace === "trigger" &&
-        !["trigger.body", "trigger.headers", "trigger.query", "trigger.method", "trigger.receivedAt"].some((prefix) => path.raw === prefix || path.raw.startsWith(`${prefix}.`))
+        !["trigger.body", "trigger.input", "trigger.headers", "trigger.query", "trigger.method", "trigger.receivedAt"].some((prefix) => path.raw === prefix || path.raw.startsWith(`${prefix}.`))
       ) {
-        issues.push(issue(EXPRESSION_ERROR_CODES.accessDenied, "trigger expressions must use trigger.body.*, trigger.headers.*, trigger.query.*, trigger.method, or trigger.receivedAt", path.raw, namespace));
+        issues.push(issue(EXPRESSION_ERROR_CODES.accessDenied, "trigger expressions must use trigger.body.*, trigger.input.*, trigger.headers.*, trigger.query.*, trigger.method, or trigger.receivedAt", path.raw, namespace));
       }
     }
   } catch (error) {

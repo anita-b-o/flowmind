@@ -34,7 +34,9 @@ export type StepType =
   | "increment_variable"
   | "append_variable"
   | "for_each"
-  | "try_catch";
+  | "try_catch"
+  | "execute_workflow"
+  | "return_workflow_output";
 
 export type WorkflowVersionStatus = "DRAFT" | "ACTIVE" | "ARCHIVED";
 
@@ -50,7 +52,7 @@ export interface WorkflowStep {
   id: string;
   key: string;
   name: string;
-  type: StepType | "webhook_trigger";
+  type: StepType | "webhook_trigger" | "subworkflow_trigger";
   position: number;
   configJson: Record<string, unknown>;
   retryPolicyJson?: Record<string, unknown> | null;
@@ -67,6 +69,13 @@ export interface WorkflowDetail extends Workflow {
   versions: WorkflowVersion[];
 }
 
+export interface InvocableWorkflow {
+  id: string;
+  name: string;
+  activeVersion: { id: string; versionNumber: number } | null;
+  versions: Array<{ id: string; versionNumber: number; status: WorkflowVersionStatus }>;
+}
+
 export interface RetryPolicyDto {
   maxAttempts: number;
   backoffMs: number;
@@ -76,7 +85,7 @@ export interface RetryPolicyDto {
 export interface WorkflowStepDto {
   key: string;
   name: string;
-  type: StepType | "webhook_trigger";
+  type: StepType | "webhook_trigger" | "subworkflow_trigger";
   config: Record<string, unknown>;
   retryPolicy?: RetryPolicyDto;
   timeoutSeconds?: number;

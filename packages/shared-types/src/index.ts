@@ -68,7 +68,10 @@ export enum StepType {
   IncrementVariable = "increment_variable",
   AppendVariable = "append_variable",
   ForEach = "for_each",
-  TryCatch = "try_catch"
+  TryCatch = "try_catch",
+  ExecuteWorkflow = "execute_workflow",
+  ReturnWorkflowOutput = "return_workflow_output",
+  SubworkflowTrigger = "subworkflow_trigger"
 }
 
 export enum ConnectionType {
@@ -207,3 +210,4 @@ export * from "./data-store";
 export * from "./workflow-variables";
 export * from "./for-each";
 export * from "./try-catch";
+export * from "./subworkflow";

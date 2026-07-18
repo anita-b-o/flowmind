@@ -12,6 +12,7 @@ import type {
   WorkflowTestRunComparison,
   WorkflowTestRunDetail,
   WorkflowTestRunListResponse
+  ,InvocableWorkflow
 } from "./types";
 
 export function useWorkflows() {
@@ -19,6 +20,10 @@ export function useWorkflows() {
     queryKey: ["workflows"],
     queryFn: () => apiClient.get<Workflow[]>("/workflows")
   });
+}
+
+export function useInvocableWorkflows() {
+  return useQuery({ queryKey: ["workflows", "invocable"], queryFn: () => apiClient.get<InvocableWorkflow[]>("/workflows/invocable") });
 }
 
 export function useWorkflow(workflowId: string) {

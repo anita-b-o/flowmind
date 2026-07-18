@@ -17,6 +17,7 @@ import type { RuntimeGraph } from "./graph/graph-validator";
 import { StepExecutor, type StepExecutionRecord } from "./step-executor";
 import { NonRetryableStepError } from "./step-errors";
 import { TryCatchExecutionService } from "./try-catch-execution.service";
+import { ExecuteWorkflowExecutionService } from "./execute-workflow-execution.service";
 
 export type ForEachStepRow = {
   id?: string | null;
@@ -53,7 +54,8 @@ export class ForEachExecutionService {
     private readonly expressionResolver: ExpressionResolver,
     private readonly logger?: WorkerLoggerService,
     private readonly metrics?: WorkerMetricsService,
-    @Optional() @Inject(forwardRef(() => TryCatchExecutionService)) private readonly tryCatch?: TryCatchExecutionService
+    @Optional() @Inject(forwardRef(() => TryCatchExecutionService)) private readonly tryCatch?: TryCatchExecutionService,
+    private readonly executeWorkflow?: ExecuteWorkflowExecutionService
   ) {}
 
   async execute(input: {
@@ -114,6 +116,17 @@ export class ForEachExecutionService {
             const selected = doneEdge.to;
             if (!selected) throw new NonRetryableStepError(`FOR_EACH Body cannot resolve next step after ${step.key}`);
             nextStepKey = selected;
+            state.currentStepKey = nextStepKey === input.doneStepKey ? undefined : nextStepKey;
+            await this.checkpoint(input.loopStepExecution.id, state, summary(state, config));
+            continue;
+          }
+          if (step.type === "execute_workflow") {
+            if (!this.executeWorkflow) throw new NonRetryableStepError("EXECUTE_WORKFLOW runtime service is unavailable");
+            const result = await this.executeWorkflow.execute({ organizationId: input.organizationId, executionId: input.executionId, correlationId: input.correlationId, step, stepExecution: stepExecution as any, context: frame, executionPath, iterationIndex });
+            if (result.outcome === "waiting") { state.currentStepKey = nextStepKey; await this.checkpoint(input.loopStepExecution.id, state, summary(state, config)); return result; }
+            frame.steps[step.key] = { status: StepExecutionStatus.Completed, output: result.output };
+            lastOutput = result.output; lastStatus = StepExecutionStatus.Completed;
+            nextStepKey = selectedNextStepKey(input.graph, step.key, result.output) ?? input.doneStepKey;
             state.currentStepKey = nextStepKey === input.doneStepKey ? undefined : nextStepKey;
             await this.checkpoint(input.loopStepExecution.id, state, summary(state, config));
             continue;

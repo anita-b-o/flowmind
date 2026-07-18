@@ -71,6 +71,13 @@ function validateStepConfig(step: NonNullable<WorkflowDraftModel["stepsByKey"][s
     requiredString(config.subject, issues, step.key, "Subject is required.");
     requiredString(config.text, issues, step.key, "Body is required.");
   }
+  if (step.type === "execute_workflow") {
+    requiredString(config.workflowId, issues, step.key, "Workflow is required.");
+    if (!["PUBLISHED", "PINNED_VERSION"].includes(String(config.versionPolicy ?? ""))) issues.push(error("invalid_subworkflow_policy", "Version policy is invalid.", step.key));
+    if (config.versionPolicy === "PINNED_VERSION") requiredString(config.workflowVersionId, issues, step.key, "Version is required.");
+    if (!(typeof config.input === "string" && config.input.includes("{{"))) optionalJson(config.input, issues, step.key, "Input must be valid JSON or an expression value.");
+  }
+  if (step.type === "return_workflow_output" && !(typeof config.output === "string" && config.output.includes("{{"))) optionalJson(config.output, issues, step.key, "Output must be valid JSON or an expression value.");
   if (step.type === "database_record") {
     requiredString(config.collection, issues, step.key, "Collection is required.");
     if (typeof config.collection === "string" && config.collection && !COLLECTION_PATTERN.test(config.collection)) issues.push(error("invalid_collection", "Collection may only contain letters, numbers, _ or -.", step.key));

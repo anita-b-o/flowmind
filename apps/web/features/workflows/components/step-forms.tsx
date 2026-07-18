@@ -10,6 +10,7 @@ import { catalogForSteps } from "../expressions";
 import { ExpressionPreview } from "./expression-preview";
 import { VariablePicker } from "./variable-picker";
 import { DelayStepForm, ForEachStepForm, IfStepForm, SwitchStepForm, TryCatchStepForm, WaitUntilStepForm } from "./control-step-forms";
+import { useInvocableWorkflows } from "../hooks";
 
 type StepFormProps = {
   index: number;
@@ -54,6 +55,8 @@ export function StepForm({ index, type, register, errors, disabled, setValue, ge
   if (type === "try_catch") {
     return <TryCatchStepForm index={index} register={register} errors={errors} disabled={disabled} setValue={setValue} getValues={getValues} />;
   }
+  if (type === "execute_workflow") return <ExecuteWorkflowStepForm index={index} register={register} errors={errors} disabled={disabled} setValue={setValue} getValues={getValues} />;
+  if (type === "return_workflow_output") return <ReturnWorkflowOutputStepForm index={index} register={register} errors={errors} disabled={disabled} setValue={setValue} getValues={getValues} />;
   if (type === "delay") {
     return <DelayStepForm index={index} register={register} errors={errors} disabled={disabled} setValue={setValue} getValues={getValues} />;
   }
@@ -61,6 +64,24 @@ export function StepForm({ index, type, register, errors, disabled, setValue, ge
     return <WaitUntilStepForm index={index} register={register} errors={errors} disabled={disabled} setValue={setValue} getValues={getValues} />;
   }
   return <ConditionalStepForm index={index} register={register} errors={errors} disabled={disabled} setValue={setValue} getValues={getValues} />;
+}
+
+function ExecuteWorkflowStepForm({ index, register, errors, disabled, getValues }: StepFormProps) {
+  const workflows = useInvocableWorkflows();
+  const workflowId = String(getValues(`steps.${index}.config.workflowId`) ?? "");
+  const selected = workflows.data?.find((workflow) => workflow.id === workflowId);
+  const policy = String(getValues(`steps.${index}.config.versionPolicy`) ?? "PUBLISHED");
+  return <div className="stack">
+    <label>Workflow<select disabled={disabled || workflows.isLoading} {...register(`steps.${index}.config.workflowId`)}><option value="">Select a workflow</option>{workflows.data?.map((workflow) => <option key={workflow.id} value={workflow.id}>{workflow.name}{workflow.activeVersion ? ` (v${workflow.activeVersion.versionNumber})` : ""}</option>)}</select><FieldError message={configError(errors, index, "workflowId")} /></label>
+    <label>Version policy<select disabled={disabled} {...register(`steps.${index}.config.versionPolicy`)}><option value="PUBLISHED">Published</option><option value="PINNED_VERSION">Pinned version</option></select></label>
+    {policy === "PINNED_VERSION" && <label>Version<select disabled={disabled || !selected} {...register(`steps.${index}.config.workflowVersionId`)}><option value="">Select a version</option>{selected?.versions.map((version) => <option key={version.id} value={version.id}>v{version.versionNumber} · {version.status}</option>)}</select><FieldError message={configError(errors, index, "workflowVersionId")} /></label>}
+    <label>Input<textarea rows={6} disabled={disabled} {...register(`steps.${index}.config.input`)} /></label>
+    <label>Timeout seconds<input type="number" min={1} max={120} disabled={disabled} {...register(`steps.${index}.config.timeoutSeconds`, { valueAsNumber: true })} /></label>
+  </div>;
+}
+
+function ReturnWorkflowOutputStepForm({ index, register, disabled }: StepFormProps) {
+  return <label>Output<textarea rows={6} disabled={disabled} {...register(`steps.${index}.config.output`)} /></label>;
 }
 
 export function HttpStepForm({ index, register, errors, disabled, setValue, getValues }: StepFormProps) {

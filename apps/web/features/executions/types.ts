@@ -84,6 +84,14 @@ export interface ExecutionDetail extends ExecutionSummary {
   deadLetter: ExecutionDeadLetter | null;
   deadLetters: ExecutionDeadLetter[];
   steps: StepExecutionDetail[];
+  output: unknown;
+  parentExecutionId: string | null;
+  parentStepExecutionId: string | null;
+  rootExecutionId: string;
+  depth: number;
+  parentExecution: { id: string; status: ExecutionStatus; workflowId: string; completedAt: string | null } | null;
+  parentStepExecution: { id: string; stepKey: string; executionPath: string } | null;
+  childExecutions: Array<{ id: string; status: ExecutionStatus; workflowId: string; workflowVersionId: string; depth: number; createdAt: string; startedAt: string | null; completedAt: string | null }>;
 }
 
 export interface ExecutionActor {

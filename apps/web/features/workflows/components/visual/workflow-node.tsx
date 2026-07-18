@@ -12,7 +12,7 @@ export function WorkflowNode({ id, data, selected }: NodeProps<WorkflowFlowNode>
   const isSwitch = data.type === "switch";
   const isForEach = data.type === "for_each";
   const isTryCatch = data.type === "try_catch";
-  const isTerminalCapable = !isIf && !isSwitch && !isForEach && !isTryCatch;
+  const isTerminalCapable = !isIf && !isSwitch && !isForEach && !isTryCatch && data.type !== "return_workflow_output";
   const debugClass = data.debugStatus ? `debug-${data.debugStatus}` : "";
 
   return (

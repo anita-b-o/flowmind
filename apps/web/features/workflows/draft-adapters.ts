@@ -66,8 +66,9 @@ export function formValueToDraft(form: WorkflowEditorFormValue, draft: WorkflowD
 export function draftToWorkflowDefinitionDto(draft: WorkflowDraftModel): WorkflowDefinitionDto {
   const form = draftToFormValue(draft);
   const graph = draftToGraph(draft);
+  const subworkflow = form.steps.some((step) => step.type === "return_workflow_output");
   return {
-    trigger: draft.trigger,
+    trigger: subworkflow ? { key: "subworkflow", name: "Subworkflow Input", type: "subworkflow_trigger", config: {} } : draft.trigger,
     steps: form.steps.map((step, index) => stepFormToDto(step, index)),
     expressionMode: "strict",
     workflowDefinitionSchemaVersion: 2,

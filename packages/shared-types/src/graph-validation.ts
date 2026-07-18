@@ -37,7 +37,9 @@ const STEP_TYPES = {
   Delay: "delay",
   WaitUntil: "wait_until",
   ForEach: "for_each",
-  TryCatch: "try_catch"
+  TryCatch: "try_catch",
+  ExecuteWorkflow: "execute_workflow",
+  ReturnWorkflowOutput: "return_workflow_output"
 } as const;
 const DURATION_PATTERN = /^\s*([1-9][0-9]*)\s+(second|seconds|minute|minutes|hour|hours)\s*$/i;
 
@@ -112,9 +114,25 @@ export function validateGraphV2(steps: GraphStepLike[], graph: GraphLike | undef
     }
     if (step.type === STEP_TYPES.Delay) validateDelay(step, issues);
     if (step.type === STEP_TYPES.WaitUntil) validateWaitUntil(step, issues);
+    if (step.type === STEP_TYPES.ExecuteWorkflow) validateExecuteWorkflow(step, issues);
+    if (step.type === STEP_TYPES.ReturnWorkflowOutput) validateReturnWorkflowOutput(step, edges, issues);
   }
 
   return issues;
+}
+
+function validateExecuteWorkflow(step: GraphStepLike, issues: GraphValidationIssue[]) {
+  const workflowId = stringValue(step.config.workflowId);
+  const policy = stringValue(step.config.versionPolicy);
+  if (!workflowId) issues.push(issue("invalid_subworkflow", "EXECUTE_WORKFLOW requires a workflow.", step.key));
+  if (policy !== "PUBLISHED" && policy !== "PINNED_VERSION") issues.push(issue("invalid_subworkflow_policy", "EXECUTE_WORKFLOW version policy is invalid.", step.key));
+  if (policy === "PINNED_VERSION" && !stringValue(step.config.workflowVersionId)) issues.push(issue("invalid_subworkflow_version", "Pinned policy requires a workflow version.", step.key));
+  const timeout = Number(step.config.timeoutSeconds ?? 120);
+  if (!Number.isInteger(timeout) || timeout < 1 || timeout > 120) issues.push(issue("invalid_subworkflow_timeout", "EXECUTE_WORKFLOW timeout must be between 1 and 120 seconds.", step.key));
+}
+
+function validateReturnWorkflowOutput(step: GraphStepLike, edges: GraphEdgeLike[], issues: GraphValidationIssue[]) {
+  if (outgoingEdges(step.key, edges).length) issues.push(issue("return_has_output", "RETURN_WORKFLOW_OUTPUT cannot have outgoing connections.", step.key));
 }
 
 export type ForEachRegion = { loopStepKey: string; bodyEntryStepKey: string; doneStepKey: string; bodyStepKeys: Set<string> };

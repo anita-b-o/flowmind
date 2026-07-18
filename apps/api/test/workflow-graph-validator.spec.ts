@@ -2,6 +2,19 @@ import { BadRequestException } from "@nestjs/common";
 import { validateWorkflowGraph } from "../src/workflows/workflow-graph-validator";
 
 describe("workflow graph validator", () => {
+  it("accepts EXECUTE_WORKFLOW and terminal RETURN_WORKFLOW_OUTPUT contracts", () => {
+    expect(() => validateWorkflowGraph([
+      { key: "call", type: "execute_workflow", config: { workflowId: "workflow-child", versionPolicy: "PUBLISHED", input: {}, timeoutSeconds: 30 } },
+      { key: "return", type: "return_workflow_output", config: { output: "{{steps.call.output.output}}" } }
+    ], { entryStepKey: "call", edges: [{ from: "call", to: "return", kind: "next" }], terminalStepKeys: ["return"] })).not.toThrow();
+  });
+
+  it("rejects invalid subworkflow policy, timeout, and outgoing return edges", () => {
+    expect(() => validateWorkflowGraph([
+      { key: "return", type: "return_workflow_output", config: {} },
+      { key: "call", type: "execute_workflow", config: { workflowId: "child", versionPolicy: "PINNED_VERSION", timeoutSeconds: 121 } }
+    ], { entryStepKey: "return", edges: [{ from: "return", to: "call", kind: "next" }] })).toThrow(BadRequestException);
+  });
   it("accepts acyclic if graphs", () => {
     expect(() =>
       validateWorkflowGraph(

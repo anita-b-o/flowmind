@@ -1,7 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { emptyStep, keepCompatibleConfig, toWorkflowDefinition, workflowEditorSchema, type WorkflowEditorFormValue } from "./workflow-builder";
+import { emptyStep, keepCompatibleConfig, serializeStepConfig, toWorkflowDefinition, workflowEditorSchema, type WorkflowEditorFormValue } from "./workflow-builder";
 
 describe("workflow builder model", () => {
+  it("serializes version policies, mapped input and explicit output", () => {
+    const published = emptyStep(0, "execute_workflow");
+    published.config = { workflowId: "child", versionPolicy: "PUBLISHED", input: '{"customerId":"{{trigger.body.customerId}}"}', timeoutSeconds: 30 };
+    expect(serializeStepConfig(published)).toEqual({ workflowId: "child", versionPolicy: "PUBLISHED", input: { customerId: "{{trigger.body.customerId}}" }, timeoutSeconds: 30 });
+    const pinned = emptyStep(1, "execute_workflow");
+    pinned.config = { workflowId: "child", versionPolicy: "PINNED_VERSION", workflowVersionId: "version-1", input: "{{item}}", timeoutSeconds: 120 };
+    expect(serializeStepConfig(pinned)).toMatchObject({ workflowVersionId: "version-1", input: "{{item}}" });
+    const returned = emptyStep(2, "return_workflow_output"); returned.config = { output: '{"processed":true}' };
+    expect(serializeStepConfig(returned)).toEqual({ output: { processed: true } });
+  });
   it("validates required per-type fields and retry bounds", () => {
     const invalid: WorkflowEditorFormValue = {
       name: "Lead flow",

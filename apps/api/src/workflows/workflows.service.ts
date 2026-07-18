@@ -20,6 +20,7 @@ import {
   WorkflowStatus,
   WorkflowVariableValidationError,
   WorkflowVersionStatus
+  ,normalizeExecuteWorkflowConfig
 } from "@automation/shared-types";
 import { PrismaService } from "../prisma/prisma.service";
 import { CreateWorkflowDto } from "./dto/create-workflow.dto";
@@ -49,6 +50,15 @@ export class WorkflowsService {
       include: { activeVersion: true },
       orderBy: { updatedAt: "desc" }
     });
+  }
+
+  async listInvocable(organizationId: string) {
+    const workflows = await this.prisma.workflow.findMany({
+      where: { organizationId, versions: { some: { activatedAt: { not: null }, status: { in: [WorkflowVersionStatus.Active, WorkflowVersionStatus.Archived] } } } },
+      select: { id: true, name: true, activeVersion: { select: { id: true, versionNumber: true } }, versions: { where: { activatedAt: { not: null }, status: { in: [WorkflowVersionStatus.Active, WorkflowVersionStatus.Archived] } }, select: { id: true, versionNumber: true, status: true }, orderBy: { versionNumber: "desc" } } },
+      orderBy: { name: "asc" }
+    });
+    return workflows.filter((workflow) => workflow.versions.length > 0);
   }
 
   async detail(organizationId: string, workflowId: string) {
@@ -105,6 +115,8 @@ export class WorkflowsService {
     const workflowVariables = this.validateVariableMap(dto.workflowVariables, "workflow variables");
     const environmentVariables = this.validateVariableMap(dto.environmentVariables, "environment variables");
     this.validateStepConfigs(dto.steps);
+    this.validateEntrypoint(dto.trigger, dto.steps, schemaVersion === 2 ? dto.graph : undefined);
+    await this.validateSubworkflowReferences(organizationId, workflowId, dto.steps);
     await this.validateConnectionReferences(organizationId, [...dto.steps, dto.trigger]);
     this.validateExpressions(dto.steps, schemaVersion === 2 ? dto.graph : undefined);
     const versionNumber = (latest?.versionNumber ?? 0) + 1;
@@ -175,6 +187,7 @@ export class WorkflowsService {
       throw new NotFoundException("Workflow version not found");
     }
     const definition = isRecord(version.definitionJson) ? version.definitionJson : {};
+    await this.validateSubworkflowReferences(organizationId, workflowId, (definition.steps as any[]) ?? []);
     if (definition.workflowDefinitionSchemaVersion === 2) {
       try {
         validateWorkflowGraph((definition.steps as Array<{ key: string; type: string; config: Record<string, unknown> }>) ?? [], definition.graph as Record<string, unknown>);
@@ -246,6 +259,43 @@ export class WorkflowsService {
     }
   }
 
+  private validateEntrypoint(trigger: { type: string }, steps: Array<{ key: string; type: string }>, graph?: Record<string, unknown>) {
+    if (![StepType.WebhookTrigger, StepType.SubworkflowTrigger].includes(trigger.type as StepType)) throw new BadRequestException("Workflow trigger type is invalid");
+    const returns = steps.filter((step) => step.type === StepType.ReturnWorkflowOutput);
+    if (trigger.type !== StepType.SubworkflowTrigger && returns.length) throw new BadRequestException("RETURN_WORKFLOW_OUTPUT is only valid for subworkflow entrypoints");
+    if (graph) {
+      const controlled = [...forEachRegions(steps as any, graph).flatMap((region) => [...region.bodyStepKeys]), ...tryCatchRegions(steps as any, graph).flatMap((region) => [...region.bodyStepKeys, ...region.catchStepKeys, ...region.finallyStepKeys])];
+      if (returns.some((step) => controlled.includes(step.key))) throw new BadRequestException("RETURN_WORKFLOW_OUTPUT cannot be used inside FOR_EACH or TRY_CATCH regions");
+    }
+  }
+
+  private async validateSubworkflowReferences(organizationId: string, sourceWorkflowId: string, steps: Array<{ type: string; config: Record<string, unknown> }>) {
+    for (const step of steps.filter((entry) => entry.type === StepType.ExecuteWorkflow)) {
+      let config;
+      try { config = normalizeExecuteWorkflowConfig(step.config); } catch (error) { throw new BadRequestException(error instanceof Error ? error.message : "Invalid EXECUTE_WORKFLOW config"); }
+      if (config.workflowId === sourceWorkflowId) throw new BadRequestException("A workflow cannot execute itself");
+      const target = await this.prisma.workflow.findFirst({ where: { id: config.workflowId, organizationId }, select: { id: true, activeVersionId: true } });
+      if (!target) throw new BadRequestException("EXECUTE_WORKFLOW references an unavailable workflow");
+      const versionId = config.versionPolicy === "PINNED_VERSION" ? config.workflowVersionId : target.activeVersionId;
+      if (!versionId) throw new BadRequestException("EXECUTE_WORKFLOW target has no published version");
+      const version = await this.prisma.workflowVersion.findFirst({ where: { id: versionId, workflowId: target.id, organizationId, activatedAt: { not: null }, status: { in: [WorkflowVersionStatus.Active, WorkflowVersionStatus.Archived] } }, select: { id: true, definitionJson: true } });
+      if (!version) throw new BadRequestException("EXECUTE_WORKFLOW version is not published");
+      await this.assertNoPublishedCycle(organizationId, sourceWorkflowId, target.id, new Set([sourceWorkflowId]));
+    }
+  }
+
+  private async assertNoPublishedCycle(organizationId: string, sourceWorkflowId: string, workflowId: string, ancestry: Set<string>): Promise<void> {
+    if (ancestry.has(workflowId)) throw new BadRequestException("Subworkflow dependency cycle detected");
+    const nextAncestry = new Set(ancestry).add(workflowId);
+    const workflow = await this.prisma.workflow.findFirst({ where: { id: workflowId, organizationId }, include: { activeVersion: true } });
+    const definition = isRecord(workflow?.activeVersion?.definitionJson) ? workflow!.activeVersion!.definitionJson as Record<string, unknown> : {};
+    const steps = Array.isArray(definition.steps) ? definition.steps as Array<{ type: string; config: Record<string, unknown> }> : [];
+    for (const step of steps.filter((entry) => entry.type === StepType.ExecuteWorkflow)) {
+      const targetId = stringValue(step.config?.workflowId);
+      if (targetId) await this.assertNoPublishedCycle(organizationId, sourceWorkflowId, targetId, nextAncestry);
+    }
+  }
+
   private validateExpressions(steps: Array<{ key: string; type: string; config: Record<string, unknown> }>, graph?: Record<string, unknown>) {
     const loopRegions = graph ? forEachRegions(steps, graph) : [];
     const tryRegions = graph ? tryCatchRegions(steps, graph) : [];
@@ -280,6 +330,9 @@ export class WorkflowsService {
       }
       if (isVariableStep(step.type)) {
         this.validateVariableStepConfig(step.type, step.config);
+      }
+      if (step.type === StepType.ExecuteWorkflow) {
+        try { normalizeExecuteWorkflowConfig(step.config); } catch (error) { throw new BadRequestException(error instanceof Error ? error.message : "Invalid EXECUTE_WORKFLOW config"); }
       }
     }
   }

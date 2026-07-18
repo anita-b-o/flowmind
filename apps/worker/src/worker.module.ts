@@ -45,6 +45,8 @@ import { DataStoreListRecordsHandler } from "./engine/handlers/data-store/list-r
 import { AppendVariableHandler, DeleteVariableHandler, GetVariableHandler, IncrementVariableHandler, SetVariableHandler } from "./engine/handlers/variables.handler";
 import { ForEachExecutionService } from "./engine/for-each-execution.service";
 import { TryCatchExecutionService } from "./engine/try-catch-execution.service";
+import { ExecuteWorkflowExecutionService } from "./engine/execute-workflow-execution.service";
+import { ReturnWorkflowOutputHandler } from "./engine/handlers/return-workflow-output.handler";
 
 const redisUrl = new URL(process.env.REDIS_URL ?? "redis://localhost:6379");
 
@@ -64,6 +66,7 @@ const redisUrl = new URL(process.env.REDIS_URL ?? "redis://localhost:6379");
     WorkflowRunner,
     ForEachExecutionService,
     TryCatchExecutionService,
+    ExecuteWorkflowExecutionService,
     StepExecutor,
     StepRegistry,
     ExpressionResolver,
@@ -106,6 +109,7 @@ const redisUrl = new URL(process.env.REDIS_URL ?? "redis://localhost:6379");
     AppendVariableHandler,
     AiHandler,
     EmailNotificationHandler
+    ,ReturnWorkflowOutputHandler
   ]
 })
 export class WorkerModule {}

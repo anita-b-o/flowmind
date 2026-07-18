@@ -236,6 +236,9 @@ export class WorkerMetricsService implements OnModuleInit, OnModuleDestroy {
   readonly tryUnhandledErrors = new Counter({ name: "flowmind_try_unhandled_errors_total", help: "Errors left unhandled by TRY_CATCH.", labelNames: ["error_category"], registers: [this.registry] });
   readonly tryFinallyFailures = new Counter({ name: "flowmind_try_finally_failures_total", help: "TRY_CATCH Finally failures.", labelNames: ["error_category"], registers: [this.registry] });
   readonly tryDuration = new Histogram({ name: "flowmind_try_duration_seconds", help: "TRY_CATCH duration by outcome and error category.", labelNames: ["outcome", "error_category"], buckets: STEP_BUCKETS, registers: [this.registry] });
+  readonly subworkflowExecutions = new Counter({ name: "flowmind_subworkflow_executions_total", help: "Subworkflow executions by outcome and version policy.", labelNames: ["outcome", "version_policy"], registers: [this.registry] });
+  readonly subworkflowDuration = new Histogram({ name: "flowmind_subworkflow_duration_seconds", help: "Subworkflow duration by outcome and version policy.", labelNames: ["outcome", "version_policy"], buckets: STEP_BUCKETS, registers: [this.registry] });
+  readonly subworkflowDepthExceeded = new Counter({ name: "flowmind_subworkflow_depth_exceeded_total", help: "Subworkflow depth limit violations.", registers: [this.registry] });
 
   constructor() {
     this.registry.setDefaultLabels({ service: "worker" });
@@ -312,6 +315,9 @@ export class WorkerMetricsService implements OnModuleInit, OnModuleDestroy {
   }
 
   recordTryFinallyFailure(category: string) { this.tryFinallyFailures.inc({ error_category: safeReason(category) }); }
+
+  recordSubworkflow(outcome: string, policy: string, durationSeconds = 0) { const labels = { outcome: safeReason(outcome), version_policy: policy === "PINNED_VERSION" ? "pinned_version" : "published" }; this.subworkflowExecutions.inc(labels); this.subworkflowDuration.observe(labels, Math.max(0, durationSeconds)); }
+  recordSubworkflowDepthExceeded() { this.subworkflowDepthExceeded.inc(); }
 
   recordTransform(mode: string | undefined, outcome: TransformOutcome, durationSeconds: number, category?: string) {
     const safeMode = safeTransformMode(mode);
