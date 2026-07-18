@@ -15,6 +15,7 @@ import {
   StepType,
   ttlSecondsToExpiresAt,
   validateTransformStepConfig,
+  forEachRegions,
   WorkflowStatus,
   WorkflowVariableValidationError,
   WorkflowVersionStatus
@@ -245,10 +246,15 @@ export class WorkflowsService {
   }
 
   private validateExpressions(steps: Array<{ key: string; type: string; config: Record<string, unknown> }>, graph?: Record<string, unknown>) {
+    const loopRegions = graph ? forEachRegions(steps, graph) : [];
     const previous: string[] = [];
     for (const step of steps) {
-      const available = graph ? graphAvailableStepKeys(step.key, steps, graph) : previous;
-      this.expressions?.validateValue(step.config, available, step.key, step.type === StepType.Transform ? ["item", "index"] : undefined);
+      let available = graph ? graphAvailableStepKeys(step.key, steps, graph) : previous;
+      for (const region of loopRegions) {
+        if (!region.bodyStepKeys.has(step.key)) available = available.filter((key) => !region.bodyStepKeys.has(key));
+      }
+      const inLoopBody = loopRegions.some((region) => region.bodyStepKeys.has(step.key));
+      this.expressions?.validateValue(step.config, available, step.key, step.type === StepType.Transform || inLoopBody ? ["item", "index"] : undefined);
       previous.push(step.key);
     }
   }

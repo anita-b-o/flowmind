@@ -12,6 +12,7 @@ import { WorkerLoggerService } from "../observability/worker-logger.service";
 import { WorkerMetricsService } from "../metrics/worker-metrics.service";
 import { branchSkipKeys, isDone, isTerminal, selectedNextStepKey } from "./graph/graph-planner";
 import { parseRuntimeGraph, validateRuntimeGraph, type RuntimeGraph } from "./graph/graph-validator";
+import { ForEachExecutionService } from "./for-each-execution.service";
 
 export type WorkflowRunResult = { status: "completed" | "skipped" | "lost_lease" } | { status: "waiting"; nextRetryAt: Date };
 
@@ -35,7 +36,8 @@ export class WorkflowRunner {
     private readonly leaseService: ExecutionLeaseService,
     private readonly deadLetterService: DeadLetterService,
     private readonly logger?: WorkerLoggerService,
-    private readonly metrics?: WorkerMetricsService
+    private readonly metrics?: WorkerMetricsService,
+    private readonly forEach?: ForEachExecutionService
   ) {}
 
   async run(payload: ExecutionJobPayload): Promise<WorkflowRunResult> {
@@ -306,6 +308,38 @@ export class WorkflowRunner {
         step
       });
 
+      if (step.type === "for_each") {
+        if (!this.forEach) throw new Error("FOR_EACH runtime service is unavailable");
+        const bodyEdge = graph.edges.find((edge) => edge.from === step.key && edge.kind === "for_each_body");
+        const doneEdge = graph.edges.find((edge) => edge.from === step.key && edge.kind === "for_each_done");
+        if (!bodyEdge || !doneEdge || bodyEdge.to === doneEdge.to) throw new Error("FOR_EACH graph connections are invalid");
+        const bodyStepKeys = bodyRegion(graph, bodyEdge.to, doneEdge.to);
+        const outcome = await this.forEach.execute({
+          organizationId: current.organizationId,
+          executionId: current.id,
+          correlationId: (current as any).correlationId,
+          loopStep: step,
+          loopStepExecution: stepExecution as any,
+          graph,
+          bodyEntryStepKey: bodyEdge.to,
+          doneStepKey: doneEdge.to,
+          bodyStepKeys,
+          stepRowsByKey,
+          runtimeContext
+        });
+        await this.updateContextCache(current.id, runtimeContext);
+        if (outcome.outcome === "waiting") {
+          await this.markWaiting(current.id);
+          stopHeartbeat();
+          await this.leaseService.release(current.id);
+          return { status: "waiting", nextRetryAt: outcome.nextRetryAt };
+        }
+        runtimeContext.setStepResult(step.key, StepExecutionStatus.Completed, outcome.output);
+        current = await this.reload(payload);
+        nextStepKey = doneEdge.to;
+        continue;
+      }
+
       if (stepExecution.status === StepExecutionStatus.Retrying && stepExecution.nextRetryAt && stepExecution.nextRetryAt > new Date()) {
         await this.markWaiting(current.id);
         stopHeartbeat();
@@ -324,7 +358,7 @@ export class WorkflowRunner {
         runtimeContext.setStepResult(step.key, outcome.result.status, outcome.result.output);
         await this.updateContextCache(current.id, runtimeContext);
         current = await this.reload(payload);
-          stepExecution = current.steps.find((entry) => entry.stepKey === step.key) as typeof stepExecution;
+          stepExecution = current.steps.find((entry) => entry.stepKey === step.key && (entry as any).executionPath === "root") as typeof stepExecution;
       }
 
       if (stepExecution.status === StepExecutionStatus.Failed && stepExecution.attemptCount >= stepExecution.maxAttempts) {
@@ -371,7 +405,7 @@ export class WorkflowRunner {
         current = await this.reload(payload);
       }
 
-      const latest = current.steps.find((entry) => entry.stepKey === step.key);
+      const latest = current.steps.find((entry) => entry.stepKey === step.key && (entry as any).executionPath === "root");
       const selected = selectedNextStepKey(graph, step.key, latest?.outputJson);
       if (selected) {
         nextStepKey = selected;
@@ -467,7 +501,7 @@ export class WorkflowRunner {
     workflowVersion?: { definitionJson: unknown; workflow?: { name: string; organization?: { id: string; slug?: string | null } } | null } | null;
     steps: Array<{ stepKey: string; status: string; outputJson: unknown }>;
   }) {
-    const context = this.contextReconstructor.reconstruct(withRuntimeDefinition(execution), execution.steps);
+    const context = this.contextReconstructor.reconstruct(withRuntimeDefinition(execution), execution.steps.filter((step: any) => (step.executionPath ?? "root") === "root"));
     const [organizationVariables, workflowVariables] = await Promise.all([
       this.loadOrganizationVariables(execution.organizationId),
       this.loadWorkflowVariables(execution.organizationId, execution.workflowId)
@@ -528,7 +562,7 @@ export class WorkflowRunner {
   }
 
   private async assertNoFailedSteps(executionId: string) {
-    const failed = await this.prisma.stepExecution.count({ where: { executionId, status: StepExecutionStatus.Failed } });
+    const failed = await this.prisma.stepExecution.count({ where: { executionId, status: StepExecutionStatus.Failed, errorHandled: false } });
     if (failed > 0) throw new Error("Execution cannot complete with failed steps");
   }
 
@@ -642,4 +676,15 @@ function deadLetterReason(stepType?: string, effectStatus?: string | null, error
 
 function toJson(value: unknown): Prisma.InputJsonValue {
   return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
+}
+
+function bodyRegion(graph: RuntimeGraph, start: string, done: string) {
+  const seen = new Set<string>();
+  const visit = (key: string) => {
+    if (key === done || seen.has(key)) return;
+    seen.add(key);
+    for (const edge of graph.edges.filter((candidate) => candidate.from === key)) visit(edge.to);
+  };
+  visit(start);
+  return seen;
 }

@@ -63,6 +63,8 @@ export function graphKindToHandle(edge: WorkflowGraphDto["edges"][number]) {
   if (edge.kind === "if_false") return "false";
   if (edge.kind === "switch_case") return `case:${edge.caseKey ?? edge.label ?? ""}`;
   if (edge.kind === "switch_default") return "default";
+  if (edge.kind === "for_each_body") return "body";
+  if (edge.kind === "for_each_done") return "done";
   return "next";
 }
 
@@ -71,6 +73,8 @@ export function handleToGraphKind(handle: string): WorkflowGraphDto["edges"][num
   if (handle === "false") return "if_false";
   if (handle === "default") return "switch_default";
   if (handle.startsWith("case:")) return "switch_case";
+  if (handle === "body") return "for_each_body";
+  if (handle === "done") return "for_each_done";
   return "next";
 }
 
@@ -83,7 +87,7 @@ export function caseKeyFromHandle(handle: string) {
 }
 
 export function isExclusiveHandle(handle: string) {
-  return handle === "next" || handle === "true" || handle === "false" || handle === "default" || handle.startsWith("case:");
+  return handle === "next" || handle === "true" || handle === "false" || handle === "default" || handle === "body" || handle === "done" || handle.startsWith("case:");
 }
 
 export function sanitizeStepKey(raw: string) {

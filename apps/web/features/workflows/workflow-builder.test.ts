@@ -181,4 +181,23 @@ describe("workflow builder model", () => {
       text: ""
     });
   });
+
+  it("serializes FOR_EACH with explicit Body and Done edges", () => {
+    const values: WorkflowEditorFormValue = {
+      name: "Loop flow",
+      description: "",
+      steps: [
+        { ...emptyStep(0, "for_each"), key: "loop", name: "Loop", config: { ...emptyStep(0, "for_each").config, source: "{{trigger.body.items}}", itemVariable: "record", bodyStepKey: "body", doneStepKey: "done" } },
+        { ...emptyStep(1, "transform"), key: "body", name: "Body", config: { mode: "OBJECT", fields: "{\"id\":\"{{item.id}}\"}", outputType: "OBJECT", nextStepKey: "done" } },
+        { ...emptyStep(2, "database_record"), key: "done", name: "Done", config: { collection: "summary", data: "{}" } }
+      ]
+    };
+    const definition = toWorkflowDefinition(values);
+    expect(definition.steps[0].config).toMatchObject({ source: "{{trigger.body.items}}", itemVariable: "record", mode: "SEQUENTIAL", concurrency: 1, maxItems: 100, maxResults: 20 });
+    expect(definition.graph?.edges).toEqual(expect.arrayContaining([
+      { from: "loop", to: "body", kind: "for_each_body", label: "body" },
+      { from: "loop", to: "done", kind: "for_each_done", label: "done" },
+      { from: "body", to: "done", kind: "next" }
+    ]));
+  });
 });

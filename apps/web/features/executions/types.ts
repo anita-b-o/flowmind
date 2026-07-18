@@ -42,6 +42,8 @@ export interface StepExecutionDetail {
   workflowStepId: string;
   stepKey: string;
   stepType: string;
+  executionPath: string;
+  iterationIndex: number | null;
   status: StepStatus;
   publicStatus?: string;
   attempt: number;

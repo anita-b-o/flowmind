@@ -252,6 +252,8 @@ export class ExecutionsService {
         workflowStepId: step.workflowStepId,
         stepKey: step.stepKey,
         stepType: step.stepType,
+        executionPath: step.executionPath,
+        iterationIndex: step.iterationIndex,
         status: step.status,
         publicStatus: step.status === StepExecutionStatus.Retrying ? "waiting" : publicStepStatus(step.status),
         attempt: step.attempt,
@@ -265,7 +267,7 @@ export class ExecutionsService {
         durationMs: step.durationMs,
         errorCategory: (step.errorJson as any)?.classification ?? null,
         error: sanitizePublic(step.errorJson),
-        input: sanitizePayload(step.inputJson),
+        input: step.stepType === "for_each" ? loopInputSummary(step.inputJson) : sanitizePayload(step.inputJson),
         output: sanitizePayload(step.outputJson),
         providerMetadata: sanitizePayload((step.debugJson as any)?.connection ?? null)
       })),
@@ -672,6 +674,12 @@ function durationMs(start?: Date | null, end?: Date | null) {
 
 function sanitizePayload(value: unknown) {
   return sanitizePublic(value);
+}
+
+function loopInputSummary(value: unknown) {
+  const record = value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, any> : {};
+  const state = record.forEachState && typeof record.forEachState === "object" ? record.forEachState as Record<string, any> : {};
+  return sanitizePublic({ total: Array.isArray(state.items) ? state.items.length : 0, nextIteration: state.nextIndex ?? 0, currentStepKey: state.currentStepKey ?? null });
 }
 
 function toJson(value: unknown): Prisma.InputJsonValue {

@@ -43,6 +43,7 @@ import { DataStoreExistsRecordHandler } from "./engine/handlers/data-store/exist
 import { DataStoreCountRecordsHandler } from "./engine/handlers/data-store/count-records.handler";
 import { DataStoreListRecordsHandler } from "./engine/handlers/data-store/list-records.handler";
 import { AppendVariableHandler, DeleteVariableHandler, GetVariableHandler, IncrementVariableHandler, SetVariableHandler } from "./engine/handlers/variables.handler";
+import { ForEachExecutionService } from "./engine/for-each-execution.service";
 
 const redisUrl = new URL(process.env.REDIS_URL ?? "redis://localhost:6379");
 
@@ -60,6 +61,7 @@ const redisUrl = new URL(process.env.REDIS_URL ?? "redis://localhost:6379");
     PrismaService,
     ExecutionsProcessor,
     WorkflowRunner,
+    ForEachExecutionService,
     StepExecutor,
     StepRegistry,
     ExpressionResolver,

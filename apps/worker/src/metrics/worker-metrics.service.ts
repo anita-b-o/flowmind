@@ -205,6 +205,31 @@ export class WorkerMetricsService implements OnModuleInit, OnModuleDestroy {
     buckets: [0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1],
     registers: [this.registry]
   });
+  readonly loopExecutions = new Counter({
+    name: "flowmind_loop_executions_total",
+    help: "FOR_EACH loop executions by outcome and mode.",
+    labelNames: ["outcome", "mode"],
+    registers: [this.registry]
+  });
+  readonly loopIterations = new Counter({
+    name: "flowmind_loop_iterations_total",
+    help: "FOR_EACH iterations by outcome and mode.",
+    labelNames: ["outcome", "mode"],
+    registers: [this.registry]
+  });
+  readonly loopIterationFailures = new Counter({
+    name: "flowmind_loop_iteration_failures_total",
+    help: "Failed FOR_EACH iterations by mode.",
+    labelNames: ["mode"],
+    registers: [this.registry]
+  });
+  readonly loopDuration = new Histogram({
+    name: "flowmind_loop_duration_seconds",
+    help: "FOR_EACH duration by outcome and mode.",
+    labelNames: ["outcome", "mode"],
+    buckets: STEP_BUCKETS,
+    registers: [this.registry]
+  });
 
   constructor() {
     this.registry.setDefaultLabels({ service: "worker" });
@@ -259,6 +284,16 @@ export class WorkerMetricsService implements OnModuleInit, OnModuleDestroy {
 
   recordBranch(stepType: string, branch: string) {
     this.branchSelected.inc({ step_type: safeStepType(stepType), branch: safeReason(branch) });
+  }
+
+  recordLoopExecution(outcome: "completed" | "failed", mode: "sequential", durationSeconds: number) {
+    this.loopExecutions.inc({ outcome, mode });
+    this.loopDuration.observe({ outcome, mode }, Math.max(0, durationSeconds));
+  }
+
+  recordLoopIteration(outcome: "success" | "failed", mode: "sequential") {
+    this.loopIterations.inc({ outcome, mode });
+    if (outcome === "failed") this.loopIterationFailures.inc({ mode });
   }
 
   recordTransform(mode: string | undefined, outcome: TransformOutcome, durationSeconds: number, category?: string) {

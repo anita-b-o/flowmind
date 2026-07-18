@@ -155,7 +155,7 @@ export class WorkflowTestRunsService {
       sideEffectNodes: collectSideEffectNodes(testRun.snapshotDefinitionJson as unknown as WorkflowDefinition),
       timeline: timeline(testRun.execution, steps, testRun.execution.deadLetters),
       graph: graphState(testRun.execution.status, steps, testRun.execution.deadLetters),
-      inspector: Object.fromEntries(steps.map((step) => [step.stepKey, inspector(step)])),
+      inspector: Object.fromEntries(steps.map((step) => [step.executionPath === "root" ? step.stepKey : `${step.executionPath}:${step.stepKey}`, inspector(step)])),
       comparison
     };
   }
@@ -423,8 +423,10 @@ function inspector(step: any): DebugStepInspector {
   return {
     stepKey: step.stepKey,
     stepType: step.stepType,
+    executionPath: step.executionPath ?? "root",
+    iterationIndex: step.iterationIndex ?? null,
     status: step.status,
-    input: sanitizePublic(input),
+    input: step.stepType === "for_each" ? loopDebugInput(input) : sanitizePublic(input),
     resolvedVariables: (Array.isArray(debug.resolvedVariables) ? sanitizePublic(debug.resolvedVariables) : []) as DebugStepInspector["resolvedVariables"],
     expressions: (Array.isArray(debug.expressions) ? sanitizePublic(debug.expressions) : []) as DebugStepInspector["expressions"],
     resolvedConfig: sanitizePublic(debug.resolvedConfig ?? input.config ?? {}),
@@ -440,6 +442,11 @@ function inspector(step: any): DebugStepInspector {
     connection: (isRecord(debug.connection) ? sanitizePublic(debug.connection) : null) as DebugStepInspector["connection"],
     variable: (isRecord(debug.variable) ? sanitizePublic(debug.variable) : null) as DebugStepInspector["variable"]
   };
+}
+
+function loopDebugInput(input: Record<string, unknown>) {
+  const state = isRecord(input.forEachState) ? input.forEachState : {};
+  return sanitizePublic({ total: Array.isArray(state.items) ? state.items.length : 0, nextIteration: state.nextIndex ?? 0, currentStepKey: state.currentStepKey ?? null });
 }
 
 function simpleDuration(start?: Date | null, end?: Date | null) {

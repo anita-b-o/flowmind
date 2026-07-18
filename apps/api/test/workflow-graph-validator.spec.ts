@@ -71,4 +71,43 @@ describe("workflow graph validator", () => {
       )
     ).toThrow(BadRequestException);
   });
+
+  it("accepts a structured FOR_EACH body and keeps arbitrary cycles invalid", () => {
+    const steps = [
+      { key: "loop", type: "for_each", config: { source: "{{trigger.body.items}}", mode: "SEQUENTIAL", concurrency: 1, maxItems: 100, maxResults: 20 } },
+      { key: "body", type: "transform", config: { mode: "OBJECT", fields: { value: "{{item}}" } } },
+      { key: "done", type: "database_record", config: {} }
+    ];
+    expect(() => validateWorkflowGraph(steps, { entryStepKey: "loop", edges: [
+      { from: "loop", to: "body", kind: "for_each_body" },
+      { from: "loop", to: "done", kind: "for_each_done" },
+      { from: "body", to: "done", kind: "next" }
+    ] })).not.toThrow();
+    expect(() => validateWorkflowGraph(steps, { entryStepKey: "loop", edges: [
+      { from: "loop", to: "body", kind: "for_each_body" },
+      { from: "loop", to: "done", kind: "for_each_done" },
+      { from: "body", to: "loop", kind: "next" }
+    ] })).toThrow(BadRequestException);
+  });
+
+  it("rejects empty, escaping, and nested FOR_EACH bodies", () => {
+    expect(() => validateWorkflowGraph([
+      { key: "loop", type: "for_each", config: { source: [] } },
+      { key: "done", type: "database_record", config: {} }
+    ], { entryStepKey: "loop", edges: [
+      { from: "loop", to: "done", kind: "for_each_body" },
+      { from: "loop", to: "done", kind: "for_each_done" }
+    ] })).toThrow(BadRequestException);
+
+    expect(() => validateWorkflowGraph([
+      { key: "outer", type: "for_each", config: { source: [] } },
+      { key: "inner", type: "for_each", config: { source: [] } },
+      { key: "done", type: "database_record", config: {} }
+    ], { entryStepKey: "outer", edges: [
+      { from: "outer", to: "inner", kind: "for_each_body" },
+      { from: "outer", to: "done", kind: "for_each_done" },
+      { from: "inner", to: "done", kind: "for_each_body" },
+      { from: "inner", to: "done", kind: "for_each_done" }
+    ] })).toThrow(BadRequestException);
+  });
 });

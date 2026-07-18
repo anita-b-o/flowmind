@@ -188,7 +188,8 @@ export function addStepToDraft(draft: WorkflowDraftModel, type: StepType): Workf
   const key = generateStepKey(type, draft.stepOrder);
   const step = { ...emptyStep(draft.stepOrder.length, type), id: crypto.randomUUID(), key, name: labelForType(type), config: defaultConfig(type), timeoutSeconds: defaultTimeout(type) };
   const previous = draft.stepOrder.at(-1);
-  const nextEdges = previous ? [...draft.edges, { source: previous, sourceHandle: "next", target: key }] : draft.edges;
+  const previousType = previous ? draft.stepsByKey[previous]?.type : undefined;
+  const nextEdges = previous && !["if", "switch", "for_each"].includes(previousType ?? "") ? [...draft.edges, { source: previous, sourceHandle: "next", target: key }] : draft.edges;
   return withValidation({
     ...draft,
     stepsByKey: { ...draft.stepsByKey, [key]: step },
@@ -276,6 +277,11 @@ function formToDraftEdges(steps: StepFormValue[]): DraftEdge[] {
       addFormEdge(edges, keys, step.key, "default", String(step.config.defaultStepKey ?? ""));
       return;
     }
+    if (step.type === "for_each") {
+      addFormEdge(edges, keys, step.key, "body", String(step.config.bodyStepKey ?? ""));
+      addFormEdge(edges, keys, step.key, "done", String(step.config.doneStepKey ?? ""));
+      return;
+    }
     addFormEdge(edges, keys, step.key, "next", String(step.config.nextStepKey ?? nextLinear ?? ""));
   });
   return edges;
@@ -299,6 +305,9 @@ function routeStepFromEdges(step: StepFormValue | undefined, edges: DraftEdge[])
       return { ...entry, stepKey: outgoing.find((edge) => edge.sourceHandle === `case:${caseKey}`)?.target ?? "" };
     });
     config.defaultStepKey = outgoing.find((edge) => edge.sourceHandle === "default")?.target ?? "";
+  } else if (step.type === "for_each") {
+    config.bodyStepKey = outgoing.find((edge) => edge.sourceHandle === "body")?.target ?? "";
+    config.doneStepKey = outgoing.find((edge) => edge.sourceHandle === "done")?.target ?? "";
   } else {
     config.nextStepKey = outgoing.find((edge) => edge.sourceHandle === "next")?.target ?? "";
   }
@@ -331,6 +340,7 @@ function sanitizeCopiedConfig(config: Record<string, unknown>) {
 function validateHandleForSource(type: StepType, handle: string) {
   if (type === "if") return handle === "true" || handle === "false" ? undefined : "If nodes must connect from True or False.";
   if (type === "switch") return handle === "default" || handle.startsWith("case:") ? undefined : "Switch nodes must connect from a case or Default.";
+  if (type === "for_each") return handle === "body" || handle === "done" ? undefined : "FOR_EACH nodes must connect from Body or Done.";
   return handle === "next" ? undefined : "This node type can only use a Next connection.";
 }
 

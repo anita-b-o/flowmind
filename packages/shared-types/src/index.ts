@@ -66,7 +66,8 @@ export enum StepType {
   GetVariable = "get_variable",
   DeleteVariable = "delete_variable",
   IncrementVariable = "increment_variable",
-  AppendVariable = "append_variable"
+  AppendVariable = "append_variable",
+  ForEach = "for_each"
 }
 
 export enum ConnectionType {
@@ -121,7 +122,7 @@ export interface WorkflowDefinition {
   ui?: WorkflowDefinitionUi;
 }
 
-export type WorkflowGraphEdgeKind = "next" | "if_true" | "if_false" | "switch_case" | "switch_default";
+export type WorkflowGraphEdgeKind = "next" | "if_true" | "if_false" | "switch_case" | "switch_default" | "for_each_body" | "for_each_done";
 
 export interface WorkflowGraphEdgeDefinition {
   from: string;
@@ -202,3 +203,4 @@ export * from "./execution-lifecycle";
 export * from "./transform-step";
 export * from "./data-store";
 export * from "./workflow-variables";
+export * from "./for-each";

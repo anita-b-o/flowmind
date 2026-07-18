@@ -376,6 +376,9 @@ model StepExecution {
   outputJson     Json?               @map("output_json")
   errorJson      Json?               @map("error_json")
   debugJson      Json?               @map("debug_json")
+  executionPath  String              @default("root") @map("execution_path")
+  iterationIndex Int?                @map("iteration_index")
+  errorHandled   Boolean             @default(false) @map("error_handled")
   startedAt      DateTime?           @map("started_at")
   completedAt    DateTime?           @map("completed_at")
   durationMs     Int?                @map("duration_ms")
@@ -388,7 +391,7 @@ model StepExecution {
   internalRecords InternalRecord[]
   deadLetters     DeadLetterExecution[] @relation("DeadLetterFailedStep")
 
-  @@unique([executionId, stepKey])
+  @@unique([executionId, stepKey, executionPath])
   @@index([organizationId, executionId])
   @@map("step_executions")
 }

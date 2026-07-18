@@ -1,5 +1,5 @@
 import { Injectable } from "@nestjs/common";
-import { StepExecutionStatus, StepType, WorkflowStepDefinition } from "@automation/shared-types";
+import { FOR_EACH_LIMITS, StepExecutionStatus, StepType, WorkflowStepDefinition } from "@automation/shared-types";
 import { sanitizeForLog } from "@automation/observability";
 import { Prisma } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
@@ -22,6 +22,8 @@ export type StepExecutionRecord = {
   effectKey: string | null;
   effectStatus: string | null;
   outputJson?: unknown;
+  executionPath?: string;
+  iterationIndex?: number | null;
 };
 
 @Injectable()
@@ -44,18 +46,28 @@ export class StepExecutor {
     executionId: string;
     workflowStepId?: string | null;
     step: WorkflowStepDefinition;
+    executionPath?: string;
+    iterationIndex?: number | null;
   }) {
+    const executionPath = input.executionPath ?? "root";
     const policy = this.retryPolicyResolver.resolve(input.step);
-    const effectKey = `flowmind:${input.executionId}:${input.step.key}`;
+    const effectKey = `flowmind:${input.executionId}:${executionPath}:${input.step.key}`;
+    const existing = await this.prisma.stepExecution.findUnique({ where: { executionId_stepKey_executionPath: { executionId: input.executionId, stepKey: input.step.key, executionPath } }, select: { id: true } });
+    if (!existing) {
+      const count = await this.prisma.stepExecution.count({ where: { executionId: input.executionId } });
+      if (count >= FOR_EACH_LIMITS.maxStepExecutions) throw new Error("Execution step limit exceeded");
+    }
     return this.prisma.stepExecution.upsert({
-      where: { executionId_stepKey: { executionId: input.executionId, stepKey: input.step.key } },
-      update: { maxAttempts: policy.maxAttempts, effectKey, workflowStepId: input.workflowStepId ?? undefined },
+      where: { executionId_stepKey_executionPath: { executionId: input.executionId, stepKey: input.step.key, executionPath } },
+      update: { maxAttempts: policy.maxAttempts, effectKey, workflowStepId: input.workflowStepId ?? undefined, iterationIndex: input.iterationIndex ?? undefined },
       create: {
         organizationId: input.organizationId,
         executionId: input.executionId,
         workflowStepId: input.workflowStepId ?? undefined,
         stepKey: input.step.key,
         stepType: input.step.type,
+        executionPath,
+        iterationIndex: input.iterationIndex ?? undefined,
         status: StepExecutionStatus.Pending,
         attempt: 0,
         attemptCount: 0,
@@ -73,6 +85,8 @@ export class StepExecutor {
     step: WorkflowStepDefinition;
     context: any;
     stepExecution: StepExecutionRecord;
+    executionPath?: string;
+    iterationIndex?: number | null;
   }) {
     const policy = this.retryPolicyResolver.resolve(input.step);
     const startedAt = new Date();
@@ -108,7 +122,9 @@ export class StepExecutor {
           executionId: input.executionId,
           workflowStepId: input.workflowStepId,
           stepExecutionId: input.stepExecution.id,
-          effectKey: input.stepExecution.effectKey ?? `flowmind:${input.executionId}:${input.step.key}`,
+          effectKey: input.stepExecution.effectKey ?? `flowmind:${input.executionId}:${input.executionPath ?? "root"}:${input.step.key}`,
+          executionPath: input.executionPath ?? input.stepExecution.executionPath ?? "root",
+          iterationIndex: input.iterationIndex ?? input.stepExecution.iterationIndex ?? null,
           requestId: trace?.requestId,
           correlationId: trace?.correlationId
         }

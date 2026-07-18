@@ -1,4 +1,4 @@
-import { assertVariableName, assertVariableValue, graphAvailableStepKeys, validateGraphV2, validateTransformStepConfig } from "@automation/shared-types";
+import { assertVariableName, assertVariableValue, forEachRegions, graphAvailableStepKeys, validateGraphV2, validateTransformStepConfig } from "@automation/shared-types";
 import { validateExpressionsInValue } from "@automation/expression-engine";
 import type { DraftEdge, DraftValidationIssue, WorkflowDraftModel } from "./draft-model";
 import { caseKeyFromHandle, handleToGraphKind } from "./draft-model";
@@ -124,10 +124,13 @@ function validateStepConfig(step: NonNullable<WorkflowDraftModel["stepsByKey"][s
       requiredString(entry.match, issues, step.key, "Switch case match is required.", `case:${String(entry.key ?? "")}`);
     }
   }
+  if (step.type === "for_each") {
+    requiredString(config.source, issues, step.key, "FOR_EACH Source is required.");
+  }
 }
 
 function validateStepExpressions(stepKey: string, serializedConfig: Record<string, unknown>, draft: WorkflowDraftModel, issues: DraftValidationIssue[]) {
-  const available = graphAvailableStepKeys(
+  let available = graphAvailableStepKeys(
     stepKey,
     draft.stepOrder.map((key) => {
       const step = draft.stepsByKey[key];
@@ -135,7 +138,11 @@ function validateStepExpressions(stepKey: string, serializedConfig: Record<strin
     }),
     draftToGraphLike(draft)
   );
-  const result = validateExpressionsInValue(serializedConfig, { availableStepKeys: available, currentStepKey: stepKey, allowConnection: true, allowMetadata: true, localNamespaces: serializedConfig.mode ? ["item", "index"] : undefined });
+  const steps = draft.stepOrder.map((key) => draft.stepsByKey[key]).filter(Boolean).map((step) => ({ id: step.id, key: step.key, type: step.type, config: safeSerializeConfig(step) }));
+  const regions = forEachRegions(steps, draftToGraphLike(draft));
+  const inLoopBody = regions.some((region) => region.bodyStepKeys.has(stepKey));
+  for (const region of regions) if (!region.bodyStepKeys.has(stepKey)) available = available.filter((key) => !region.bodyStepKeys.has(key));
+  const result = validateExpressionsInValue(serializedConfig, { availableStepKeys: available, currentStepKey: stepKey, allowConnection: true, allowMetadata: true, localNamespaces: inLoopBody || serializedConfig.mode ? ["item", "index"] : undefined });
   for (const expressionIssue of result.issues) {
     issues.push(error("invalid_expression", expressionIssue.message, stepKey));
   }

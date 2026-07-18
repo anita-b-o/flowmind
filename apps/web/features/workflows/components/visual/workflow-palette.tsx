@@ -17,6 +17,7 @@ const GROUPS: Array<{ label: string; items: Array<{ type: StepType; name: string
     items: [
       { type: "if", name: "If", description: "Route true and false branches.", icon: "IF" },
       { type: "switch", name: "Switch", description: "Route cases plus default.", icon: "SW" },
+      { type: "for_each", name: "For Each", description: "Run a controlled body for each array item.", icon: "EACH" },
       { type: "conditional", name: "Conditional", description: "Legacy linear condition.", icon: "LEG" }
     ]
   },

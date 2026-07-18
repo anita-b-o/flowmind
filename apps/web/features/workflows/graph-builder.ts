@@ -20,6 +20,11 @@ export function buildGraph(steps: StepFormValue[]): WorkflowGraphDto | undefined
       addEdge(edges, key, String(step.config.defaultStepKey ?? ""), "switch_default", "default", undefined, stepKeys);
       return;
     }
+    if (step.type === "for_each") {
+      addEdge(edges, key, String(step.config.bodyStepKey ?? ""), "for_each_body", "body", undefined, stepKeys);
+      addEdge(edges, key, String(step.config.doneStepKey ?? ""), "for_each_done", "done", undefined, stepKeys);
+      return;
+    }
     addEdge(edges, key, String(step.config.nextStepKey ?? nextLinearKey(index) ?? ""), "next", undefined, undefined, stepKeys);
   });
   const targets = new Set(edges.map((edge) => edge.from));

@@ -78,6 +78,10 @@ Worker:
 - `flowmind_step_wait_scheduled_total`
 - `flowmind_step_wait_duration_seconds`
 - `flowmind_branch_selected_total`
+- `flowmind_loop_executions_total`
+- `flowmind_loop_iterations_total`
+- `flowmind_loop_iteration_failures_total`
+- `flowmind_loop_duration_seconds`
 - `flowmind_graph_validation_failures_total`
 - `flowmind_dlq_entries_total`
 - `flowmind_dlq_publish_failures_total`

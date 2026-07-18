@@ -59,12 +59,17 @@ describe("WorkerMetricsService", () => {
     service.reconcilerDuration.observe(0.01);
     service.dlqEntries.inc({ reason_code: dlqReasonCode("failed"), outcome: "created" });
     service.dlqPublishFailures.inc({ reason_code: dlqReasonCode("ambiguous") });
+    service.recordLoopIteration("success", "sequential");
+    service.recordLoopIteration("failed", "sequential");
+    service.recordLoopExecution("completed", "sequential", 0.5);
     const output = await service.registry.metrics();
     expect(output).toContain("flowmind_worker_active_jobs");
     expect(output).toContain("flowmind_execution_lease_conflict_total");
     expect(output).toContain("flowmind_step_duration_seconds_bucket");
     expect(output).toContain("flowmind_reconciler_runs_total");
     expect(output).toContain("flowmind_dlq_publish_failures_total");
+    expect(output).toContain('flowmind_loop_iterations_total{outcome="success",mode="sequential",service="worker"} 1');
+    expect(output).toContain('flowmind_loop_iteration_failures_total{mode="sequential",service="worker"} 1');
     expect(output).not.toMatch(/(executionId|workflowId|workerId|jobId|correlationId|requestId|email|hostname)=/);
   });
 });

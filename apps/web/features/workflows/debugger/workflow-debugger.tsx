@@ -227,7 +227,10 @@ function RealModeDialog({
 }
 
 function Inspector({ detail, selectedStepKey, onSkipWait }: { detail?: WorkflowTestRunDetail; selectedStepKey: string | null; onSkipWait: (stepKey: string) => void }) {
-  const step = selectedStepKey ? detail?.inspector?.[selectedStepKey] : undefined;
+  const [iterationKey, setIterationKey] = useState<string>("");
+  const matches = selectedStepKey ? Object.entries(detail?.inspector ?? {}).filter(([, entry]) => entry.stepKey === selectedStepKey) : [];
+  const selected = matches.find(([key]) => key === iterationKey) ?? matches.at(-1);
+  const step = selected?.[1];
   return (
     <aside className="panel stack debugger-inspector">
       <div>
@@ -243,6 +246,14 @@ function Inspector({ detail, selectedStepKey, onSkipWait }: { detail?: WorkflowT
             <span className="status-badge">{step.stepType}</span>
             {step.connection && <span className="status-badge">{step.connection.name ?? step.connection.type}</span>}
           </div>
+          {matches.some(([, entry]) => entry.iterationIndex !== null) && (
+            <label>
+              Iteration
+              <select value={selected?.[0] ?? ""} onChange={(event) => setIterationKey(event.target.value)}>
+                {matches.map(([key, entry]) => <option key={key} value={key}>{entry.iterationIndex === null ? "Root" : `#${entry.iterationIndex}`} · {entry.executionPath}</option>)}
+              </select>
+            </label>
+          )}
           {step.retry.nextRetryAt && (
             <button type="button" onClick={() => onSkipWait(step.stepKey)}>
               Skip wait

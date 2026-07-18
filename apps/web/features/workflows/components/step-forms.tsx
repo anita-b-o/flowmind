@@ -9,7 +9,7 @@ import type { WorkflowEditorFormValue } from "../workflow-builder";
 import { catalogForSteps } from "../expressions";
 import { ExpressionPreview } from "./expression-preview";
 import { VariablePicker } from "./variable-picker";
-import { DelayStepForm, IfStepForm, SwitchStepForm, WaitUntilStepForm } from "./control-step-forms";
+import { DelayStepForm, ForEachStepForm, IfStepForm, SwitchStepForm, WaitUntilStepForm } from "./control-step-forms";
 
 type StepFormProps = {
   index: number;
@@ -47,6 +47,9 @@ export function StepForm({ index, type, register, errors, disabled, setValue, ge
   }
   if (type === "switch") {
     return <SwitchStepForm index={index} register={register} errors={errors} disabled={disabled} setValue={setValue} getValues={getValues} />;
+  }
+  if (type === "for_each") {
+    return <ForEachStepForm index={index} register={register} errors={errors} disabled={disabled} setValue={setValue} getValues={getValues} />;
   }
   if (type === "delay") {
     return <DelayStepForm index={index} register={register} errors={errors} disabled={disabled} setValue={setValue} getValues={getValues} />;

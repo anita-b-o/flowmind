@@ -39,6 +39,8 @@ PostgreSQL is the source of truth for workflow recovery. BullMQ delivers executi
 
 The runner reloads `Execution`, `WorkflowVersion`, `WorkflowStep`, and `StepExecution` before progressing. Completed and skipped steps are reused from persisted output; `contextJson` is only a cache rebuilt from step rows.
 
+Repeated steps inside a controlled `FOR_EACH` are keyed by `(execution_id, step_key, execution_path)`. Root steps use `root`; iteration rows use `root/<loop-key>[<index>]`. The loop control row persists its bounded cursor so waits and retries resume the same iteration without permitting cyclic Graph v2 edges.
+
 Workflow versions with `workflowDefinitionSchemaVersion: 2` add an acyclic `definitionJson.graph` on top of the flat step list. The worker follows persisted control outputs for If/Switch, skips unselected branch steps, and uses `StepExecution.nextRetryAt` for durable Delay/Wait Until pauses. Versions without schema v2 continue through the legacy linear runner.
 
 Before a handler runs, the worker reconstructs expression scope from persisted execution input and completed `StepExecution.outputJson`, resolves the current step config once, and stores only the resolved step input on `StepExecution.inputJson`.

@@ -30,14 +30,14 @@ export type GraphLike = {
   terminalStepKeys?: unknown;
 };
 
-const EDGE_KINDS = new Set(["next", "if_true", "if_false", "switch_case", "switch_default"]);
+const EDGE_KINDS = new Set(["next", "if_true", "if_false", "switch_case", "switch_default", "for_each_body", "for_each_done"]);
 const STEP_TYPES = {
   If: "if",
   Switch: "switch",
   Delay: "delay",
-  WaitUntil: "wait_until"
+  WaitUntil: "wait_until",
+  ForEach: "for_each"
 } as const;
-const CONTROL_TYPES = new Set([STEP_TYPES.If, STEP_TYPES.Switch]);
 const DURATION_PATTERN = /^\s*([1-9][0-9]*)\s+(second|seconds|minute|minutes|hour|hours)\s*$/i;
 
 export function validateGraphV2(steps: GraphStepLike[], graph: GraphLike | undefined): GraphValidationIssue[] {
@@ -104,6 +104,7 @@ export function validateGraphV2(steps: GraphStepLike[], graph: GraphLike | undef
   for (const step of steps) {
     if (step.type === STEP_TYPES.If) validateIf(step, stepKeySet, edges, issues);
     else if (step.type === STEP_TYPES.Switch) validateSwitch(step, stepKeySet, edges, issues);
+    else if (step.type === STEP_TYPES.ForEach) validateForEach(step, steps, stepKeySet, edges, issues);
     else {
       validateNonControl(step, edges, issues);
     }
@@ -112,6 +113,21 @@ export function validateGraphV2(steps: GraphStepLike[], graph: GraphLike | undef
   }
 
   return issues;
+}
+
+export type ForEachRegion = { loopStepKey: string; bodyEntryStepKey: string; doneStepKey: string; bodyStepKeys: Set<string> };
+
+export function forEachRegions(steps: GraphStepLike[], graph: GraphLike | undefined): ForEachRegion[] {
+  const edges = graph ? normalizedEdges(graph) : [];
+  return steps.filter((step) => step.type === STEP_TYPES.ForEach).flatMap((step) => {
+    const body = outgoingEdges(step.key, edges).find((edge) => stringValue(edge.kind) === "for_each_body");
+    const done = outgoingEdges(step.key, edges).find((edge) => stringValue(edge.kind) === "for_each_done");
+    const bodyEntryStepKey = stringValue(body?.to);
+    const doneStepKey = stringValue(done?.to);
+    if (!bodyEntryStepKey || !doneStepKey || bodyEntryStepKey === doneStepKey) return [];
+    const bodyStepKeys = descendantsUntil(bodyEntryStepKey, doneStepKey, edges);
+    return [{ loopStepKey: step.key, bodyEntryStepKey, doneStepKey, bodyStepKeys }];
+  });
 }
 
 export function graphAvailableStepKeys(currentStepKey: string, steps: GraphStepLike[], graph: GraphLike | undefined) {
@@ -178,6 +194,62 @@ function validateSwitch(step: GraphStepLike, stepKeys: Set<string>, edges: Graph
     const kind = stringValue(edge.kind);
     if (kind === "switch_case" && !caseKeys.has(stringValue(edge.caseKey) ?? "")) issues.push(issue("orphan_switch_case_edge", "Switch case edge references a missing case.", step.key, edgeId(edge), handleForKind(kind, edge)));
     if (!["switch_case", "switch_default"].includes(kind ?? "")) issues.push(issue("invalid_switch_edge", "Switch steps may only use case or default graph edges.", step.key, edgeId(edge), handleForKind(kind, edge)));
+  }
+}
+
+function validateForEach(step: GraphStepLike, steps: GraphStepLike[], stepKeys: Set<string>, edges: GraphEdgeLike[], issues: GraphValidationIssue[]) {
+  const outgoing = outgoingEdges(step.key, edges);
+  const bodyEdges = outgoing.filter((edge) => stringValue(edge.kind) === "for_each_body");
+  const doneEdges = outgoing.filter((edge) => stringValue(edge.kind) === "for_each_done");
+  if (bodyEdges.length !== 1) issues.push(issue("invalid_for_each_body", "FOR_EACH must have exactly one Body connection.", step.key, undefined, "body"));
+  if (doneEdges.length !== 1) issues.push(issue("invalid_for_each_done", "FOR_EACH must have exactly one Done connection.", step.key, undefined, "done"));
+  for (const edge of outgoing) {
+    if (!["for_each_body", "for_each_done"].includes(stringValue(edge.kind) ?? "")) issues.push(issue("invalid_for_each_edge", "FOR_EACH may only use Body and Done edges.", step.key, edgeId(edge), handleForKind(stringValue(edge.kind), edge)));
+  }
+  validateForEachConfig(step, issues);
+  if (bodyEdges.length !== 1 || doneEdges.length !== 1) return;
+  const bodyEntry = stringValue(bodyEdges[0].to);
+  const done = stringValue(doneEdges[0].to);
+  if (!bodyEntry || !done || !stepKeys.has(bodyEntry) || !stepKeys.has(done)) return;
+  if (bodyEntry === done) {
+    issues.push(issue("empty_for_each_body", "FOR_EACH Body must contain at least one step before Done.", step.key, undefined, "body"));
+    return;
+  }
+  const body = descendantsUntil(bodyEntry, done, edges);
+  if (!body.size) issues.push(issue("empty_for_each_body", "FOR_EACH Body must contain at least one step before Done.", step.key, undefined, "body"));
+  if (body.has(step.key)) issues.push(issue("for_each_back_edge", "FOR_EACH Body cannot return to the loop node.", step.key));
+  for (const key of body) {
+    const bodyStep = steps.find((candidate) => candidate.key === key);
+    if (bodyStep?.type === STEP_TYPES.ForEach) issues.push(issue("nested_for_each", "Nested FOR_EACH loops are not supported.", key));
+    if (!canReach(key, done, edges)) issues.push(issue("for_each_body_escape", "Every FOR_EACH Body path must converge on Done.", key));
+    for (const edge of outgoingEdges(key, edges)) {
+      const target = stringValue(edge.to);
+      if (target && target !== done && !body.has(target)) issues.push(issue("for_each_body_escape", "FOR_EACH Body edges cannot escape the controlled region.", key, edgeId(edge)));
+    }
+  }
+  for (const edge of edges) {
+    const from = stringValue(edge.from);
+    const to = stringValue(edge.to);
+    if (!from || !to || !body.has(to) || body.has(from)) continue;
+    if (!(from === step.key && to === bodyEntry && stringValue(edge.kind) === "for_each_body")) {
+      issues.push(issue("for_each_external_entry", "FOR_EACH Body cannot receive external connections.", to, edgeId(edge)));
+    }
+  }
+}
+
+function validateForEachConfig(step: GraphStepLike, issues: GraphValidationIssue[]) {
+  const config = step.config;
+  if (config.source === undefined || config.source === null || config.source === "") issues.push(issue("invalid_for_each_source", "FOR_EACH Source is required.", step.key));
+  if (config.mode !== undefined && config.mode !== "SEQUENTIAL") issues.push(issue("invalid_for_each_mode", "FOR_EACH only supports SEQUENTIAL mode.", step.key));
+  if (config.concurrency !== undefined && Number(config.concurrency) !== 1) issues.push(issue("invalid_for_each_concurrency", "FOR_EACH concurrency must be 1.", step.key));
+  const maxItems = Number(config.maxItems ?? 100);
+  if (!Number.isInteger(maxItems) || maxItems < 0 || maxItems > 1000) issues.push(issue("invalid_for_each_max_items", "FOR_EACH maxItems must be an integer between 0 and 1000.", step.key));
+  const maxResults = Number(config.maxResults ?? 20);
+  if (!Number.isInteger(maxResults) || maxResults < 0 || maxResults > 100) issues.push(issue("invalid_for_each_max_results", "FOR_EACH maxResults must be an integer between 0 and 100.", step.key));
+  const aliases = [config.itemVariable, config.indexVariable].filter((value): value is string => typeof value === "string" && Boolean(value));
+  if (new Set(aliases).size !== aliases.length) issues.push(issue("duplicate_for_each_alias", "FOR_EACH item and index aliases must be different.", step.key));
+  for (const alias of aliases) {
+    if (!/^[A-Za-z_][A-Za-z0-9_-]{0,63}$/.test(alias) || ["item", "index", "__proto__", "prototype", "constructor"].includes(alias)) issues.push(issue("invalid_for_each_alias", "FOR_EACH aliases must be safe variable names.", step.key));
   }
 }
 
@@ -254,6 +326,34 @@ function adjacencyMap(edges: GraphEdgeLike[]) {
   return map;
 }
 
+function descendantsUntil(start: string, stop: string, edges: GraphEdgeLike[]) {
+  const seen = new Set<string>();
+  const visit = (key: string) => {
+    if (key === stop || seen.has(key)) return;
+    seen.add(key);
+    for (const edge of outgoingEdges(key, edges)) {
+      const target = stringValue(edge.to);
+      if (target) visit(target);
+    }
+  };
+  visit(start);
+  return seen;
+}
+
+function canReach(start: string, target: string, edges: GraphEdgeLike[]) {
+  const seen = new Set<string>();
+  const visit = (key: string): boolean => {
+    if (key === target) return true;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return outgoingEdges(key, edges).some((edge) => {
+      const next = stringValue(edge.to);
+      return next ? visit(next) : false;
+    });
+  };
+  return visit(start);
+}
+
 function edgeId(edge: GraphEdgeLike) {
   return `${String(edge.from ?? "")}:${String(edge.kind ?? "")}:${String(edge.caseKey ?? "")}->${String(edge.to ?? "")}`;
 }
@@ -263,6 +363,8 @@ function handleForKind(kind: string | undefined, edge: GraphEdgeLike) {
   if (kind === "if_false") return "false";
   if (kind === "switch_default") return "default";
   if (kind === "switch_case") return `case:${stringValue(edge.caseKey) ?? ""}`;
+  if (kind === "for_each_body") return "body";
+  if (kind === "for_each_done") return "done";
   return "next";
 }
 

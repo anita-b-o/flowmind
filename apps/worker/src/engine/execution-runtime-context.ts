@@ -8,7 +8,8 @@ import {
   type VariableScope
 } from "@automation/shared-types";
 
-const runtimeContexts = new WeakMap<ExecutionContext, ExecutionRuntimeContext>();
+type RuntimeBinding = { runtime: ExecutionRuntimeContext; aliases: Readonly<Record<string, unknown>> };
+const runtimeContexts = new WeakMap<ExecutionContext, RuntimeBinding>();
 
 export class ExecutionRuntimeContext {
   readonly context: ExecutionContext;
@@ -42,13 +43,38 @@ export class ExecutionRuntimeContext {
       timestamp: now,
       steps: base.steps ?? {}
     };
-    runtimeContexts.set(this.context, this);
+    runtimeContexts.set(this.context, { runtime: this, aliases: {} });
   }
 
   static fromContext(context: ExecutionContext): ExecutionRuntimeContext {
-    const runtime = runtimeContexts.get(context);
-    if (!runtime) throw new Error("Execution runtime context is not available");
-    return runtime;
+    const binding = runtimeContexts.get(context);
+    if (!binding) throw new Error("Execution runtime context is not available");
+    return binding.runtime;
+  }
+
+  createIterationFrame(input: { item: unknown; index: number; itemVariable?: string; indexVariable?: string; steps?: ExecutionContext["steps"] }) {
+    const aliases: Record<string, unknown> = {};
+    if (input.itemVariable) aliases[input.itemVariable] = input.item;
+    if (input.indexVariable) aliases[input.indexVariable] = input.index;
+    const variables = new Proxy(this.context.variables ?? {}, {
+      get: (target, property, receiver) => typeof property === "string" && Object.prototype.hasOwnProperty.call(aliases, property) ? aliases[property] : Reflect.get(target, property, receiver),
+      has: (target, property) => typeof property === "string" && Object.prototype.hasOwnProperty.call(aliases, property) || Reflect.has(target, property),
+      ownKeys: (target) => [...new Set([...Reflect.ownKeys(target), ...Object.keys(aliases)])],
+      getOwnPropertyDescriptor: (target, property) => typeof property === "string" && Object.prototype.hasOwnProperty.call(aliases, property)
+        ? { configurable: true, enumerable: true, writable: false, value: aliases[property] }
+        : Reflect.getOwnPropertyDescriptor(target, property)
+    });
+    const context: ExecutionContext = {
+      ...this.context,
+      steps: input.steps ?? {},
+      variables,
+      execution: { ...(this.context.execution ?? {}), variables },
+      item: input.item,
+      index: input.index,
+      metadata: { ...(this.context.metadata ?? {}), iteration: { index: input.index } }
+    };
+    runtimeContexts.set(context, { runtime: this, aliases: Object.freeze(aliases) });
+    return context;
   }
 
   get(scope: VariableScope, name: string): { exists: boolean; value?: unknown; type: string } {
@@ -121,7 +147,41 @@ export class ExecutionRuntimeContext {
 }
 
 export function getExecutionRuntimeContext(context: ExecutionContext) {
-  return ExecutionRuntimeContext.fromContext(context);
+  const binding = runtimeContexts.get(context);
+  if (!binding) throw new Error("Execution runtime context is not available");
+  const reserved = (scope: VariableScope, name: string) => {
+    if (scope === "execution" && Object.prototype.hasOwnProperty.call(binding.aliases, name)) throw new Error(`Iteration variable "${name}" is read-only.`);
+  };
+  return {
+    get(scope: VariableScope, name: string) {
+      if (scope === "execution" && Object.prototype.hasOwnProperty.call(binding.aliases, name)) return { exists: true, value: binding.aliases[name], type: variableValueType(binding.aliases[name]) };
+      return binding.runtime.get(scope, name);
+    },
+    set(scope: unknown, name: unknown, value: unknown) {
+      const checkedScope = assertVariableScope(scope);
+      const checkedName = assertVariableName(name);
+      reserved(checkedScope, checkedName);
+      return binding.runtime.set(checkedScope, checkedName, value);
+    },
+    delete(scope: unknown, name: unknown) {
+      const checkedScope = assertVariableScope(scope);
+      const checkedName = assertVariableName(name);
+      reserved(checkedScope, checkedName);
+      return binding.runtime.delete(checkedScope, checkedName);
+    },
+    increment(scope: unknown, name: unknown, amount: unknown) {
+      const checkedScope = assertVariableScope(scope);
+      const checkedName = assertVariableName(name);
+      reserved(checkedScope, checkedName);
+      return binding.runtime.increment(checkedScope, checkedName, amount);
+    },
+    append(scope: unknown, name: unknown, value: unknown) {
+      const checkedScope = assertVariableScope(scope);
+      const checkedName = assertVariableName(name);
+      reserved(checkedScope, checkedName);
+      return binding.runtime.append(checkedScope, checkedName, value);
+    }
+  };
 }
 
 function cloneRecord(value: unknown): Record<string, unknown> {

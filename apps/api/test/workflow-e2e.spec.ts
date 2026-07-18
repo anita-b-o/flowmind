@@ -289,6 +289,30 @@ describe("workflow webhook execution e2e", () => {
     expect((execution.contextJson as any).variables).toEqual({});
   }, 30_000);
 
+  it("runs a controlled FOR_EACH body with Data Store, per-item branching, and DONE once", async () => {
+    const user = await register("foreach-smoke@example.com", "For Each Smoke");
+    const workflow = await createWorkflow(user, "For Each workflow");
+    const store = await prisma.dataStore.create({ data: { organizationId: user.organizationId, name: "Loop records", description: "FOR_EACH smoke" } });
+    const version = await createForEachVersion(user, workflow.id, store.id);
+    const trigger = await createTrigger(user, workflow.id);
+    await request(app.getHttpServer()).patch(`/workflows/${workflow.id}/versions/${version.id}/activate`).set(authHeaders(user)).expect(200);
+    const webhook = await request(app.getHttpServer()).post(`/webhooks/${workflow.id}/${trigger.token}`).set("Idempotency-Key", "foreach-webhook-1").send({ items: [
+      { id: "a", amount: 10 }, { id: "b", amount: 20 }, { id: "c", amount: 30 }
+    ] }).expect(202);
+    const detail = await waitForExecution(webhook.body.executionId, "COMPLETED");
+    const loop = detail.body.steps.find((step: any) => step.stepKey === "loop");
+    expect(loop.output).toMatchObject({ total: 3, succeeded: 3, failed: 0, skipped: 0, mode: "SEQUENTIAL" });
+    const bodyRows = detail.body.steps.filter((step: any) => step.executionPath !== "root");
+    expect(bodyRows.filter((step: any) => step.stepKey === "shape").map((step: any) => step.iterationIndex)).toEqual([0, 1, 2]);
+    expect(new Set(bodyRows.map((step: any) => step.executionPath)).size).toBe(3);
+    expect(await prisma.dataStoreRecord.count({ where: { organizationId: user.organizationId, dataStoreId: store.id, deletedAt: null } })).toBe(3);
+    expect(await prisma.internalRecord.count({ where: { executionId: webhook.body.executionId, collection: "loop_summary" } })).toBe(1);
+    expect(await prisma.stepExecution.count({ where: { executionId: webhook.body.executionId, stepKey: "count_done", executionPath: "root" } })).toBe(1);
+    const execution = await prisma.execution.findUniqueOrThrow({ where: { id: webhook.body.executionId } });
+    expect((execution.contextJson as any).item).toBeUndefined();
+    expect((execution.contextJson as any).index).toBeUndefined();
+  }, 30_000);
+
   it("prevents cross-tenant trigger and execution access", async () => {
     const userA = await register("tenant-a@example.com", "Tenant A");
     const userB = await register("tenant-b@example.com", "Tenant B");
@@ -407,6 +431,36 @@ describe("workflow webhook execution e2e", () => {
         ]
       })
       .expect(201);
+    return response.body;
+  }
+
+  async function createForEachVersion(user: TestUser, workflowId: string, dataStoreId: string) {
+    const response = await request(app.getHttpServer()).post(`/workflows/${workflowId}/versions`).set(authHeaders(user)).send({
+      workflowDefinitionSchemaVersion: 2,
+      expressionMode: "strict",
+      trigger: { key: "webhook", name: "Webhook", type: "webhook_trigger", config: {} },
+      steps: [
+        { key: "loop", name: "Loop", type: "for_each", config: { source: "{{trigger.body.items}}", itemVariable: "record", indexVariable: "position", mode: "SEQUENTIAL", concurrency: 1, continueOnError: false, maxItems: 100, collectResults: true, maxResults: 20 } },
+        { key: "shape", name: "Shape", type: "transform", config: { mode: "OBJECT", fields: { id: "{{item.id}}", amount: "{{item.amount}}", index: "{{index}}", aliasId: "{{variables.record.id}}" }, outputType: "OBJECT" } },
+        { key: "upsert", name: "Upsert", type: "data_store_upsert_record", config: { dataStoreId, key: "{{item.id}}", value: { id: "{{item.id}}", amount: "{{item.amount}}", index: "{{index}}" }, mode: "replace" } },
+        { key: "route", name: "Route", type: "if", config: { left: "{{item.amount}}", operator: "equals", right: 20, trueStepKey: "high", falseStepKey: "low" } },
+        { key: "high", name: "High", type: "database_record", config: { collection: "loop_high", data: { id: "{{item.id}}", index: "{{index}}" } } },
+        { key: "low", name: "Low", type: "database_record", config: { collection: "loop_low", data: { id: "{{item.id}}", index: "{{index}}" } } },
+        { key: "count_done", name: "Count", type: "data_store_count_records", config: { dataStoreId } },
+        { key: "summary", name: "Summary", type: "database_record", config: { collection: "loop_summary", data: { total: "{{steps.loop.output.total}}", records: "{{steps.count_done.output.count}}" } } }
+      ],
+      graph: { entryStepKey: "loop", edges: [
+        { from: "loop", to: "shape", kind: "for_each_body" },
+        { from: "loop", to: "count_done", kind: "for_each_done" },
+        { from: "shape", to: "upsert", kind: "next" },
+        { from: "upsert", to: "route", kind: "next" },
+        { from: "route", to: "high", kind: "if_true" },
+        { from: "route", to: "low", kind: "if_false" },
+        { from: "high", to: "count_done", kind: "next" },
+        { from: "low", to: "count_done", kind: "next" },
+        { from: "count_done", to: "summary", kind: "next" }
+      ], terminalStepKeys: ["summary"] }
+    }).expect(201);
     return response.body;
   }
 

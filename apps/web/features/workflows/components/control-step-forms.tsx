@@ -153,6 +153,32 @@ export function WaitUntilStepForm({ index, register, errors, disabled, setValue,
   );
 }
 
+export function ForEachStepForm({ index, register, errors, disabled, setValue, getValues }: Props) {
+  const entries = catalogForSteps(getValues("steps"), index);
+  const previousKeys = getValues("steps").slice(0, index).map((step) => step.key);
+  return (
+    <div className="stack">
+      <label>
+        Source
+        <input disabled={disabled} placeholder="{{steps.transform.output}}" {...register(`steps.${index}.config.source`)} />
+        <ExpressionTools field={`steps.${index}.config.source`} entries={entries} previousKeys={previousKeys} disabled={disabled} getValues={getValues} setValue={setValue} />
+        <FieldError message={configError(errors, index, "source")} />
+      </label>
+      <div className="workflow-form-grid">
+        <label>Item alias <input disabled={disabled} placeholder="record" {...register(`steps.${index}.config.itemVariable`)} /></label>
+        <label>Index alias <input disabled={disabled} placeholder="position" {...register(`steps.${index}.config.indexVariable`)} /></label>
+        <label>Max items <input type="number" min={0} max={1000} disabled={disabled} {...register(`steps.${index}.config.maxItems`, { valueAsNumber: true })} /></label>
+        <label>Mode <select disabled {...register(`steps.${index}.config.mode`)}><option value="SEQUENTIAL">Sequential</option></select></label>
+        <label>Concurrency <input type="number" value={1} disabled aria-label="Concurrency" /></label>
+        <label><input type="checkbox" disabled={disabled} {...register(`steps.${index}.config.continueOnError`)} /> Continue on error</label>
+        <label><input type="checkbox" disabled={disabled} {...register(`steps.${index}.config.collectResults`)} /> Collect results</label>
+        <label>Max collected results <input type="number" min={0} max={100} disabled={disabled} {...register(`steps.${index}.config.maxResults`, { valueAsNumber: true })} /></label>
+      </div>
+      <p className="muted">Body expressions can use <code>{"{{item}}"}</code>, <code>{"{{index}}"}</code>, and configured aliases under <code>variables.*</code>. Connect the Body and Done handles on the canvas.</p>
+    </div>
+  );
+}
+
 function TargetSelect({
   label,
   field,

@@ -40,6 +40,8 @@ export interface DebugTimelineEvent {
 export interface DebugStepInspector {
   stepKey: string;
   stepType: string;
+  executionPath: string;
+  iterationIndex: number | null;
   status: StepExecutionStatus | "PENDING";
   input: unknown;
   resolvedVariables: Array<{ path: string; original?: unknown; resolved: unknown; origin: string }>;
