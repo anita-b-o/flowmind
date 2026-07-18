@@ -12,7 +12,7 @@ import { StepExecutor, type StepExecutionRecord } from "./step-executor";
 import { StructuredStepFailure } from "./structured-step-failure";
 import { ExecuteWorkflowExecutionService } from "./execute-workflow-execution.service";
 
-type RegionResult = { outcome: "completed" } | { outcome: "waiting"; nextRetryAt: Date };
+type RegionResult = { outcome: "completed" } | { outcome: "waiting"; nextRetryAt: Date | null; waitReason?: string };
 type Region = { name: "body" | "catch" | "finally"; entry: string; exit: string; keys: Set<string> };
 
 @Injectable()
@@ -30,7 +30,7 @@ export class TryCatchExecutionService {
     tryStep: WorkflowStepDefinition; tryStepExecution: StepExecutionRecord & { inputJson?: unknown; startedAt?: Date | null };
     graph: RuntimeGraph; stepRowsByKey: Map<string, ForEachStepRow>; runtimeContext: ExecutionRuntimeContext;
     parentContext: ExecutionContext; parentPath: string; iterationIndex?: number | null;
-  }): Promise<{ outcome: "completed"; output: TryCatchOutput } | { outcome: "waiting"; nextRetryAt: Date }> {
+  }): Promise<{ outcome: "completed"; output: TryCatchOutput } | { outcome: "waiting"; nextRetryAt: Date | null; waitReason?: string }> {
     const edges = input.graph.edges.filter((edge) => edge.from === input.tryStep.key);
     const bodyEntry = edges.find((edge) => edge.kind === "try_body")!.to;
     const catchEntry = edges.find((edge) => edge.kind === "try_catch")!.to;
@@ -141,7 +141,7 @@ export class TryCatchExecutionService {
       if (!isDone(execution.status)) {
         try {
           const result = await this.stepExecutor.execute({ organizationId: input.organizationId, executionId: input.executionId, workflowStepId: row.id, step, context, stepExecution: execution, executionPath, iterationIndex: input.iterationIndex });
-          if (result.outcome === "retrying") { state.currentStepKey = next; await this.checkpoint(input, state); return { outcome: "waiting", nextRetryAt: result.nextRetryAt }; }
+          if (result.outcome === "retrying" || result.outcome === "durable_wait") { state.currentStepKey = next; await this.checkpoint(input, state); return { outcome: "waiting", nextRetryAt: result.nextRetryAt, waitReason: result.waitReason }; }
           context.steps[step.key] = { status: result.result.status, output: result.result.output };
           next = selectedNextStepKey(input.graph, step.key, result.result.output) ?? region.exit;
         } catch (error) { throw await this.asFailure(input, error, execution.id); }
@@ -163,5 +163,5 @@ function summary(state: any): TryCatchOutput { return { status: state.phase === 
 function record(value: unknown): Record<string, any> { return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, any> : {}; }
 function json(value: unknown): Prisma.InputJsonValue { return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue; }
 function toStep(row: ForEachStepRow): WorkflowStepDefinition { return { id: row.id ?? undefined, key: row.key, name: row.name, type: row.type as any, position: row.position, config: record(row.configJson), retryPolicy: row.retryPolicyJson as any, timeoutSeconds: row.timeoutSeconds ?? undefined }; }
-function isIntentionalWait(step: { effectStatus?: string | null; outputJson?: unknown }) { return ["delay", "wait_until", "waiting"].includes(step.effectStatus ?? "") || Boolean(step.outputJson && typeof step.outputJson === "object" && "waitReason" in step.outputJson); }
+function isIntentionalWait(step: { effectStatus?: string | null; outputJson?: unknown }) { return step.effectStatus !== "approval_waiting" && (["delay", "wait_until", "waiting"].includes(step.effectStatus ?? "") || Boolean(step.outputJson && typeof step.outputJson === "object" && "waitReason" in step.outputJson)); }
 function safeMessage(value: unknown) { return String(value ?? "Step failed").replace(/(authorization|cookie|password|token|api[-_ ]?key|secret|connection(?:string)?|smtp)(\s*[:=]\s*)[^\s,;]+/gi, "$1$2[REDACTED]").replace(/\b(?:postgres(?:ql)?|mysql|mongodb(?:\+srv)?|redis|smtp):\/\/[^\s]+/gi, "[REDACTED_CONNECTION]").replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer [REDACTED]").slice(0, 500); }

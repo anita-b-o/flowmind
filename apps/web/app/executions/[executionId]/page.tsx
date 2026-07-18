@@ -11,6 +11,7 @@ import { useCancelExecution, useExecution } from "../../../features/executions/h
 import { canCancelExecution, canRetryExecution } from "../../../features/auth/rbac";
 import { RetryExecutionDialog } from "../../../features/dead-letter-executions/components/retry-execution-dialog";
 import { ConfirmDialog } from "../../../components/confirm-dialog";
+import { ExecutionApprovalDetails } from "../../../features/executions/components/execution-approval-details";
 
 export default function ExecutionDetailPage({ params }: { params: Promise<{ executionId: string }> }) {
   const { executionId } = use(params);
@@ -98,6 +99,7 @@ export default function ExecutionDetailPage({ params }: { params: Promise<{ exec
             )}
 
             {!!detail.childExecutions.length && <section className="panel stack"><h2>Child workflows</h2>{detail.childExecutions.map((child) => <p key={child.id}><StatusBadge status={child.status} /> <Link href={`/executions/${child.id}`}>{child.id}</Link> · depth {child.depth}</p>)}</section>}
+            <ExecutionApprovalDetails waitReason={detail.waitReason} approvals={detail.approvals} />
 
             {detail.output !== null && detail.output !== undefined && <section className="panel stack"><h2>Workflow output</h2><JsonViewer value={detail.output} /></section>}
 

@@ -43,6 +43,7 @@ export class ExecutionReconcilerService implements OnModuleInit, OnModuleDestroy
     const started = process.hrtime.bigint();
     try {
       await this.recoverExpiredRunning();
+      await this.recoverApprovals();
       await this.requeueDueRetries();
       await this.requeueQueuedExecutions();
       this.metrics?.reconcilerRuns.inc({ outcome: "completed" });
@@ -53,6 +54,29 @@ export class ExecutionReconcilerService implements OnModuleInit, OnModuleDestroy
       throw error;
     } finally {
       this.running = false;
+    }
+  }
+
+  private async recoverApprovals() {
+    const now = new Date();
+    const expired = await this.prisma.approvalRequest.findMany({ where: { status: "PENDING", expiresAt: { lte: now } }, orderBy: { expiresAt: "asc" }, take: 100, include: { execution: { select: { correlationId: true } } } });
+    for (const approval of expired) {
+      const won = await this.prisma.$transaction(async (tx) => {
+        const changed = await tx.approvalRequest.updateMany({ where: { id: approval.id, status: "PENDING", expiresAt: { lte: now } }, data: { status: "EXPIRED", decidedAt: now, version: { increment: 1 } } });
+        if (!changed.count) return false;
+        await tx.execution.updateMany({ where: { id: approval.executionId, status: "RETRYING", waitReason: "approval" }, data: { status: "QUEUED", waitReason: null } });
+        await tx.auditLog.create({ data: { organizationId: approval.organizationId, actorUserId: null, action: "approval.expired", resourceType: "ApprovalRequest", resourceId: approval.id, correlationId: approval.execution.correlationId, metadataJson: { workflowId: approval.workflowId, executionId: approval.executionId, stepKey: approval.stepKey, outcome: "expired" } } });
+        return true;
+      });
+      if (won) {
+        this.metrics?.recordApproval("expired", approval.assigneePolicy, Math.max(0, (now.getTime() - approval.requestedAt.getTime()) / 1000));
+        await this.enqueue(approval.executionId, approval.organizationId, approval.workflowId, approval.workflowVersionId, approval.execution.correlationId, "execution_requeued", approvalResumeJobId(approval.executionId, approval.id, approval.version + 1));
+      }
+    }
+    const stranded = await this.prisma.approvalRequest.findMany({ where: { status: { in: ["APPROVED", "REJECTED", "EXPIRED"] }, stepExecution: { status: "RETRYING", effectStatus: "approval_waiting" }, execution: { status: { in: ["RETRYING", "QUEUED"] } } }, orderBy: { requestedAt: "asc" }, take: 100, include: { execution: { select: { correlationId: true } } } });
+    for (const approval of stranded) {
+      await this.prisma.execution.updateMany({ where: { id: approval.executionId, status: "RETRYING", waitReason: "approval" }, data: { status: "QUEUED", waitReason: null } });
+      await this.enqueue(approval.executionId, approval.organizationId, approval.workflowId, approval.workflowVersionId, approval.execution.correlationId, "execution_requeued", approvalResumeJobId(approval.executionId, approval.id, approval.version));
     }
   }
 
@@ -129,13 +153,14 @@ export class ExecutionReconcilerService implements OnModuleInit, OnModuleDestroy
     workflowId: string,
     workflowVersionId: string | null,
     existingCorrelationId?: string | null,
-    reasonCode: ReconcilerReason = "execution_requeued"
+    reasonCode: ReconcilerReason = "execution_requeued",
+    jobId = `execution-${executionId}`
   ) {
     const correlationId = existingCorrelationId ?? (await this.ensureExecutionCorrelationId(executionId));
     const job = await this.queue.add(
       EXECUTION_RUN_JOB,
       { executionId, organizationId, workflowId, workflowVersionId: workflowVersionId ?? undefined, requestId: newTraceId(), correlationId, enqueuedAt: new Date().toISOString() },
-      { jobId: `execution-${executionId}`, attempts: 1, removeOnComplete: 1000, removeOnFail: false }
+      { jobId, attempts: 1, removeOnComplete: 1000, removeOnFail: false }
     );
     this.metrics?.executionsReconciled.inc({ reason_code: reasonCode });
     this.metrics?.reconcilerReenqueued.inc({ reason_code: reasonCode });
@@ -149,6 +174,10 @@ export class ExecutionReconcilerService implements OnModuleInit, OnModuleDestroy
     const execution = await this.prisma.execution.findUniqueOrThrow({ where: { id: executionId }, select: { correlationId: true } });
     return execution.correlationId ?? candidate;
   }
+}
+
+function approvalResumeJobId(executionId: string, approvalId: string, version: number) {
+  return `execution-${executionId}-approval-${approvalId}-v${version}`;
 }
 
 function isAmbiguousWhenAbandoned(stepType: string) {

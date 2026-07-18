@@ -62,6 +62,19 @@ enum ExecutionMode {
   TEST
 }
 
+enum ApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  EXPIRED
+  CANCELLED
+}
+
+enum ApprovalDecision {
+  APPROVED
+  REJECTED
+}
+
 enum TestExternalMode {
   mock
   real
@@ -110,6 +123,7 @@ model User {
   startedExecutions         Execution[]           @relation("ExecutionStartedBy")
   requestedExecutionCancels Execution[]           @relation("ExecutionCancelRequestedBy")
   workflowTestRuns          WorkflowTestRun[]      @relation("WorkflowTestRunCreatedBy")
+  decidedApprovals          ApprovalRequest[]
 
   @@map("users")
 }
@@ -165,6 +179,7 @@ model Organization {
   workflowVariables    WorkflowVariable[]
   dataStores           DataStore[]
   dataStoreRecords     DataStoreRecord[]
+  approvalRequests     ApprovalRequest[]
 
   @@map("organizations")
 }
@@ -206,6 +221,7 @@ model Workflow {
   internalRecords      InternalRecord[]
   deadLetterExecutions DeadLetterExecution[]
   variables            WorkflowVariable[]
+  approvalRequests     ApprovalRequest[]
 
   @@index([organizationId, status])
   @@map("workflows")
@@ -231,6 +247,7 @@ model WorkflowVersion {
   testRuns             WorkflowTestRun[]
   internalRecords      InternalRecord[]
   deadLetterExecutions DeadLetterExecution[]
+  approvalRequests     ApprovalRequest[]
 
   @@unique([workflowId, versionNumber])
   @@index([organizationId, workflowId])
@@ -321,6 +338,7 @@ model Execution {
   cancelReason           String?         @map("cancel_reason")
   manualExecutionKey     String?         @map("manual_execution_key")
   status                 ExecutionStatus @default(PENDING)
+  waitReason             String?         @map("wait_reason")
   executionMode          ExecutionMode   @default(REAL) @map("execution_mode")
   inputJson              Json            @map("input_json")
   contextJson            Json            @map("context_json")
@@ -356,6 +374,7 @@ model Execution {
   retryDeadLetters DeadLetterExecution[] @relation("DeadLetterRetryExecution")
   testRun          WorkflowTestRun?
   triggerLastFor   Trigger[]              @relation("TriggerLastExecution")
+  approvalRequests ApprovalRequest[]
 
   @@index([organizationId, workflowId, status])
   @@index([organizationId, workflowId, executionMode, createdAt])
@@ -404,10 +423,52 @@ model StepExecution {
   internalRecords InternalRecord[]
   deadLetters     DeadLetterExecution[] @relation("DeadLetterFailedStep")
   childExecutions Execution[]           @relation("StepExecutionChildren")
+  approvalRequest ApprovalRequest?
 
   @@unique([executionId, stepKey, executionPath])
   @@index([organizationId, executionId])
   @@map("step_executions")
+}
+
+model ApprovalRequest {
+  id                  String           @id @default(uuid())
+  organizationId      String           @map("organization_id")
+  executionId         String           @map("execution_id")
+  stepExecutionId     String           @unique @map("step_execution_id")
+  workflowId          String           @map("workflow_id")
+  workflowVersionId   String?          @map("workflow_version_id")
+  stepKey             String           @map("step_key")
+  executionPath       String           @default("root") @map("execution_path")
+  iterationIndex      Int?             @map("iteration_index")
+  status              ApprovalStatus   @default(PENDING)
+  title               String
+  description         String?
+  summary             String?
+  assigneePolicy      String           @default("ANY_AUTHORIZED_USER") @map("assignee_policy")
+  allowedRoles        String[]         @map("allowed_roles")
+  requestedAt         DateTime         @default(now()) @map("requested_at")
+  expiresAt           DateTime?        @map("expires_at")
+  decidedAt           DateTime?        @map("decided_at")
+  decidedByUserId     String?          @map("decided_by_user_id")
+  decision            ApprovalDecision?
+  decisionComment     String?          @map("decision_comment")
+  version             Int              @default(0)
+  createdAt           DateTime         @default(now()) @map("created_at")
+  updatedAt           DateTime         @updatedAt @map("updated_at")
+
+  organization        Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  execution           Execution        @relation(fields: [executionId], references: [id], onDelete: Cascade)
+  stepExecution       StepExecution    @relation(fields: [stepExecutionId], references: [id], onDelete: Cascade)
+  workflow            Workflow         @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  workflowVersion     WorkflowVersion? @relation(fields: [workflowVersionId], references: [id], onDelete: SetNull)
+  decidedBy           User?            @relation(fields: [decidedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId, status, requestedAt])
+  @@index([executionId])
+  @@index([status, expiresAt])
+  @@index([organizationId, workflowId, requestedAt])
+  @@index([decidedByUserId])
+  @@map("approval_requests")
 }
 
 model WorkflowTestRun {

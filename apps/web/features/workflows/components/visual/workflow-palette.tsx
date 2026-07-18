@@ -30,6 +30,7 @@ const GROUPS: Array<{ label: string; items: Array<{ type: StepType; name: string
     items: [
       { type: "delay", name: "Delay", description: "Pause for a duration.", icon: "DLY" },
       { type: "wait_until", name: "Wait Until", description: "Pause until a timestamp.", icon: "CLK" }
+      ,{ type: "approval", name: "Approval", description: "Wait for an authorized human decision.", icon: "OK" }
     ]
   },
   {

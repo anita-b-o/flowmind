@@ -12,7 +12,8 @@ export function WorkflowNode({ id, data, selected }: NodeProps<WorkflowFlowNode>
   const isSwitch = data.type === "switch";
   const isForEach = data.type === "for_each";
   const isTryCatch = data.type === "try_catch";
-  const isTerminalCapable = !isIf && !isSwitch && !isForEach && !isTryCatch && data.type !== "return_workflow_output";
+  const isApproval = data.type === "approval";
+  const isTerminalCapable = !isIf && !isSwitch && !isForEach && !isTryCatch && !isApproval && data.type !== "return_workflow_output";
   const debugClass = data.debugStatus ? `debug-${data.debugStatus}` : "";
 
   return (
@@ -56,6 +57,7 @@ export function WorkflowNode({ id, data, selected }: NodeProps<WorkflowFlowNode>
           <OutputHandle id="done" label="Done" disabled={data.readOnly} offset={136} />
         </>
       )}
+      {isApproval && <><OutputHandle id="approved" label="Approved" disabled={data.readOnly} offset={36} /><OutputHandle id="rejected" label="Rejected" disabled={data.readOnly} offset={78} /><OutputHandle id="expired" label="Expired" disabled={data.readOnly} offset={120} /></>}
     </div>
   );
 }
@@ -73,7 +75,7 @@ function nodeKind(type: string) {
   if (type === "webhook_trigger") return "Trigger";
   if (type.startsWith("ai_")) return "AI";
   if (type === "if" || type === "switch" || type === "conditional" || type === "for_each" || type === "try_catch") return "Logic";
-  if (type === "delay" || type === "wait_until") return "Wait";
+  if (type === "delay" || type === "wait_until" || type === "approval") return "Wait";
   if (type === "transform" || type === "database_record" || type.startsWith("data_store_")) return "Data";
   return "Action";
 }

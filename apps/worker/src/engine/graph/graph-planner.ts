@@ -11,6 +11,10 @@ export function selectedNextStepKey(graph: RuntimeGraph, stepKey: string, output
   const output = asRecord(outputJson);
   const explicit = typeof output.nextStepKey === "string" ? output.nextStepKey : undefined;
   if (explicit) return explicit;
+  if (typeof output.decision === "string") {
+    const kind = `approval_${output.decision.toLowerCase()}`;
+    return outgoingEdges(graph, stepKey).find((edge) => edge.kind === kind)?.to;
+  }
   const next = outgoingEdges(graph, stepKey).find((edge) => edge.kind === "next");
   return next?.to;
 }

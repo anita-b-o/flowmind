@@ -44,7 +44,7 @@ type LoopState = {
   startedAt: string;
 };
 
-export type ForEachRunResult = { outcome: "completed"; output: ForEachOutput } | { outcome: "waiting"; nextRetryAt: Date };
+export type ForEachRunResult = { outcome: "completed"; output: ForEachOutput } | { outcome: "waiting"; nextRetryAt: Date | null; waitReason?: string };
 
 @Injectable()
 export class ForEachExecutionService {
@@ -162,10 +162,10 @@ export class ForEachExecutionService {
                 executionPath,
                 iterationIndex
               });
-              if (outcome.outcome === "retrying") {
+              if (outcome.outcome === "retrying" || outcome.outcome === "durable_wait") {
                 state.currentStepKey = nextStepKey;
                 await this.checkpoint(input.loopStepExecution.id, state, summary(state, config));
-                return { outcome: "waiting", nextRetryAt: outcome.nextRetryAt };
+                return { outcome: "waiting", nextRetryAt: outcome.nextRetryAt, waitReason: outcome.waitReason };
               }
               output = outcome.result.output;
               status = outcome.result.status;
@@ -293,6 +293,7 @@ function toStep(row: ForEachStepRow): WorkflowStepDefinition {
 }
 
 function isIntentionalWait(step: { effectStatus?: string | null; outputJson?: unknown }) {
+  if (step.effectStatus === "approval_waiting") return false;
   return ["delay", "wait_until", "waiting"].includes(step.effectStatus ?? "") || Boolean(step.outputJson && typeof step.outputJson === "object" && "waitReason" in step.outputJson);
 }
 

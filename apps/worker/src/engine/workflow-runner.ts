@@ -19,7 +19,7 @@ import { TryCatchExecutionService } from "./try-catch-execution.service";
 import { ExecuteWorkflowExecutionService } from "./execute-workflow-execution.service";
 import { EXECUTION_RUN_JOB, WORKFLOW_EXECUTIONS_QUEUE } from "../queues/queue.constants";
 
-export type WorkflowRunResult = { status: "completed" | "skipped" | "lost_lease" } | { status: "waiting"; nextRetryAt: Date };
+export type WorkflowRunResult = { status: "completed" | "skipped" | "lost_lease" } | { status: "waiting"; nextRetryAt: Date | null; waitReason?: string };
 
 type RuntimeStepRow = {
   id?: string | null;
@@ -163,8 +163,8 @@ export class WorkflowRunner {
         if (outcome.outcome === "completed") runtimeContext.setStepResult(step.key, outcome.result.status, outcome.result.output);
         await this.updateContextCache(current.id, runtimeContext);
 
-        if (outcome.outcome === "retrying") {
-          await this.markWaiting(current.id);
+        if (outcome.outcome === "retrying" || outcome.outcome === "durable_wait") {
+          await this.markWaiting(current.id, outcome.waitReason);
           if (heartbeat) clearInterval(heartbeat);
           await this.leaseService.release(current.id);
           this.logger?.info("worker.step.retry_scheduled", {
@@ -173,7 +173,7 @@ export class WorkflowRunner {
             stepType: step.type,
             nextRetryAt: outcome.nextRetryAt
           });
-          return { status: "waiting", nextRetryAt: outcome.nextRetryAt };
+          return { status: "waiting", nextRetryAt: outcome.nextRetryAt, waitReason: outcome.waitReason };
         }
         skipNext = Boolean(outcome.result.control?.skipNext);
         current = await this.reload(payload);
@@ -184,7 +184,7 @@ export class WorkflowRunner {
       await this.assertNoFailedSteps(execution.id);
       const completed = await this.prisma.execution.updateMany({
         where: { id: execution.id, status: { in: ACTIVE_EXECUTION_STATUSES as any } },
-        data: { status: ExecutionStatus.Completed, completedAt: new Date(), contextJson: toJson(context), errorJson: undefined }
+        data: { status: ExecutionStatus.Completed, completedAt: new Date(), contextJson: toJson(context), errorJson: undefined, waitReason: null }
       });
       if (heartbeat) clearInterval(heartbeat);
       await this.leaseService.release(execution.id);
@@ -217,6 +217,7 @@ export class WorkflowRunner {
         where: { id: execution.id, status: { in: ACTIVE_EXECUTION_STATUSES as any } },
         data: {
           status: ExecutionStatus.Failed,
+          waitReason: null,
           completedAt: new Date(),
           contextJson: toJson(context),
           errorJson: { message: error instanceof Error ? error.message : String(error) }
@@ -341,10 +342,10 @@ export class WorkflowRunner {
         });
         await this.updateContextCache(current.id, runtimeContext);
         if (outcome.outcome === "waiting") {
-          await this.markWaiting(current.id);
+          await this.markWaiting(current.id, outcome.waitReason);
           stopHeartbeat();
           await this.leaseService.release(current.id);
-          return { status: "waiting", nextRetryAt: outcome.nextRetryAt };
+          return { status: "waiting", nextRetryAt: outcome.nextRetryAt, waitReason: outcome.waitReason };
         }
         runtimeContext.setStepResult(step.key, StepExecutionStatus.Completed, outcome.output);
         current = await this.reload(payload);
@@ -360,7 +361,7 @@ export class WorkflowRunner {
         if (stepExecution.status === StepExecutionStatus.Completed) { runtimeContext.setStepResult(step.key, StepExecutionStatus.Completed, stepExecution.outputJson); nextStepKey = doneEdge.to; continue; }
         const outcome = await this.tryCatch.execute({ organizationId: current.organizationId, executionId: current.id, correlationId: (current as any).correlationId, tryStep: step, tryStepExecution: stepExecution as any, graph, stepRowsByKey, runtimeContext, parentContext: runtimeContext.context, parentPath: "root" });
         await this.updateContextCache(current.id, runtimeContext);
-        if (outcome.outcome === "waiting") { await this.markWaiting(current.id); stopHeartbeat(); await this.leaseService.release(current.id); return { status: "waiting", nextRetryAt: outcome.nextRetryAt }; }
+        if (outcome.outcome === "waiting") { await this.markWaiting(current.id, outcome.waitReason); stopHeartbeat(); await this.leaseService.release(current.id); return { status: "waiting", nextRetryAt: outcome.nextRetryAt, waitReason: outcome.waitReason }; }
         runtimeContext.setStepResult(step.key, StepExecutionStatus.Completed, outcome.output);
         current = await this.reload(payload);
         nextStepKey = doneEdge.to;
@@ -416,8 +417,8 @@ export class WorkflowRunner {
         if (outcome.outcome === "completed") runtimeContext.setStepResult(step.key, outcome.result.status, outcome.result.output);
         await this.updateContextCache(current.id, runtimeContext);
 
-        if (outcome.outcome === "retrying") {
-          await this.markWaiting(current.id);
+        if (outcome.outcome === "retrying" || outcome.outcome === "durable_wait") {
+          await this.markWaiting(current.id, outcome.waitReason);
           stopHeartbeat();
           await this.leaseService.release(current.id);
           this.logger?.info("worker.step.retry_scheduled", {
@@ -426,7 +427,7 @@ export class WorkflowRunner {
             stepType: step.type,
             nextRetryAt: outcome.nextRetryAt
           });
-          return { status: "waiting", nextRetryAt: outcome.nextRetryAt };
+          return { status: "waiting", nextRetryAt: outcome.nextRetryAt, waitReason: outcome.waitReason };
         }
 
         if (step.type === "return_workflow_output") {
@@ -468,7 +469,7 @@ export class WorkflowRunner {
     await this.assertNoFailedSteps(initialExecution.id);
     const completed = await this.prisma.execution.updateMany({
       where: { id: initialExecution.id, status: { in: ACTIVE_EXECUTION_STATUSES as any } },
-      data: { status: ExecutionStatus.Completed, completedAt: new Date(), contextJson: toJson(context), errorJson: undefined }
+      data: { status: ExecutionStatus.Completed, completedAt: new Date(), contextJson: toJson(context), errorJson: undefined, waitReason: null }
     });
     stopHeartbeat();
     await this.leaseService.release(initialExecution.id);
@@ -600,10 +601,10 @@ export class WorkflowRunner {
     await this.prisma.execution.update({ where: { id: executionId }, data: { contextJson: toJson(context) } });
   }
 
-  private markWaiting(executionId: string) {
+  private markWaiting(executionId: string, waitReason?: string) {
     return this.prisma.execution.updateMany({
       where: { id: executionId, status: { in: ACTIVE_EXECUTION_STATUSES as any } },
-      data: { status: ExecutionStatus.Retrying, completedAt: null }
+      data: { status: ExecutionStatus.Retrying, completedAt: null, waitReason: waitReason ?? "retry" }
     });
   }
 
@@ -712,10 +713,11 @@ function shouldSkipNext(step: WorkflowStepDefinition, output: unknown) {
 }
 
 function isControlStep(stepType: string) {
-  return stepType === "if" || stepType === "switch";
+  return stepType === "if" || stepType === "switch" || stepType === "approval";
 }
 
 function isIntentionalWait(stepExecution: { effectStatus: string | null; outputJson?: unknown }) {
+  if (stepExecution.effectStatus === "approval_waiting") return false;
   if (stepExecution.effectStatus === "delay" || stepExecution.effectStatus === "wait_until" || stepExecution.effectStatus === "waiting") return true;
   const output = stepExecution.outputJson;
   return Boolean(output && typeof output === "object" && "waitReason" in output);

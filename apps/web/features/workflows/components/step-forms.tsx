@@ -57,6 +57,7 @@ export function StepForm({ index, type, register, errors, disabled, setValue, ge
   }
   if (type === "execute_workflow") return <ExecuteWorkflowStepForm index={index} register={register} errors={errors} disabled={disabled} setValue={setValue} getValues={getValues} />;
   if (type === "return_workflow_output") return <ReturnWorkflowOutputStepForm index={index} register={register} errors={errors} disabled={disabled} setValue={setValue} getValues={getValues} />;
+  if (type === "approval") return <ApprovalStepForm index={index} register={register} errors={errors} disabled={disabled} setValue={setValue} getValues={getValues} />;
   if (type === "delay") {
     return <DelayStepForm index={index} register={register} errors={errors} disabled={disabled} setValue={setValue} getValues={getValues} />;
   }
@@ -64,6 +65,17 @@ export function StepForm({ index, type, register, errors, disabled, setValue, ge
     return <WaitUntilStepForm index={index} register={register} errors={errors} disabled={disabled} setValue={setValue} getValues={getValues} />;
   }
   return <ConditionalStepForm index={index} register={register} errors={errors} disabled={disabled} setValue={setValue} getValues={getValues} />;
+}
+
+function ApprovalStepForm({ index, register, disabled }: StepFormProps) {
+  return <div className="stack">
+    <label>Title<input disabled={disabled} maxLength={160} {...register(`steps.${index}.config.title`)} /></label>
+    <label>Description<textarea disabled={disabled} rows={3} maxLength={2000} {...register(`steps.${index}.config.description`)} /></label>
+    <label>Summary<textarea disabled={disabled} rows={4} maxLength={4000} placeholder="Expressions such as {{steps.transform.output}} are supported" {...register(`steps.${index}.config.summary`)} /></label>
+    <label>Expiration seconds<input disabled={disabled} type="number" min={1} max={31536000} {...register(`steps.${index}.config.expirationSeconds`, { valueAsNumber: true })} /></label>
+    <fieldset disabled={disabled}><legend>Roles allowed to decide</legend>{(["editor", "admin", "owner"] as const).map((role) => <label key={role}><input type="checkbox" value={role} {...register(`steps.${index}.config.allowedRoles`)} /> {role}</label>)}</fieldset>
+    <p className="muted">Admin and Owner always retain decision access. Connect the Approved, Rejected and Expired handles on the canvas.</p>
+  </div>;
 }
 
 function ExecuteWorkflowStepForm({ index, register, errors, disabled, getValues }: StepFormProps) {

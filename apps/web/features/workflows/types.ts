@@ -36,7 +36,8 @@ export type StepType =
   | "for_each"
   | "try_catch"
   | "execute_workflow"
-  | "return_workflow_output";
+  | "return_workflow_output"
+  | "approval";
 
 export type WorkflowVersionStatus = "DRAFT" | "ACTIVE" | "ARCHIVED";
 
@@ -104,7 +105,7 @@ export interface WorkflowDefinitionDto {
 
 export interface WorkflowGraphDto {
   entryStepKey: string;
-  edges: Array<{ from: string; to: string; kind: "next" | "if_true" | "if_false" | "switch_case" | "switch_default" | "for_each_body" | "for_each_done" | "try_body" | "try_catch" | "try_finally" | "try_done"; label?: string; caseKey?: string }>;
+  edges: Array<{ from: string; to: string; kind: "next" | "if_true" | "if_false" | "switch_case" | "switch_default" | "for_each_body" | "for_each_done" | "try_body" | "try_catch" | "try_finally" | "try_done" | "approval_approved" | "approval_rejected" | "approval_expired"; label?: string; caseKey?: string }>;
   terminalStepKeys?: string[];
 }
 

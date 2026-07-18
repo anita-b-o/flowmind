@@ -28,6 +28,7 @@ export interface ExecutionSummary {
   failedStepCount?: number;
   attempts?: number;
   cancelled?: boolean;
+  waitReason?: string | null;
 }
 
 export interface ExecutionListResponse {
@@ -92,6 +93,7 @@ export interface ExecutionDetail extends ExecutionSummary {
   parentExecution: { id: string; status: ExecutionStatus; workflowId: string; completedAt: string | null } | null;
   parentStepExecution: { id: string; stepKey: string; executionPath: string } | null;
   childExecutions: Array<{ id: string; status: ExecutionStatus; workflowId: string; workflowVersionId: string; depth: number; createdAt: string; startedAt: string | null; completedAt: string | null }>;
+  approvals: Array<{ id: string; status: string; title: string; requestedAt: string; expiresAt: string | null; decidedAt: string | null; decidedByUserId: string | null; stepKey: string; executionPath: string; iterationIndex: number | null }>;
 }
 
 export interface ExecutionActor {

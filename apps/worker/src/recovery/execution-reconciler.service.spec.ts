@@ -31,7 +31,9 @@ describe("ExecutionReconcilerService trace propagation", () => {
         }),
         findUniqueOrThrow: jest.fn(async () => ({ correlationId: state.correlationId }))
       },
-      stepExecution: { update: jest.fn() }
+      stepExecution: { update: jest.fn() },
+      approvalRequest: { findMany: jest.fn(async () => []) },
+      $transaction: jest.fn()
     };
     const queue = { close: jest.fn(), add: jest.fn(async (_name, data, opts) => jobs.push({ data, opts }) && { id: opts.jobId }) };
     const service = new ExecutionReconcilerService(prisma as any, new ShutdownStateService(), queue as any, { info: jest.fn() } as any);

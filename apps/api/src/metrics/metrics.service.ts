@@ -100,6 +100,8 @@ export class ApiMetricsService implements OnModuleInit, OnModuleDestroy {
     labelNames: ["operation", "error_category"],
     registers: [this.registry]
   });
+  readonly approvalDecisions = new Counter({ name: "flowmind_approval_decisions_total", help: "Approval terminal decisions.", labelNames: ["outcome", "assignee_policy"], registers: [this.registry] });
+  readonly approvalDecisionLatency = new Histogram({ name: "flowmind_approval_decision_latency_seconds", help: "Approval decision latency.", labelNames: ["outcome", "assignee_policy"], buckets: [1, 10, 60, 300, 3600, 86400, 604800], registers: [this.registry] });
   readonly scheduledTriggers = new Gauge({
     name: "flowmind_scheduled_triggers",
     help: "Scheduled triggers by state.",

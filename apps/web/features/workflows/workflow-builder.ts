@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { validateTransformStepConfig } from "@automation/shared-types";
+import { normalizeApprovalConfig, validateTransformStepConfig } from "@automation/shared-types";
 import type { RetryPolicyDto, StepType, WorkflowDefinitionDto, WorkflowStepDto, WorkflowVersion } from "./types";
 import { buildGraph } from "./graph-builder";
 
@@ -30,6 +30,7 @@ export const STEP_TYPES: Array<{ value: StepType; label: string }> = [
   { value: "return_workflow_output", label: "Return Workflow Output" },
   { value: "delay", label: "Delay" },
   { value: "wait_until", label: "Wait Until" },
+  { value: "approval", label: "Approval" },
   { value: "conditional", label: "Conditional" }
 ];
 
@@ -94,7 +95,8 @@ export const workflowEditorSchema: z.ZodType<WorkflowEditorFormValue> = z
           "execute_workflow",
           "return_workflow_output",
           "delay",
-          "wait_until"
+          "wait_until",
+          "approval"
         ]),
         expanded: z.boolean(),
         config: z.record(z.unknown()),
@@ -211,6 +213,9 @@ function validateStepConfig(step: StepFormValue, index: number, ctx: z.Refinemen
     if (typeof config.timestamp === "string" && !config.timestamp.includes("{{") && Number.isNaN(Date.parse(config.timestamp))) {
       ctx.addIssue({ code: "custom", path: ["steps", index, "config", "timestamp"], message: "Timestamp must be valid." });
     }
+  }
+  if (step.type === "approval") {
+    try { normalizeApprovalConfig(config); } catch (error) { ctx.addIssue({ code: "custom", path: ["steps", index, "config", "title"], message: error instanceof Error ? error.message : "Approval configuration is invalid." }); }
   }
 }
 
@@ -357,6 +362,8 @@ export function defaultConfig(type: StepType): Record<string, unknown> {
       return { duration: "30 seconds" };
     case "wait_until":
       return { timestamp: "" };
+    case "approval":
+      return { title: "Approval required", description: "", summary: "", expirationSeconds: "", assigneePolicy: "ANY_AUTHORIZED_USER", allowedRoles: ["editor", "admin", "owner"], approvedStepKey: "", rejectedStepKey: "", expiredStepKey: "" };
   }
 }
 
@@ -588,6 +595,8 @@ export function serializeStepConfig(step: StepFormValue) {
       return { duration: String(config.duration ?? "") };
     case "wait_until":
       return { timestamp: String(config.timestamp ?? "") };
+    case "approval":
+      return { title: String(config.title ?? ""), description: String(config.description ?? ""), summary: String(config.summary ?? ""), ...(config.expirationSeconds ? { expirationSeconds: Number(config.expirationSeconds) } : {}), assigneePolicy: "ANY_AUTHORIZED_USER", allowedRoles: Array.isArray(config.allowedRoles) ? config.allowedRoles : ["editor", "admin", "owner"] };
   }
 }
 

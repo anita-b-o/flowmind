@@ -62,6 +62,11 @@ describe("WorkerMetricsService", () => {
     service.recordLoopIteration("success", "sequential");
     service.recordLoopIteration("failed", "sequential");
     service.recordLoopExecution("completed", "sequential", 0.5);
+    service.approvalRequests.inc({ assignee_policy: "any_authorized_user" });
+    service.recordApproval("approved", "ANY_AUTHORIZED_USER", 10);
+    service.recordApproval("rejected", "ANY_AUTHORIZED_USER", 20);
+    service.recordApproval("expired", "ANY_AUTHORIZED_USER", 42);
+    service.recordApproval("cancelled", "ANY_AUTHORIZED_USER", 30);
     const output = await service.registry.metrics();
     expect(output).toContain("flowmind_worker_active_jobs");
     expect(output).toContain("flowmind_execution_lease_conflict_total");
@@ -70,6 +75,11 @@ describe("WorkerMetricsService", () => {
     expect(output).toContain("flowmind_dlq_publish_failures_total");
     expect(output).toContain('flowmind_loop_iterations_total{outcome="success",mode="sequential",service="worker"} 1');
     expect(output).toContain('flowmind_loop_iteration_failures_total{mode="sequential",service="worker"} 1');
+    expect(output).toContain('flowmind_approval_outcomes_total{outcome="expired",assignee_policy="any_authorized_user",service="worker"} 1');
+    expect(output).toContain('flowmind_approval_outcomes_total{outcome="approved",assignee_policy="any_authorized_user",service="worker"} 1');
+    expect(output).toContain('flowmind_approval_outcomes_total{outcome="rejected",assignee_policy="any_authorized_user",service="worker"} 1');
+    expect(output).toContain('flowmind_approval_outcomes_total{outcome="cancelled",assignee_policy="any_authorized_user",service="worker"} 1');
+    expect(output.match(/flowmind_approval_decision_latency_seconds_count\{[^}]*outcome="approved"[^}]*\} 1/g)).toHaveLength(1);
     expect(output).not.toMatch(/(executionId|workflowId|workerId|jobId|correlationId|requestId|email|hostname)=/);
   });
 });

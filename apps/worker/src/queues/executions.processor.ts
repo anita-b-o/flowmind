@@ -37,7 +37,7 @@ export class ExecutionsProcessor extends WorkerHost {
       try {
         this.logger.info("worker.job.received", { jobId: job.id });
         const result = await this.runner.run(job.data);
-        if (result.status === "waiting") {
+        if (result.status === "waiting" && result.nextRetryAt) {
           await this.queue.add(
             EXECUTION_RUN_JOB,
             { ...job.data, requestId: newTraceId(), enqueuedAt: new Date().toISOString() },

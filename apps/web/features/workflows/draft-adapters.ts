@@ -190,7 +190,7 @@ export function addStepToDraft(draft: WorkflowDraftModel, type: StepType): Workf
   const step = { ...emptyStep(draft.stepOrder.length, type), id: crypto.randomUUID(), key, name: labelForType(type), config: defaultConfig(type), timeoutSeconds: defaultTimeout(type) };
   const previous = draft.stepOrder.at(-1);
   const previousType = previous ? draft.stepsByKey[previous]?.type : undefined;
-  const nextEdges = previous && !["if", "switch", "for_each", "try_catch"].includes(previousType ?? "") ? [...draft.edges, { source: previous, sourceHandle: "next", target: key }] : draft.edges;
+  const nextEdges = previous && !["if", "switch", "for_each", "try_catch", "approval"].includes(previousType ?? "") ? [...draft.edges, { source: previous, sourceHandle: "next", target: key }] : draft.edges;
   return withValidation({
     ...draft,
     stepsByKey: { ...draft.stepsByKey, [key]: step },
@@ -290,6 +290,7 @@ function formToDraftEdges(steps: StepFormValue[]): DraftEdge[] {
       addFormEdge(edges, keys, step.key, "done", String(step.config.doneStepKey ?? ""));
       return;
     }
+    if (step.type === "approval") { addFormEdge(edges, keys, step.key, "approved", String(step.config.approvedStepKey ?? "")); addFormEdge(edges, keys, step.key, "rejected", String(step.config.rejectedStepKey ?? "")); addFormEdge(edges, keys, step.key, "expired", String(step.config.expiredStepKey ?? "")); return; }
     addFormEdge(edges, keys, step.key, "next", String(step.config.nextStepKey ?? nextLinear ?? ""));
   });
   return edges;
@@ -321,6 +322,10 @@ function routeStepFromEdges(step: StepFormValue | undefined, edges: DraftEdge[])
     config.catchStepKey = outgoing.find((edge) => edge.sourceHandle === "catch")?.target ?? "";
     config.finallyStepKey = outgoing.find((edge) => edge.sourceHandle === "finally")?.target ?? "";
     config.doneStepKey = outgoing.find((edge) => edge.sourceHandle === "done")?.target ?? "";
+  } else if (step.type === "approval") {
+    config.approvedStepKey = outgoing.find((edge) => edge.sourceHandle === "approved")?.target ?? "";
+    config.rejectedStepKey = outgoing.find((edge) => edge.sourceHandle === "rejected")?.target ?? "";
+    config.expiredStepKey = outgoing.find((edge) => edge.sourceHandle === "expired")?.target ?? "";
   } else {
     config.nextStepKey = outgoing.find((edge) => edge.sourceHandle === "next")?.target ?? "";
   }
@@ -355,6 +360,7 @@ function validateHandleForSource(type: StepType, handle: string) {
   if (type === "switch") return handle === "default" || handle.startsWith("case:") ? undefined : "Switch nodes must connect from a case or Default.";
   if (type === "for_each") return handle === "body" || handle === "done" ? undefined : "FOR_EACH nodes must connect from Body or Done.";
   if (type === "try_catch") return ["body", "catch", "finally", "done"].includes(handle) ? undefined : "TRY_CATCH nodes must connect from Body, Catch, Finally or Done.";
+  if (type === "approval") return ["approved", "rejected", "expired"].includes(handle) ? undefined : "APPROVAL nodes must connect from Approved, Rejected or Expired.";
   return handle === "next" ? undefined : "This node type can only use a Next connection.";
 }
 

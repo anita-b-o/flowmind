@@ -69,6 +69,9 @@ export function graphKindToHandle(edge: WorkflowGraphDto["edges"][number]) {
   if (edge.kind === "try_catch") return "catch";
   if (edge.kind === "try_finally") return "finally";
   if (edge.kind === "try_done") return "done";
+  if (edge.kind === "approval_approved") return "approved";
+  if (edge.kind === "approval_rejected") return "rejected";
+  if (edge.kind === "approval_expired") return "expired";
   return "next";
 }
 
@@ -82,6 +85,11 @@ export function handleToGraphKind(handle: string, sourceType?: StepType): Workfl
     if (handle === "catch") return "try_catch";
     if (handle === "finally") return "try_finally";
     if (handle === "done") return "try_done";
+  }
+  if (sourceType === "approval") {
+    if (handle === "approved") return "approval_approved";
+    if (handle === "rejected") return "approval_rejected";
+    if (handle === "expired") return "approval_expired";
   }
   if (handle === "body") return "for_each_body";
   if (handle === "done") return "for_each_done";
@@ -97,7 +105,7 @@ export function caseKeyFromHandle(handle: string) {
 }
 
 export function isExclusiveHandle(handle: string) {
-  return handle === "next" || handle === "true" || handle === "false" || handle === "default" || handle === "body" || handle === "catch" || handle === "finally" || handle === "done" || handle.startsWith("case:");
+  return handle === "next" || handle === "true" || handle === "false" || handle === "default" || handle === "body" || handle === "catch" || handle === "finally" || handle === "done" || handle === "approved" || handle === "rejected" || handle === "expired" || handle.startsWith("case:");
 }
 
 export function sanitizeStepKey(raw: string) {

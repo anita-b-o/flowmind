@@ -16,6 +16,8 @@ export type GraphStepLike = {
   config: Record<string, unknown>;
 };
 
+import { normalizeApprovalConfig } from "./approval";
+
 export type GraphEdgeLike = {
   from?: unknown;
   to?: unknown;
@@ -30,7 +32,7 @@ export type GraphLike = {
   terminalStepKeys?: unknown;
 };
 
-const EDGE_KINDS = new Set(["next", "if_true", "if_false", "switch_case", "switch_default", "for_each_body", "for_each_done", "try_body", "try_catch", "try_finally", "try_done"]);
+const EDGE_KINDS = new Set(["next", "if_true", "if_false", "switch_case", "switch_default", "for_each_body", "for_each_done", "try_body", "try_catch", "try_finally", "try_done", "approval_approved", "approval_rejected", "approval_expired"]);
 const STEP_TYPES = {
   If: "if",
   Switch: "switch",
@@ -39,7 +41,8 @@ const STEP_TYPES = {
   ForEach: "for_each",
   TryCatch: "try_catch",
   ExecuteWorkflow: "execute_workflow",
-  ReturnWorkflowOutput: "return_workflow_output"
+  ReturnWorkflowOutput: "return_workflow_output",
+  Approval: "approval"
 } as const;
 const DURATION_PATTERN = /^\s*([1-9][0-9]*)\s+(second|seconds|minute|minutes|hour|hours)\s*$/i;
 
@@ -109,6 +112,7 @@ export function validateGraphV2(steps: GraphStepLike[], graph: GraphLike | undef
     else if (step.type === STEP_TYPES.Switch) validateSwitch(step, stepKeySet, edges, issues);
     else if (step.type === STEP_TYPES.ForEach) validateForEach(step, steps, stepKeySet, edges, issues);
     else if (step.type === STEP_TYPES.TryCatch) validateTryCatch(step, steps, stepKeySet, edges, issues);
+    else if (step.type === STEP_TYPES.Approval) validateApproval(step, edges, issues);
     else {
       validateNonControl(step, edges, issues);
     }
@@ -119,6 +123,17 @@ export function validateGraphV2(steps: GraphStepLike[], graph: GraphLike | undef
   }
 
   return issues;
+}
+
+function validateApproval(step: GraphStepLike, edges: GraphEdgeLike[], issues: GraphValidationIssue[]) {
+  try { normalizeApprovalConfig(step.config); } catch (error) {
+    issues.push(issue("invalid_approval_config", error instanceof Error ? error.message : "APPROVAL configuration is invalid.", step.key));
+  }
+  const outgoing = outgoingEdges(step.key, edges);
+  for (const [kind, handle] of [["approval_approved", "approved"], ["approval_rejected", "rejected"], ["approval_expired", "expired"]] as const) {
+    if (outgoing.filter((edge) => stringValue(edge.kind) === kind).length !== 1) issues.push(issue(`invalid_approval_${handle}`, `APPROVAL must have exactly one ${handle} connection.`, step.key, undefined, handle));
+  }
+  for (const edge of outgoing) if (!["approval_approved", "approval_rejected", "approval_expired"].includes(stringValue(edge.kind) ?? "")) issues.push(issue("invalid_approval_edge", "APPROVAL may only use Approved, Rejected and Expired edges.", step.key, edgeId(edge), handleForKind(stringValue(edge.kind), edge)));
 }
 
 function validateExecuteWorkflow(step: GraphStepLike, issues: GraphValidationIssue[]) {
@@ -451,6 +466,9 @@ function handleForKind(kind: string | undefined, edge: GraphEdgeLike) {
   if (kind === "try_catch") return "catch";
   if (kind === "try_finally") return "finally";
   if (kind === "try_done") return "done";
+  if (kind === "approval_approved") return "approved";
+  if (kind === "approval_rejected") return "rejected";
+  if (kind === "approval_expired") return "expired";
   return "next";
 }
 

@@ -16,6 +16,9 @@ export type DlqReason = "non_retryable" | "attempts_exhausted" | "ambiguous_effe
 export class WorkerMetricsService implements OnModuleInit, OnModuleDestroy {
   readonly registry = new Registry();
   private server?: Server;
+  readonly approvalRequests = new Counter({ name: "flowmind_approval_requests_total", help: "Approval requests created.", labelNames: ["assignee_policy"], registers: [this.registry] });
+  readonly approvalOutcomes = new Counter({ name: "flowmind_approval_outcomes_total", help: "Approval outcomes processed.", labelNames: ["outcome", "assignee_policy"], registers: [this.registry] });
+  readonly approvalLatency = new Histogram({ name: "flowmind_approval_decision_latency_seconds", help: "Approval decision latency.", labelNames: ["outcome", "assignee_policy"], buckets: [1, 10, 60, 300, 3600, 86400, 604800], registers: [this.registry] });
 
   readonly jobsReceived = new Counter({
     name: "flowmind_workflow_jobs_received_total",
@@ -277,6 +280,11 @@ export class WorkerMetricsService implements OnModuleInit, OnModuleDestroy {
     this.leaseAcquire.inc({ outcome });
     if (outcome === "conflict") this.leaseConflict.inc();
     if (outcome === "lost") this.leaseLost.inc();
+  }
+  recordApproval(outcome: string, assigneePolicy: string, latencySeconds?: number) {
+    const labels = { outcome, assignee_policy: assigneePolicy.toLowerCase() };
+    this.approvalOutcomes.inc(labels);
+    if (latencySeconds !== undefined) this.approvalLatency.observe(labels, latencySeconds);
   }
 
   recordStep(stepType: string, outcome: StepOutcome, durationSeconds: number, errorCategory?: WorkerErrorCategory) {

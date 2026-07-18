@@ -32,6 +32,7 @@ export function buildGraph(steps: StepFormValue[]): WorkflowGraphDto | undefined
       addEdge(edges, key, String(step.config.doneStepKey ?? ""), "try_done", "done", undefined, stepKeys);
       return;
     }
+    if (step.type === "approval") { addEdge(edges, key, String(step.config.approvedStepKey ?? ""), "approval_approved", "approved", undefined, stepKeys); addEdge(edges, key, String(step.config.rejectedStepKey ?? ""), "approval_rejected", "rejected", undefined, stepKeys); addEdge(edges, key, String(step.config.expiredStepKey ?? ""), "approval_expired", "expired", undefined, stepKeys); return; }
     addEdge(edges, key, String(step.config.nextStepKey ?? nextLinearKey(index) ?? ""), "next", undefined, undefined, stepKeys);
   });
   const targets = new Set(edges.map((edge) => edge.from));

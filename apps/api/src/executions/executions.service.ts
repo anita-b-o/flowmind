@@ -204,6 +204,7 @@ export class ExecutionsService {
         parentExecution: { select: { id: true, status: true, workflowId: true, completedAt: true } },
         parentStepExecution: { select: { id: true, stepKey: true, executionPath: true } },
         childExecutions: { select: { id: true, status: true, workflowId: true, workflowVersionId: true, depth: true, createdAt: true, startedAt: true, completedAt: true }, orderBy: { createdAt: "asc" } },
+        approvalRequests: { select: { id: true, status: true, title: true, requestedAt: true, expiresAt: true, decidedAt: true, decidedByUserId: true, stepKey: true, executionPath: true, iterationIndex: true }, orderBy: { requestedAt: "desc" } },
         deadLetters: {
           select: {
             id: true,
@@ -286,6 +287,8 @@ export class ExecutionsService {
       parentExecution: execution.parentExecution,
       parentStepExecution: execution.parentStepExecution,
       childExecutions: execution.childExecutions,
+      waitReason: execution.waitReason,
+      approvals: execution.approvalRequests,
       deadLetter: execution.deadLetters.find((item) => !item.resolvedAt)
         ? formatDeadLetter(execution.deadLetters.find((item) => !item.resolvedAt)!)
         : null,
@@ -319,6 +322,7 @@ export class ExecutionsService {
         lockedBy: null,
         lockedUntil: null,
         lastHeartbeatAt: null
+        ,waitReason: null
       }
     });
     const updated = await this.prisma.execution.findUniqueOrThrow({ where: { id: executionId } });
@@ -326,8 +330,17 @@ export class ExecutionsService {
       const rootId = (updated as any).rootExecutionId ?? updated.id;
       await this.prisma.execution.updateMany({
         where: { organizationId, rootExecutionId: rootId, status: { in: ACTIVE_EXECUTION_STATUSES as any } },
-        data: { status: ExecutionStatus.Cancelled, completedAt: now, cancelledAt: now, cancelRequestedAt: now, cancelRequestedByUserId: userId, cancelReason: reason ?? "Parent execution cancelled", lockedBy: null, lockedUntil: null, lastHeartbeatAt: null }
+        data: { status: ExecutionStatus.Cancelled, completedAt: now, cancelledAt: now, cancelRequestedAt: now, cancelRequestedByUserId: userId, cancelReason: reason ?? "Parent execution cancelled", lockedBy: null, lockedUntil: null, lastHeartbeatAt: null, waitReason: null }
       });
+      const cancelledApprovals = await this.prisma.approvalRequest.findMany({ where: { organizationId, status: "PENDING", execution: { OR: [{ id: executionId }, { rootExecutionId: rootId }] } }, select: { id: true, workflowId: true, executionId: true, stepKey: true, assigneePolicy: true, requestedAt: true } });
+      for (const approval of cancelledApprovals) {
+        const changed = await this.prisma.approvalRequest.updateMany({ where: { id: approval.id, status: "PENDING" }, data: { status: "CANCELLED", decidedAt: now, version: { increment: 1 } } });
+        if (changed.count !== 1) continue;
+        await this.auditLogs?.record({ organizationId, actorUserId: userId, action: "approval.cancelled", resourceType: "ApprovalRequest", resourceId: approval.id, correlationId: execution.correlationId, metadata: { workflowId: approval.workflowId, executionId: approval.executionId, stepKey: approval.stepKey, outcome: "cancelled" } });
+        const labels = { outcome: "cancelled", assignee_policy: approval.assigneePolicy.toLowerCase() };
+        this.metrics?.approvalDecisions.inc(labels);
+        this.metrics?.approvalDecisionLatency.observe(labels, Math.max(0, (now.getTime() - approval.requestedAt.getTime()) / 1000));
+      }
       this.metrics?.recordExecutionCancel("success");
       await this.auditLogs?.record({
         organizationId,
@@ -597,6 +610,7 @@ function summary(item: any, counts?: StepCount) {
     correlationId: item.correlationId,
     status: item.status,
     publicStatus: publicExecutionStatus(item.status),
+    waitReason: item.waitReason ?? null,
     mode: item.executionMode,
     startedAt: item.startedAt,
     completedAt: item.completedAt,

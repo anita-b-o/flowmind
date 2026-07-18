@@ -71,7 +71,8 @@ export enum StepType {
   TryCatch = "try_catch",
   ExecuteWorkflow = "execute_workflow",
   ReturnWorkflowOutput = "return_workflow_output",
-  SubworkflowTrigger = "subworkflow_trigger"
+  SubworkflowTrigger = "subworkflow_trigger",
+  Approval = "approval"
 }
 
 export enum ConnectionType {
@@ -126,7 +127,7 @@ export interface WorkflowDefinition {
   ui?: WorkflowDefinitionUi;
 }
 
-export type WorkflowGraphEdgeKind = "next" | "if_true" | "if_false" | "switch_case" | "switch_default" | "for_each_body" | "for_each_done" | "try_body" | "try_catch" | "try_finally" | "try_done";
+export type WorkflowGraphEdgeKind = "next" | "if_true" | "if_false" | "switch_case" | "switch_default" | "for_each_body" | "for_each_done" | "try_body" | "try_catch" | "try_finally" | "try_done" | "approval_approved" | "approval_rejected" | "approval_expired";
 
 export interface WorkflowGraphEdgeDefinition {
   from: string;
@@ -181,7 +182,8 @@ export interface StepResult {
     skipNext?: boolean;
     nextStepKey?: string;
     waitUntil?: string;
-    waitReason?: "delay" | "wait_until";
+    waitReason?: "delay" | "wait_until" | "approval";
+    durableWait?: boolean;
   };
 }
 
@@ -211,3 +213,4 @@ export * from "./workflow-variables";
 export * from "./for-each";
 export * from "./try-catch";
 export * from "./subworkflow";
+export * from "./approval";

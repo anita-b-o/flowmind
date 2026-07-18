@@ -90,7 +90,8 @@ export class StepExecutor {
   }) {
     const policy = this.retryPolicyResolver.resolve(input.step);
     const startedAt = new Date();
-    const nextAttempt = input.stepExecution.attemptCount + 1;
+    const resumesApprovalWait = input.step.type === StepType.Approval && input.stepExecution.effectStatus === "approval_waiting";
+    const nextAttempt = resumesApprovalWait ? input.stepExecution.attemptCount : input.stepExecution.attemptCount + 1;
     await this.prisma.stepExecution.update({
       where: { id: input.stepExecution.id },
       data: {
@@ -173,6 +174,10 @@ export class StepExecutor {
       const completedAt = new Date();
       const control = result.control;
       const waitUntil = control?.waitUntil ? new Date(control.waitUntil) : null;
+      if (control?.durableWait) {
+        await this.prisma.stepExecution.update({ where: { id: input.stepExecution.id }, data: { status: StepExecutionStatus.Retrying, outputJson: toJson(sanitizePersisted(result.output)), errorJson: Prisma.JsonNull, completedAt, durationMs: completedAt.getTime() - startedAt.getTime(), nextRetryAt: null, effectStatus: "approval_waiting" } });
+        return { outcome: "durable_wait" as const, nextRetryAt: null, waitReason: "approval" as const };
+      }
       if (waitUntil && Number.isFinite(waitUntil.getTime()) && waitUntil > completedAt) {
         await this.prisma.stepExecution.update({
           where: { id: input.stepExecution.id },

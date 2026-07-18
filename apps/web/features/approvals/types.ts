@@ -1,0 +1,3 @@
+export type ApprovalStatus = "PENDING" | "APPROVED" | "REJECTED" | "EXPIRED" | "CANCELLED";
+export interface Approval { id: string; status: ApprovalStatus; title: string; description?: string | null; summary?: string | null; requestedAt: string; expiresAt?: string | null; decidedAt?: string | null; decidedByUserId?: string | null; decisionComment?: string | null; workflow: { id: string; name: string }; executionId: string; stepKey: string; executionPath: string; iterationIndex?: number | null; allowedRoles: string[]; }
+export interface ApprovalList { items: Approval[]; page: number; pageSize: number; total: number; }

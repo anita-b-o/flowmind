@@ -11,9 +11,9 @@ export class QueueService {
     @InjectQueue(SCHEDULED_TRIGGERS_QUEUE) private readonly scheduledTriggersQueue: Queue
   ) {}
 
-  enqueueExecution(payload: ExecutionJobPayload) {
+  enqueueExecution(payload: ExecutionJobPayload, jobId = `execution-${payload.executionId}`) {
     return this.executionsQueue.add(EXECUTION_RUN_JOB, payload, {
-      jobId: `execution-${payload.executionId}`,
+      jobId,
       attempts: 1,
       removeOnComplete: 1000,
       removeOnFail: false
