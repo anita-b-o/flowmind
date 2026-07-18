@@ -42,6 +42,9 @@ export function canManageDataStores(role: OrganizationRole) {
   return roleRank(role) >= rank.editor;
 }
 
+export function canManageNotificationRules(role: OrganizationRole) { return roleRank(role) >= rank.editor; }
+export function canRetryNotification(role: OrganizationRole) { return roleRank(role) >= rank.admin; }
+
 function roleRank(role: OrganizationRole) {
   return role ? rank[role] ?? 0 : 0;
 }

@@ -1,0 +1,10 @@
+"use client";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { apiClient } from "../../lib/api-client";
+import { useAuth } from "../auth/use-auth";
+import type { NotificationItem, NotificationList, NotificationRule, NotificationStatus } from "./types";
+export function useNotificationRules() { const { activeOrganizationId } = useAuth(); return useQuery({ queryKey: ["notification-rules", activeOrganizationId], queryFn: () => apiClient.get<NotificationRule[]>("/notification-rules"), enabled: Boolean(activeOrganizationId) }); }
+export function useNotifications(status: NotificationStatus | "", page: number) { const { activeOrganizationId } = useAuth(); return useQuery({ queryKey: ["notifications", activeOrganizationId, status, page], queryFn: () => apiClient.get<NotificationList>("/notifications", { status, page, pageSize: 20 }), enabled: Boolean(activeOrganizationId) }); }
+export function useNotification(id: string) { const { activeOrganizationId } = useAuth(); return useQuery({ queryKey: ["notification", activeOrganizationId, id], queryFn: () => apiClient.get<NotificationItem>(`/notifications/${id}`), enabled: Boolean(activeOrganizationId && id) }); }
+export function useNotificationRuleMutations() { const client = useQueryClient(); const invalidate = () => client.invalidateQueries({ queryKey: ["notification-rules"] }); return { create: useMutation({ mutationFn: (dto: Record<string, unknown>) => apiClient.post("/notification-rules", dto), onSuccess: invalidate }), update: useMutation({ mutationFn: ({ id, dto }: { id: string; dto: Record<string, unknown> }) => apiClient.patch(`/notification-rules/${id}`, dto), onSuccess: invalidate }), remove: useMutation({ mutationFn: (id: string) => apiClient.delete(`/notification-rules/${id}`), onSuccess: invalidate }) }; }
+export function useRetryNotification(id: string) { const client = useQueryClient(); return useMutation({ mutationFn: () => apiClient.post(`/notifications/${id}/retry`, {}), onSuccess: () => { void client.invalidateQueries({ queryKey: ["notification"] }); void client.invalidateQueries({ queryKey: ["notifications"] }); } }); }

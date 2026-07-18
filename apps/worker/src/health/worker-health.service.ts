@@ -5,6 +5,7 @@ import { PrismaService } from "../prisma/prisma.service";
 import { ShutdownStateService } from "../runtime/shutdown-state.service";
 import { ExecutionReconcilerService } from "../recovery/execution-reconciler.service";
 import { EventDispatcherService } from "../internal-events/event-dispatcher.service";
+import { NotificationReconcilerService } from "../notifications/notification-reconciler.service";
 
 @Injectable()
 export class WorkerHealthService implements OnModuleInit, OnModuleDestroy {
@@ -14,7 +15,8 @@ export class WorkerHealthService implements OnModuleInit, OnModuleDestroy {
     private readonly prisma: PrismaService,
     private readonly shutdown: ShutdownStateService,
     private readonly reconciler: ExecutionReconcilerService,
-    private readonly eventDispatcher: EventDispatcherService
+    private readonly eventDispatcher: EventDispatcherService,
+    private readonly notificationReconciler: NotificationReconcilerService
   ) {}
 
   onModuleInit() {
@@ -61,8 +63,19 @@ export class WorkerHealthService implements OnModuleInit, OnModuleDestroy {
     };
     checks.database = await this.checkDatabase();
     checks.redis = await this.checkRedis();
-    const ready = Object.values(checks).every((value) => ["up", "ok"].includes(value));
+    checks.notifications = await this.notificationState();
+    const ready = Object.entries(checks).every(([key, value]) => key === "notifications" ? ["disabled", "ready"].includes(value) : ["up", "ok"].includes(value));
     return { status: ready ? "ready" : "not_ready", checks };
+  }
+
+  private async notificationState() {
+    try {
+      const enabled = await this.prisma.notificationRule.count({ where: { enabled: true, deletedAt: null } });
+      if (!enabled) return "disabled";
+      if (!this.notificationReconciler.isActive()) return "degraded";
+      const invalid = await this.prisma.notificationRule.count({ where: { enabled: true, deletedAt: null, connection: { OR: [{ status: { not: "ACTIVE" } }, { deletedAt: { not: null } }, { type: { not: "smtp" } }] } } });
+      return invalid ? "degraded" : "ready";
+    } catch { return "degraded"; }
   }
 
   private async checkDatabase() {

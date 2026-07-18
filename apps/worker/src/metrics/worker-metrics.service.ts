@@ -29,6 +29,11 @@ export class WorkerMetricsService implements OnModuleInit, OnModuleDestroy {
   readonly executionQueueLatency = new Histogram({ name: "flowmind_execution_queue_latency_seconds", help: "Execution queue latency by bounded origin.", labelNames: ["origin"], buckets: [0.01, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60, 300], registers: [this.registry] });
   readonly internalEventChainLimit = new Counter({ name: "flowmind_internal_event_chain_limit_exceeded_total", help: "Internal event chains suppressed by a safety limit.", labelNames: ["limit_type"], registers: [this.registry] });
   readonly internalEventBacklog = new Gauge({ name: "flowmind_internal_event_backlog", help: "Internal event durable backlog.", labelNames: ["state"], registers: [this.registry] });
+  readonly notificationDeliveries = new Counter({ name: "flowmind_notification_deliveries_total", help: "Notification delivery outcomes.", labelNames: ["channel", "outcome", "error_category"], registers: [this.registry] });
+  readonly notificationRequests = new Counter({ name: "flowmind_notification_requests_total", help: "Durable notification requests materialized.", labelNames: ["channel", "outcome"], registers: [this.registry] });
+  readonly notificationRetries = new Counter({ name: "flowmind_notification_retries_total", help: "Notification retries scheduled.", labelNames: ["channel", "error_category"], registers: [this.registry] });
+  readonly notificationDeliveryLatency = new Histogram({ name: "flowmind_notification_delivery_latency_seconds", help: "Notification request to terminal delivery latency.", labelNames: ["channel", "outcome"], buckets: [0.1, 0.5, 1, 2.5, 5, 10, 30, 60, 300, 1800], registers: [this.registry] });
+  readonly notificationBacklog = new Gauge({ name: "flowmind_notification_backlog", help: "Durable notification backlog by state.", labelNames: ["state"], registers: [this.registry] });
 
   readonly jobsReceived = new Counter({
     name: "flowmind_workflow_jobs_received_total",

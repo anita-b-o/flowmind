@@ -2,7 +2,7 @@ import { BullModule } from "@nestjs/bullmq";
 import { Module } from "@nestjs/common";
 import { PrismaService } from "./prisma/prisma.service";
 import { ExecutionsProcessor } from "./queues/executions.processor";
-import { WORKFLOW_EXECUTIONS_QUEUE } from "./queues/queue.constants";
+import { NOTIFICATION_DELIVERIES_QUEUE, WORKFLOW_EXECUTIONS_QUEUE } from "./queues/queue.constants";
 import { WORKFLOW_EXECUTIONS_DLQ } from "./queues/queue.constants";
 import { WorkflowRunner } from "./engine/workflow-runner";
 import { StepExecutor } from "./engine/step-executor";
@@ -50,6 +50,11 @@ import { ReturnWorkflowOutputHandler } from "./engine/handlers/return-workflow-o
 import { ApprovalHandler } from "./engine/handlers/approval.handler";
 import { InternalEventEmitter } from "./internal-events/internal-event-emitter.service";
 import { EventDispatcherService } from "./internal-events/event-dispatcher.service";
+import { NotificationMaterializerService } from "./notifications/notification-materializer.service";
+import { NotificationProcessor } from "./notifications/notification.processor";
+import { NotificationReconcilerService } from "./notifications/notification-reconciler.service";
+import { NotificationTemplates } from "./notifications/notification-templates";
+import { EmailProvider, SmtpEmailProvider } from "./notifications/email-provider";
 
 const redisUrl = new URL(process.env.REDIS_URL ?? "redis://localhost:6379");
 
@@ -61,7 +66,7 @@ const redisUrl = new URL(process.env.REDIS_URL ?? "redis://localhost:6379");
         port: Number(redisUrl.port || 6379)
       }
     }),
-    BullModule.registerQueue({ name: WORKFLOW_EXECUTIONS_QUEUE }, { name: WORKFLOW_EXECUTIONS_DLQ })
+    BullModule.registerQueue({ name: WORKFLOW_EXECUTIONS_QUEUE }, { name: WORKFLOW_EXECUTIONS_DLQ }, { name: NOTIFICATION_DELIVERIES_QUEUE })
   ],
   providers: [
     PrismaService,
@@ -116,6 +121,12 @@ const redisUrl = new URL(process.env.REDIS_URL ?? "redis://localhost:6379");
     ApprovalHandler
     ,InternalEventEmitter
     ,EventDispatcherService
+    ,NotificationMaterializerService
+    ,NotificationProcessor
+    ,NotificationReconcilerService
+    ,NotificationTemplates
+    ,SmtpEmailProvider
+    ,{ provide: EmailProvider, useExisting: SmtpEmailProvider }
   ]
 })
 export class WorkerModule {}

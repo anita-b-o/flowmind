@@ -7,11 +7,13 @@ describe("ApprovalHandler", () => {
 
   it("creates one durable pending request and returns a worker-free wait", async () => {
     const created: any[] = [];
+    const emit = jest.fn(async () => ({}));
     const prisma: any = { approvalRequest: { findUnique: jest.fn(async () => null) }, execution: { findFirstOrThrow: jest.fn(async () => ({ workflowId: "workflow", workflowVersionId: "version", correlationId: "correlation" })) }, $transaction: jest.fn(async (callback: any) => callback({ approvalRequest: { upsert: jest.fn(async ({ create }: any) => { created.push(create); return { id: "approval" }; }) }, auditLog: { create: jest.fn() } })) };
-    const result = await new ApprovalHandler(prisma).execute(step, context);
+    const result = await new ApprovalHandler(prisma, undefined, { emit } as any).execute(step, context);
     expect(result.control).toEqual({ waitReason: "approval", durableWait: true });
     expect(created).toHaveLength(1);
     expect(created[0]).toMatchObject({ stepExecutionId: "step-execution", executionPath: "for_each:loop:0", iterationIndex: 0, title: "Review" });
+    expect(emit).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ type: "APPROVAL_REQUESTED", data: expect.objectContaining({ approvalId: "approval", outcome: "REQUESTED" }) }));
   });
 
   it("turns a terminal request into compact business output", async () => {

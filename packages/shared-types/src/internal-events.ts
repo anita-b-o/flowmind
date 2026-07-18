@@ -4,9 +4,12 @@ export const INTERNAL_EVENT_TYPES = [
   "DATA_STORE_RECORD_DELETED",
   "EXECUTION_COMPLETED",
   "EXECUTION_FAILED",
+  "APPROVAL_REQUESTED",
   "APPROVAL_APPROVED",
   "APPROVAL_REJECTED",
-  "APPROVAL_EXPIRED"
+  "APPROVAL_EXPIRED",
+  "EVENT_TRIGGER_FAILED",
+  "EVENT_CHAIN_DEPTH_EXCEEDED"
 ] as const;
 
 export type InternalEventType = (typeof INTERNAL_EVENT_TYPES)[number];
@@ -24,17 +27,23 @@ export interface ExecutionEventData {
 }
 export interface ApprovalEventData {
   approvalId: string; executionId: string; workflowId: string; workflowVersionId: string | null; stepKey: string;
-  outcome: "APPROVED" | "REJECTED" | "EXPIRED"; requestedAt: string; decidedAt: string;
+  outcome: "REQUESTED" | "APPROVED" | "REJECTED" | "EXPIRED"; requestedAt: string; decidedAt: string | null;
+  title?: string; description?: string | null; expiresAt?: string | null;
 }
+export interface EventTriggerFailureData { internalEventId: string; triggerId?: string; eventType: string; errorCode: string; }
+export interface EventChainLimitData { suppressedEventType: string; rootEventId: string; depth: number; reason: "depth" | "count"; }
 export interface InternalEventDataByType {
   DATA_STORE_RECORD_CREATED: DataStoreRecordEventData;
   DATA_STORE_RECORD_UPDATED: DataStoreRecordEventData;
   DATA_STORE_RECORD_DELETED: DataStoreRecordEventData;
   EXECUTION_COMPLETED: ExecutionEventData;
   EXECUTION_FAILED: ExecutionEventData;
+  APPROVAL_REQUESTED: ApprovalEventData;
   APPROVAL_APPROVED: ApprovalEventData;
   APPROVAL_REJECTED: ApprovalEventData;
   APPROVAL_EXPIRED: ApprovalEventData;
+  EVENT_TRIGGER_FAILED: EventTriggerFailureData;
+  EVENT_CHAIN_DEPTH_EXCEEDED: EventChainLimitData;
 }
 export interface InternalEventEnvelope<T extends InternalEventType = InternalEventType> {
   id: string; schemaVersion: 1; type: T; organizationId: string; occurredAt: string;
@@ -58,7 +67,7 @@ export function isInternalEventType(value: unknown): value is InternalEventType 
 export function normalizeEventTriggerFilters(eventType: InternalEventType, value: unknown): EventTriggerFilters {
   const input = record(value);
   const allowed = eventType.startsWith("DATA_STORE_") ? new Set(["dataStoreId", "keyPrefix"])
-    : eventType.startsWith("EXECUTION_") ? new Set(["workflowId", "origin"]) : new Set(["workflowId"]);
+    : eventType.startsWith("EXECUTION_") ? new Set(["workflowId", "origin"]) : eventType.startsWith("APPROVAL_") ? new Set(["workflowId"]) : new Set();
   for (const key of Object.keys(input)) if (!allowed.has(key)) throw new Error(`Unsupported filter ${key} for ${eventType}`);
   const filters: EventTriggerFilters = {};
   if (input.dataStoreId !== undefined) filters.dataStoreId = requiredString(input.dataStoreId, "dataStoreId", 128);

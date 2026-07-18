@@ -119,6 +119,28 @@ enum SecretStatus {
   REVOKED
 }
 
+enum NotificationChannel {
+  EMAIL
+}
+
+enum NotificationStatus {
+  PENDING
+  PROCESSING
+  SENT
+  FAILED
+  DEAD_LETTER
+  CANCELLED
+}
+
+enum NotificationErrorCategory {
+  TRANSIENT
+  INVALID_RECIPIENT
+  TEMPLATE
+  CONFIGURATION
+  PROVIDER_REJECTED
+  UNKNOWN
+}
+
 model User {
   id           String     @id @default(uuid())
   email        String     @unique
@@ -196,6 +218,9 @@ model Organization {
   internalEvents       InternalEvent[]
   internalEventChains  InternalEventChain[]
   internalEventDeliveries InternalEventDelivery[]
+  notificationRules     NotificationRule[]
+  notificationRequests  NotificationRequest[]
+  notificationDeliveries NotificationDelivery[]
 
   @@map("organizations")
 }
@@ -680,11 +705,90 @@ model Connection {
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   secrets      Secret[]
+  notificationRules NotificationRule[]
 
   @@index([organizationId, type])
   @@index([organizationId, type, status])
   @@index([organizationId, deletedAt])
   @@map("connections")
+}
+
+model NotificationRule {
+  id                  String              @id @default(uuid())
+  organizationId      String              @map("organization_id")
+  eventType           String              @map("event_type")
+  channel             NotificationChannel @default(EMAIL)
+  enabled             Boolean             @default(true)
+  connectionId        String              @map("connection_id")
+  recipientConfigJson Json                @map("recipient_config_json")
+  filtersJson         Json                @default("{}") @map("filters_json")
+  templateKey         String              @map("template_key")
+  deletedAt           DateTime?           @map("deleted_at")
+  createdAt           DateTime            @default(now()) @map("created_at")
+  updatedAt           DateTime            @updatedAt @map("updated_at")
+
+  organization Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  connection   Connection            @relation(fields: [connectionId], references: [id], onDelete: Restrict)
+  requests     NotificationRequest[]
+
+  @@index([organizationId, enabled, eventType, deletedAt])
+  @@index([organizationId, connectionId])
+  @@map("notification_rules")
+}
+
+model NotificationRequest {
+  id                 String              @id @default(uuid())
+  organizationId     String              @map("organization_id")
+  notificationRuleId String              @map("notification_rule_id")
+  sourceEventId      String              @map("source_event_id")
+  type               String
+  channel            NotificationChannel @default(EMAIL)
+  status             NotificationStatus  @default(PENDING)
+  recipient          String
+  subject            String
+  templateKey        String              @map("template_key")
+  payloadJson        Json                @map("payload_json")
+  idempotencyKey     String              @map("idempotency_key")
+  correlationId      String?             @map("correlation_id")
+  scheduledAt        DateTime            @default(now()) @map("scheduled_at")
+  nextAttemptAt      DateTime?           @map("next_attempt_at")
+  lockedBy           String?             @map("locked_by")
+  lockedUntil        DateTime?           @map("locked_until")
+  createdAt          DateTime            @default(now()) @map("created_at")
+  updatedAt          DateTime            @updatedAt @map("updated_at")
+
+  organization Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  rule         NotificationRule     @relation(fields: [notificationRuleId], references: [id], onDelete: Restrict)
+  delivery     NotificationDelivery?
+
+  @@unique([organizationId, idempotencyKey])
+  @@index([organizationId, status, createdAt])
+  @@index([status, scheduledAt, nextAttemptAt, lockedUntil])
+  @@index([sourceEventId])
+  @@map("notification_requests")
+}
+
+model NotificationDelivery {
+  id                    String                     @id @default(uuid())
+  organizationId        String                     @map("organization_id")
+  notificationRequestId String                     @unique @map("notification_request_id")
+  provider              String                     @default("smtp")
+  status                NotificationStatus         @default(PENDING)
+  attempts              Int                        @default(0)
+  lastAttemptAt         DateTime?                   @map("last_attempt_at")
+  sentAt                DateTime?                   @map("sent_at")
+  failedAt              DateTime?                   @map("failed_at")
+  providerMessageId     String?                     @map("provider_message_id")
+  errorCategory         NotificationErrorCategory? @map("error_category")
+  errorMessageSafe      String?                     @map("error_message_safe")
+  createdAt             DateTime                    @default(now()) @map("created_at")
+  updatedAt             DateTime                    @updatedAt @map("updated_at")
+
+  organization Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  request      NotificationRequest @relation(fields: [notificationRequestId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, status, createdAt])
+  @@map("notification_deliveries")
 }
 
 model Secret {

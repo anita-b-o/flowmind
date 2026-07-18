@@ -1,0 +1,17 @@
+import { NotificationProcessor } from "./notification.processor";
+import { NotificationTemplates } from "./notification-templates";
+
+function fixture(provider: { send: jest.Mock }) {
+  const request = { id: "request-1", organizationId: "org-1", recipient: "ops@example.com", templateKey: "workflow.failed", type: "EXECUTION_FAILED", channel: "EMAIL", createdAt: new Date(), correlationId: "correlation", payloadJson: { title: "Payments", status: "FAILED", link: "http://localhost:3000/executions/execution-1" }, rule: { connectionId: "smtp-1" }, delivery: { attempts: 0 } };
+  let attempts = 0; const requestUpdates: any[] = []; const deliveryUpdates: any[] = [];
+  const tx: any = { notificationRequest: { update: jest.fn(async ({ data }) => requestUpdates.push(data)) }, notificationDelivery: { update: jest.fn(async ({ data }) => deliveryUpdates.push(data)) }, auditLog: { create: jest.fn() } };
+  const prisma: any = { notificationRequest: { updateMany: jest.fn(async () => ({ count: 1 })), findUniqueOrThrow: jest.fn(async () => request) }, notificationDelivery: { update: jest.fn(async ({ data }) => { if (data.attempts) attempts += 1; }), findUniqueOrThrow: jest.fn(async () => ({ attempts, lastAttemptAt: new Date() })) }, $transaction: jest.fn(async (callback) => callback(tx)) };
+  const connections: any = { resolveSmtp: jest.fn(async () => ({ host: "localhost", port: 1025, secure: false, username: "user", password: "secret", fromEmail: "from@example.com", type: "SMTP", id: "smtp-1" })) };
+  const processor = new NotificationProcessor(prisma, { id: "worker-1" } as any, connections, new NotificationTemplates(), provider as any);
+  return { processor, requestUpdates, deliveryUpdates, tx };
+}
+describe("NotificationProcessor", () => {
+  it("claims one request and sends it once", async () => { const provider = { send: jest.fn(async () => ({ messageId: "message-1" })) }; const test = fixture(provider); await test.processor.deliver("request-1"); expect(provider.send).toHaveBeenCalledTimes(1); expect(test.requestUpdates).toContainEqual(expect.objectContaining({ status: "SENT", lockedBy: null })); expect(test.deliveryUpdates).toContainEqual(expect.objectContaining({ status: "SENT", providerMessageId: "message-1" })); });
+  it("schedules retryable failures without leaking provider details", async () => { const provider = { send: jest.fn(async () => { throw Object.assign(new Error("smtp://user:password@host secret=abc"), { code: "ETIMEDOUT" }); }) }; const test = fixture(provider); await test.processor.deliver("request-1"); expect(test.requestUpdates).toContainEqual(expect.objectContaining({ status: "FAILED", lockedBy: null })); expect(test.deliveryUpdates).toContainEqual(expect.objectContaining({ status: "FAILED", errorCategory: "TRANSIENT", errorMessageSafe: "Temporary SMTP delivery failure" })); });
+  it("dead-letters invalid connection configuration without retrying", async () => { const provider = { send: jest.fn() }; const test = fixture(provider); (test.processor as any).connections.resolveSmtp.mockRejectedValue(Object.assign(new Error("CONNECTION_NOT_FOUND"), { name: "NonRetryableStepError" })); await test.processor.deliver("request-1"); expect(provider.send).not.toHaveBeenCalled(); expect(test.requestUpdates).toContainEqual(expect.objectContaining({ status: "DEAD_LETTER", nextAttemptAt: null })); expect(test.deliveryUpdates).toContainEqual(expect.objectContaining({ status: "DEAD_LETTER", errorCategory: "CONFIGURATION", errorMessageSafe: "SMTP connection configuration is invalid" })); });
+});

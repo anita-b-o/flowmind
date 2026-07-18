@@ -332,9 +332,32 @@ describe("APPROVAL PostgreSQL integration", () => {
     return { approval, child, parent };
   }
 
-  async function waitApproval(executionId: string) { for (let i = 0; i < 80; i++) { const row = await prisma.approvalRequest.findFirst({ where: { executionId } }); if (row) return row; await delay(100); } throw new Error("Approval was not created"); }
+  async function waitApproval(executionId: string) {
+    for (let i = 0; i < 80; i++) {
+      const [row, execution] = await Promise.all([
+        prisma.approvalRequest.findFirst({ where: { executionId } }),
+        prisma.execution.findUnique({ where: { id: executionId }, select: { status: true, waitReason: true, lockedBy: true, lockedUntil: true } })
+      ]);
+      if (row && execution?.status === "RETRYING" && execution.waitReason === "approval" && execution.lockedBy === null && execution.lockedUntil === null) return row;
+      await delay(100);
+    }
+    throw new Error("Approval was not created and durably waiting");
+  }
   async function waitApprovalCount(executionId: string, count: number) { for (let i = 0; i < 80; i++) { const rows = await prisma.approvalRequest.findMany({ where: { executionId }, orderBy: { iterationIndex: "asc" } }); if (rows.length === count) return rows; await delay(100); } throw new Error(`${count} approvals were not created`); }
-  async function waitApprovalForRoot(rootExecutionId: string) { for (let i = 0; i < 80; i++) { const row = await prisma.approvalRequest.findFirst({ where: { execution: { rootExecutionId } } }); if (row) return row; await delay(100); } throw new Error("Child approval was not created"); }
+  async function waitApprovalForRoot(rootExecutionId: string) {
+    for (let i = 0; i < 80; i++) {
+      const row = await prisma.approvalRequest.findFirst({ where: { execution: { rootExecutionId } } });
+      if (row) {
+        const [child, parent] = await Promise.all([
+          prisma.execution.findUnique({ where: { id: row.executionId }, select: { status: true, lockedBy: true, lockedUntil: true } }),
+          prisma.execution.findUnique({ where: { id: rootExecutionId }, select: { status: true, lockedBy: true, lockedUntil: true } })
+        ]);
+        if (child?.status === "RETRYING" && child.lockedBy === null && child.lockedUntil === null && parent?.status === "RETRYING" && parent.lockedBy === null && parent.lockedUntil === null) return row;
+      }
+      await delay(100);
+    }
+    throw new Error("Child approval was not created and durably waiting");
+  }
   async function waitStatus(executionId: string, status: string, user: User) { for (let i = 0; i < 80; i++) { const response = await request(app.getHttpServer()).get(`/executions/${executionId}`).set(headers(user)); if (response.body.status === status) return response.body; await delay(100); } throw new Error(`Execution ${executionId} did not reach ${status}`); }
 });
 

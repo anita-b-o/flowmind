@@ -59,6 +59,10 @@ export class InternalEventEmitter {
       metadataJson: json({ eventType: input.type, depth, rootEventId, reason })
     } });
     this.metrics?.internalEventChainLimit.inc({ limit_type: reason });
+    const diagnosticId = randomUUID(); const occurredAt = new Date();
+    const envelope = { id: diagnosticId, schemaVersion: 1 as const, type: "EVENT_CHAIN_DEPTH_EXCEEDED" as const, organizationId: input.organizationId, occurredAt: occurredAt.toISOString(), source: { type: "internal_event_guard" }, subject: { type: "internal_event_chain", id: rootEventId }, correlationId, rootEventId: diagnosticId, causationId: null, depth: 0, data: { suppressedEventType: input.type, rootEventId, depth, reason } };
+    await tx.internalEventChain.create({ data: { rootEventId: diagnosticId, organizationId: input.organizationId, eventCount: 1 } });
+    await tx.internalEvent.create({ data: { id: diagnosticId, organizationId: input.organizationId, eventType: envelope.type, schemaVersion: 1, envelopeJson: json(envelope), occurredAt, rootEventId: diagnosticId, correlationId, depth: 0 } });
     return null;
   }
 }

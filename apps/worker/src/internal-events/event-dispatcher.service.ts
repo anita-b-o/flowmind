@@ -1,4 +1,5 @@
 import { InjectQueue } from "@nestjs/bullmq";
+import { randomUUID } from "node:crypto";
 import { Injectable, OnModuleDestroy, OnModuleInit } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { Queue } from "bullmq";
@@ -8,13 +9,14 @@ import { WorkerIdentityService } from "../runtime/worker-identity.service";
 import { ShutdownStateService } from "../runtime/shutdown-state.service";
 import { EXECUTION_RUN_JOB, WORKFLOW_EXECUTIONS_QUEUE } from "../queues/queue.constants";
 import { WorkerMetricsService } from "../metrics/worker-metrics.service";
+import { NotificationMaterializerService } from "../notifications/notification-materializer.service";
 
 @Injectable()
 export class EventDispatcherService implements OnModuleInit, OnModuleDestroy {
   private timer?: NodeJS.Timeout;
   private currentRun?: Promise<void>;
   private destroyed = false;
-  constructor(private readonly prisma: PrismaService, private readonly identity: WorkerIdentityService, private readonly shutdown: ShutdownStateService, @InjectQueue(WORKFLOW_EXECUTIONS_QUEUE) private readonly queue: Queue, private readonly metrics?: WorkerMetricsService) {}
+  constructor(private readonly prisma: PrismaService, private readonly identity: WorkerIdentityService, private readonly shutdown: ShutdownStateService, @InjectQueue(WORKFLOW_EXECUTIONS_QUEUE) private readonly queue: Queue, private readonly metrics?: WorkerMetricsService, private readonly notifications?: NotificationMaterializerService) {}
   onModuleInit() { this.timer = setInterval(() => void this.dispatch(), numberEnv("INTERNAL_EVENT_POLL_INTERVAL_MS", 1_000, 100, 60_000)); this.timer.unref(); void this.dispatch(); }
   async onModuleDestroy() {
     this.destroyed = true;
@@ -64,8 +66,10 @@ export class EventDispatcherService implements OnModuleInit, OnModuleDestroy {
     const event = await this.prisma.internalEvent.findUniqueOrThrow({ where: { id } });
     const envelope = event.envelopeJson as unknown as InternalEventEnvelope;
     if (!isInternalEventType(envelope.type) || envelope.organizationId !== event.organizationId) throw permanent("invalid_envelope");
+    await this.notifications?.materialize(event, envelope);
     if (!event.matchingCompletedAt) {
-      const triggers = await this.prisma.trigger.findMany({ where: { organizationId: event.organizationId, type: "event", eventType: event.eventType, enabled: true, deletedAt: null } });
+      const diagnostic = event.eventType === "EVENT_TRIGGER_FAILED" || event.eventType === "EVENT_CHAIN_DEPTH_EXCEEDED";
+      const triggers = diagnostic ? [] : await this.prisma.trigger.findMany({ where: { organizationId: event.organizationId, type: "event", eventType: event.eventType, enabled: true, deletedAt: null } });
       const matches = triggers.filter((trigger) => {
         try { return matchesInternalEvent(envelope, normalizeEventTriggerFilters(envelope.type, storedConfig(trigger.configJson).filters)); } catch { return false; }
       });
@@ -126,6 +130,12 @@ export class EventDispatcherService implements OnModuleInit, OnModuleDestroy {
     await this.prisma.$transaction(async (tx) => {
       await tx.internalEvent.update({ where: { id }, data: { status: dead ? "DEAD" : "PENDING", deadLetteredAt: dead ? new Date() : null, nextAttemptAt: dead ? null : next, lockedBy: null, lockedUntil: null, lastErrorCode: code } });
       if (dead) await tx.auditLog.create({ data: { organizationId: row.organizationId, actorUserId: null, action: "internal_event.dead_lettered", resourceType: "InternalEvent", resourceId: id, correlationId: row.correlationId, metadataJson: json({ eventType: row.eventType, reason: code }) } });
+      if (dead && row.eventType !== "EVENT_TRIGGER_FAILED") {
+        const diagnosticId = randomUUID(); const occurredAt = new Date();
+        const envelope = { id: diagnosticId, schemaVersion: 1, type: "EVENT_TRIGGER_FAILED", organizationId: row.organizationId, occurredAt: occurredAt.toISOString(), source: { type: "event_dispatcher" }, subject: { type: "internal_event", id }, correlationId: row.correlationId, rootEventId: diagnosticId, causationId: null, depth: 0, data: { internalEventId: id, eventType: row.eventType, errorCode: code } };
+        await tx.internalEventChain.create({ data: { rootEventId: diagnosticId, organizationId: row.organizationId, eventCount: 1 } });
+        await tx.internalEvent.create({ data: { id: diagnosticId, organizationId: row.organizationId, eventType: "EVENT_TRIGGER_FAILED", schemaVersion: 1, envelopeJson: json(envelope), occurredAt, rootEventId: diagnosticId, correlationId: row.correlationId, depth: 0 } });
+      }
     });
   }
   private async recordBacklog() {

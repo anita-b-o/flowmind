@@ -4,11 +4,12 @@ import { normalizeApprovalConfig, StepExecutionStatus, StepType, type ExecutionC
 import { PrismaService } from "../../prisma/prisma.service";
 import type { StepHandler } from "../types";
 import { WorkerMetricsService } from "../../metrics/worker-metrics.service";
+import { InternalEventEmitter } from "../../internal-events/internal-event-emitter.service";
 
 @Injectable()
 export class ApprovalHandler implements StepHandler {
   readonly type = StepType.Approval;
-  constructor(private readonly prisma: PrismaService, private readonly metrics?: WorkerMetricsService) {}
+  constructor(private readonly prisma: PrismaService, private readonly metrics?: WorkerMetricsService, private readonly events?: InternalEventEmitter) {}
 
   async execute(step: WorkflowStepDefinition, context: ExecutionContext): Promise<StepResult> {
     const runtime = record(context.metadata?.runtime);
@@ -46,6 +47,14 @@ export class ApprovalHandler implements StepHandler {
           }
         });
         await tx.auditLog.create({ data: { organizationId, actorUserId: null, action: "approval.requested", resourceType: "ApprovalRequest", resourceId: approval.id, correlationId: execution.correlationId, metadataJson: json({ workflowId: execution.workflowId, executionId, stepKey: step.key, outcome: "pending" }) } });
+        await this.events?.emit(tx, {
+          organizationId,
+          type: "APPROVAL_REQUESTED",
+          source: { type: "approval", id: approval.id },
+          subject: { type: "approval_request", id: approval.id },
+          data: { approvalId: approval.id, executionId, workflowId: execution.workflowId, workflowVersionId: execution.workflowVersionId, stepKey: step.key, outcome: "REQUESTED", requestedAt: now.toISOString(), decidedAt: null, title: config.title, description: config.description, expiresAt: expiresAt?.toISOString() ?? null },
+          causality: { correlationId: execution.correlationId }
+        });
       });
       this.metrics?.approvalRequests.inc({ assignee_policy: config.assigneePolicy.toLowerCase() });
     }

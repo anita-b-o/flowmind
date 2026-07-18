@@ -32,7 +32,12 @@ export class InternalEventEmitter {
     return envelope;
   }
   private async suppress(tx: Prisma.TransactionClient, organizationId: string, eventType: string, id: string, rootEventId: string, correlationId: string, depth: number, reason: string) {
-    await tx.auditLog.create({ data: { organizationId, actorUserId: null, action: "internal_event.suppressed", resourceType: "InternalEvent", resourceId: id, correlationId, metadataJson: json({ eventType, depth, rootEventId, reason }) } }); this.metrics?.internalEventChainLimit.inc({ limit_type: reason }); return null;
+    await tx.auditLog.create({ data: { organizationId, actorUserId: null, action: "internal_event.suppressed", resourceType: "InternalEvent", resourceId: id, correlationId, metadataJson: json({ eventType, depth, rootEventId, reason }) } });
+    const diagnosticId = randomUUID(); const occurredAt = new Date();
+    const envelope = { id: diagnosticId, schemaVersion: 1 as const, type: "EVENT_CHAIN_DEPTH_EXCEEDED" as const, organizationId, occurredAt: occurredAt.toISOString(), source: { type: "internal_event_guard" }, subject: { type: "internal_event_chain", id: rootEventId }, correlationId, rootEventId: diagnosticId, causationId: null, depth: 0, data: { suppressedEventType: eventType, rootEventId, depth, reason: reason as "depth" | "count" } };
+    await tx.internalEventChain.create({ data: { rootEventId: diagnosticId, organizationId, eventCount: 1 } });
+    await tx.internalEvent.create({ data: { id: diagnosticId, organizationId, eventType: envelope.type, schemaVersion: 1, envelopeJson: json(envelope), occurredAt, rootEventId: diagnosticId, correlationId, depth: 0 } });
+    this.metrics?.internalEventChainLimit.inc({ limit_type: reason }); return null;
   }
 }
 function bounded(raw: string | undefined, fallback: number, min: number, max: number) { const value = Number(raw ?? fallback); return Number.isInteger(value) && value >= min && value <= max ? value : fallback; }

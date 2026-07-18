@@ -8,6 +8,7 @@ const nav = [
   ["Workflows", "/workflows"],
   ["Executions", "/executions"],
   ["Approvals", "/approvals"],
+  ["Notifications", "/notifications"],
   ["Connections", "/connections"],
   ["Members", "/members"],
   ["Settings", "/settings"]
