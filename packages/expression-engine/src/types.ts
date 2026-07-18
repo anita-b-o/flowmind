@@ -2,7 +2,7 @@ export type ExpressionMode = "legacy" | "strict";
 
 export type ExpressionValueType = "string" | "number" | "boolean" | "object" | "array" | "null" | "unknown";
 
-export type ExpressionNamespace = "trigger" | "workflow" | "steps" | "execution" | "organization" | "connection" | "metadata" | "item" | "index";
+export type ExpressionNamespace = "trigger" | "workflow" | "steps" | "execution" | "variables" | "system" | "timestamp" | "organization" | "connection" | "metadata" | "item" | "index";
 
 export type ExpressionSegment = string;
 
@@ -28,6 +28,9 @@ export interface ExpressionScope {
   workflow?: Record<string, unknown>;
   steps?: Record<string, unknown>;
   execution?: Record<string, unknown>;
+  variables?: Record<string, unknown>;
+  system?: Record<string, unknown>;
+  timestamp?: string;
   organization?: Record<string, unknown>;
   connection?: Record<string, unknown>;
   metadata?: Record<string, unknown>;

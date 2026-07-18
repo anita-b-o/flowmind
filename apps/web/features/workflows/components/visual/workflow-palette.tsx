@@ -38,6 +38,11 @@ const GROUPS: Array<{ label: string; items: Array<{ type: StepType; name: string
       { type: "data_store_exists_record", name: "Data Store Exists", description: "Check whether a key exists.", icon: "EX" },
       { type: "data_store_count_records", name: "Data Store Count", description: "Count records.", icon: "#" },
       { type: "data_store_list_records", name: "Data Store List", description: "Page through records.", icon: "LS" },
+      { type: "set_variable", name: "Set Variable", description: "Create or overwrite a runtime variable.", icon: "SET" },
+      { type: "get_variable", name: "Get Variable", description: "Read a runtime variable.", icon: "GET" },
+      { type: "delete_variable", name: "Delete Variable", description: "Remove a runtime variable.", icon: "DEL" },
+      { type: "increment_variable", name: "Increment Variable", description: "Increment a numeric variable.", icon: "+1" },
+      { type: "append_variable", name: "Append Variable", description: "Append an item to an array variable.", icon: "ADD" },
       { type: "email_notification", name: "Email", description: "Send via SMTP connection.", icon: "MAIL" }
     ]
   }

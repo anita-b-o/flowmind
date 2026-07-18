@@ -5,6 +5,10 @@ import {
   assertDataStoreSelector,
   assertDataStoreMetadata,
   assertDataStoreValue,
+  assertVariableName,
+  assertVariableScope,
+  assertVariableValue,
+  assertWorkflowVariables,
   DataStoreValidationError,
   normalizeListLimit,
   normalizeOffset,
@@ -12,6 +16,7 @@ import {
   ttlSecondsToExpiresAt,
   validateTransformStepConfig,
   WorkflowStatus,
+  WorkflowVariableValidationError,
   WorkflowVersionStatus
 } from "@automation/shared-types";
 import { PrismaService } from "../prisma/prisma.service";
@@ -95,6 +100,8 @@ export class WorkflowsService {
     if (schemaVersion === 2) {
       validateWorkflowGraph(dto.steps, dto.graph);
     }
+    const workflowVariables = this.validateVariableMap(dto.workflowVariables, "workflow variables");
+    const environmentVariables = this.validateVariableMap(dto.environmentVariables, "environment variables");
     this.validateStepConfigs(dto.steps);
     await this.validateConnectionReferences(organizationId, [...dto.steps, dto.trigger]);
     this.validateExpressions(dto.steps, schemaVersion === 2 ? dto.graph : undefined);
@@ -107,7 +114,8 @@ export class WorkflowsService {
       workflowDefinitionSchemaVersion: schemaVersion,
       ...(schemaVersion === 2 ? { graph: dto.graph } : {}),
       ...(dto.ui ? { ui: dto.ui } : {}),
-      workflowVariables: dto.workflowVariables ?? {}
+      workflowVariables,
+      environmentVariables
     });
 
     const version = await this.prisma.workflowVersion.create({
@@ -254,6 +262,40 @@ export class WorkflowsService {
       if (isDataStoreStep(step.type)) {
         this.validateDataStoreStepConfig(step.type, step.config);
       }
+      if (isVariableStep(step.type)) {
+        this.validateVariableStepConfig(step.type, step.config);
+      }
+    }
+  }
+
+  private validateVariableMap(value: unknown, label: string) {
+    try {
+      return assertWorkflowVariables(value ?? {}, label);
+    } catch (error) {
+      if (error instanceof WorkflowVariableValidationError) throw new BadRequestException(error.message);
+      throw error;
+    }
+  }
+
+  private validateVariableStepConfig(type: string, config: Record<string, unknown>) {
+    try {
+      assertVariableScope(config.scope);
+      assertVariableName(config.name);
+      if (type === StepType.SetVariable || type === StepType.AppendVariable) {
+        const hasValue = Object.prototype.hasOwnProperty.call(config, "value");
+        const hasExpression = typeof config.expression === "string" && config.expression.trim();
+        if (!hasValue && !hasExpression) throw new WorkflowVariableValidationError("MISSING_VALUE", "Variable value or expression is required.");
+        if (hasValue && !containsExpression(config.value)) assertVariableValue(config.value);
+      }
+      if (type === StepType.IncrementVariable) {
+        const amount = config.amount;
+        if (amount !== undefined && !(typeof amount === "string" && amount.includes("{{")) && !Number.isFinite(Number(amount))) {
+          throw new WorkflowVariableValidationError("INVALID_AMOUNT", "Increment amount must be a finite number.");
+        }
+      }
+    } catch (error) {
+      if (error instanceof WorkflowVariableValidationError) throw new BadRequestException(error.message);
+      throw error;
     }
   }
 
@@ -296,6 +338,16 @@ function isDataStoreStep(type: string) {
     StepType.DataStoreExistsRecord,
     StepType.DataStoreCountRecords,
     StepType.DataStoreListRecords
+  ].includes(type as StepType);
+}
+
+function isVariableStep(type: string) {
+  return [
+    StepType.SetVariable,
+    StepType.GetVariable,
+    StepType.DeleteVariable,
+    StepType.IncrementVariable,
+    StepType.AppendVariable
   ].includes(type as StepType);
 }
 

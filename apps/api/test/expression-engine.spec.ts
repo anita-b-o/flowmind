@@ -41,4 +41,42 @@ describe("expression engine", () => {
     expect(validateExpressionString("{{item.id}}").issues[0].code).toBe("EXPRESSION_NAMESPACE_UNKNOWN");
     expect(resolver.resolveValue({ id: "{{item.id}}", row: "{{index}}" }, { item: { id: "a" }, index: 0 }, { mode: "strict" })).toEqual({ id: "a", row: 0 });
   });
+
+  it("supports variable, execution, workflow, system and timestamp namespaces", () => {
+    expect(validateExpressionString("{{variables.customerId}}").valid).toBe(true);
+    expect(validateExpressionString("{{execution.variables.customerId}}").valid).toBe(true);
+    expect(validateExpressionString("{{workflow.environment.region}}").valid).toBe(true);
+    expect(validateExpressionString("{{system.now}}").valid).toBe(true);
+    expect(validateExpressionString("{{timestamp}}").valid).toBe(true);
+    expect(resolver.resolveValue(
+      {
+        id: "{{variables.customerId}}",
+        same: "{{execution.variables.customerId}}",
+        env: "{{workflow.environment.region}}",
+        now: "{{system.now}}",
+        ts: "{{timestamp}}"
+      },
+      {
+        variables: { customerId: "cus_123" },
+        execution: { variables: { customerId: "cus_123" } },
+        workflow: { environment: { region: "us" } },
+        system: { now: "2026-01-01T00:00:00.000Z" },
+        timestamp: "2026-01-01T00:00:00.000Z"
+      },
+      { mode: "strict" }
+    )).toEqual({
+      id: "cus_123",
+      same: "cus_123",
+      env: "us",
+      now: "2026-01-01T00:00:00.000Z",
+      ts: "2026-01-01T00:00:00.000Z"
+    });
+  });
+
+  it("rejects unknown namespaces and dangerous variable paths", () => {
+    expect(validateExpressionString("{{unknown.value}}").issues[0].code).toBe("EXPRESSION_NAMESPACE_UNKNOWN");
+    expect(() => parseTemplate("{{variables.__proto__}}")).toThrow("not allowed");
+    expect(() => parseTemplate("{{execution.variables.constructor}}")).toThrow("not allowed");
+    expect(() => parseTemplate("{{workflow.environment.prototype}}")).toThrow("not allowed");
+  });
 });

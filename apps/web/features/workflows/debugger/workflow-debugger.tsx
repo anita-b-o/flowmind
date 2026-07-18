@@ -250,6 +250,7 @@ function Inspector({ detail, selectedStepKey, onSkipWait }: { detail?: WorkflowT
           )}
           <InspectorBlock title="Input" value={step.input} />
           <InspectorBlock title="Resolved Variables" value={step.resolvedVariables} />
+          {step.variable && <InspectorBlock title="Variable" value={step.variable} />}
           <InspectorBlock title="Expressions" value={step.expressions} />
           <InspectorBlock title="Resolved Config" value={step.resolvedConfig} />
           <InspectorBlock title="Output" value={step.output} />

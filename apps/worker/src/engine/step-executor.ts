@@ -115,7 +115,7 @@ export class StepExecutor {
       };
       input.context.connection = await this.safeConnectionMetadata(input.organizationId, input.step.config);
       const mode = input.context.metadata?.expressionMode === "strict" ? "strict" : "legacy";
-      const shouldResolveConfigBeforeHandler = input.step.type !== StepType.Transform;
+      const shouldResolveConfigBeforeHandler = input.step.type !== StepType.Transform && !isVariableStep(input.step.type);
       const resolvedConfig = shouldResolveConfigBeforeHandler && this.expressionResolver
         ? this.expressionResolver.resolveValue(input.step.config, input.context, { mode })
         : input.step.config;
@@ -150,6 +150,9 @@ export class StepExecutor {
       }
       if (isDataStoreStep(input.step.type)) {
         await this.debugRecorder?.record(input.stepExecution.id, dataStoreDebugArtifact(resolvedStep.config, result.output));
+      }
+      if (isVariableStep(input.step.type)) {
+        await this.debugRecorder?.record(input.stepExecution.id, variableDebugArtifact(input.step.type, resolvedStep.config, result.output));
       }
       const completedAt = new Date();
       const control = result.control;
@@ -197,6 +200,10 @@ export class StepExecutor {
       if (input.step.type === StepType.Transform) {
         this.metrics?.recordTransform(String(input.step.config.mode ?? ""), "success", (completedAt.getTime() - startedAt.getTime()) / 1000);
       }
+      if (isVariableStep(input.step.type)) {
+        this.metrics?.recordVariable(variableOperation(input.step.type), "success", (completedAt.getTime() - startedAt.getTime()) / 1000);
+        await this.recordVariableAudit(input.organizationId, input.executionId, input.stepExecution.id, input.step.type, result.output);
+      }
       return { result, outcome: "completed" as const };
     } catch (error) {
       const completedAt = new Date();
@@ -237,6 +244,9 @@ export class StepExecutor {
       );
       if (input.step.type === StepType.Transform) {
         this.metrics?.recordTransform(String(input.step.config.mode ?? ""), "failure", (completedAt.getTime() - startedAt.getTime()) / 1000, transformFailureCategory(error));
+      }
+      if (isVariableStep(input.step.type)) {
+        this.metrics?.recordVariable(variableOperation(input.step.type), "error", (completedAt.getTime() - startedAt.getTime()) / 1000, workerErrorCategory(classification));
       }
       throw error;
     }
@@ -309,6 +319,30 @@ export class StepExecutor {
       authScheme: connection.type === "smtp" ? undefined : safeHttpAuthScheme(connection.configJson),
       status: connection.status
     };
+  }
+
+  private async recordVariableAudit(organizationId: string, executionId: string, stepExecutionId: string, stepType: string, output: unknown) {
+    const operation = variableOperation(stepType);
+    if (operation === "get") return;
+    const result = output && typeof output === "object" ? (output as Record<string, unknown>) : {};
+    await this.prisma.auditLog.create({
+      data: {
+        organizationId,
+        actorUserId: null,
+        action: `variable.${operation}`,
+        resourceType: "Execution",
+        resourceId: executionId,
+        correlationId: this.jobContext?.getContext()?.correlationId ?? null,
+        metadataJson: toJson({
+          stepExecutionId,
+          operation: operation.toUpperCase(),
+          scope: typeof result.scope === "string" ? result.scope : undefined,
+          name: typeof result.name === "string" ? result.name : undefined,
+          type: typeof result.type === "string" ? result.type : undefined,
+          exists: typeof result.exists === "boolean" ? result.exists : undefined
+        })
+      }
+    }).catch(() => undefined);
   }
 }
 
@@ -389,6 +423,16 @@ function isDataStoreStep(type: string) {
   return String(type).startsWith("data_store_");
 }
 
+function isVariableStep(type: string) {
+  return [
+    StepType.SetVariable,
+    StepType.GetVariable,
+    StepType.DeleteVariable,
+    StepType.IncrementVariable,
+    StepType.AppendVariable
+  ].includes(type as StepType);
+}
+
 function dataStoreDebugArtifact(config: Record<string, unknown>, output: unknown) {
   const result = output && typeof output === "object" ? (output as Record<string, unknown>) : {};
   return {
@@ -428,6 +472,48 @@ function dataStoreOperation(config: Record<string, unknown>, output: Record<stri
   if ("items" in output) return "list";
   if ("found" in output) return "get";
   return String(config.operation ?? "unknown");
+}
+
+function variableDebugArtifact(stepType: string, config: Record<string, unknown>, output: unknown) {
+  const result = output && typeof output === "object" ? (output as Record<string, unknown>) : {};
+  return {
+    resolvedConfig: variableSafeConfig(config),
+    variable: {
+      operation: variableOperation(stepType).toUpperCase(),
+      scope: typeof result.scope === "string" ? result.scope : config.scope,
+      name: typeof result.name === "string" ? result.name : config.name,
+      type: typeof result.type === "string" ? result.type : undefined,
+      exists: typeof result.exists === "boolean" ? result.exists : undefined,
+      summary: result.summary
+    }
+  };
+}
+
+function variableSafeConfig(config: Record<string, unknown>) {
+  return {
+    scope: typeof config.scope === "string" ? config.scope : undefined,
+    name: typeof config.name === "string" ? config.name : undefined,
+    hasValue: Object.prototype.hasOwnProperty.call(config, "value"),
+    hasExpression: typeof config.expression === "string" && Boolean(config.expression.trim()),
+    hasAmount: Object.prototype.hasOwnProperty.call(config, "amount") || Object.prototype.hasOwnProperty.call(config, "amountExpression")
+  };
+}
+
+function variableOperation(stepType: string) {
+  switch (stepType) {
+    case StepType.SetVariable:
+      return "set";
+    case StepType.GetVariable:
+      return "get";
+    case StepType.DeleteVariable:
+      return "delete";
+    case StepType.IncrementVariable:
+      return "increment";
+    case StepType.AppendVariable:
+      return "append";
+    default:
+      return "unknown";
+  }
 }
 
 function dataStoreSafeConfig(config: Record<string, unknown>) {

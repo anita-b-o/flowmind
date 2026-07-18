@@ -1,4 +1,4 @@
-import { graphAvailableStepKeys, validateGraphV2, validateTransformStepConfig } from "@automation/shared-types";
+import { assertVariableName, assertVariableValue, graphAvailableStepKeys, validateGraphV2, validateTransformStepConfig } from "@automation/shared-types";
 import { validateExpressionsInValue } from "@automation/expression-engine";
 import type { DraftEdge, DraftValidationIssue, WorkflowDraftModel } from "./draft-model";
 import { caseKeyFromHandle, handleToGraphKind } from "./draft-model";
@@ -88,6 +88,28 @@ function validateStepConfig(step: NonNullable<WorkflowDraftModel["stepsByKey"][s
     const serialized = safeSerializeConfig(step);
     for (const transformIssue of validateTransformStepConfig(serialized)) {
       issues.push(error(transformIssue.code, transformIssue.message, step.key));
+    }
+  }
+  if (step.type.endsWith("_variable")) {
+    if (config.scope !== "execution" && config.scope !== "workflow") issues.push(error("invalid_variable_scope", "Variable scope must be execution or workflow.", step.key));
+    try {
+      assertVariableName(config.name);
+    } catch (err) {
+      issues.push(error("invalid_variable_name", err instanceof Error ? err.message : "Variable name is invalid.", step.key));
+    }
+    if (step.type === "set_variable" || step.type === "append_variable") {
+      if (typeof config.expression === "string" && config.expression.trim()) {
+        // Expression syntax is validated with the rest of the config.
+      } else {
+        try {
+          assertVariableValue(config.value);
+        } catch (err) {
+          issues.push(error("invalid_variable_value", err instanceof Error ? err.message : "Variable value is invalid.", step.key));
+        }
+      }
+    }
+    if (step.type === "increment_variable" && config.amountExpression === "" && !Number.isFinite(Number(config.amount ?? 1))) {
+      issues.push(error("invalid_variable_amount", "Increment amount must be a finite number.", step.key));
     }
   }
   if (step.type === "conditional" || step.type === "if") {

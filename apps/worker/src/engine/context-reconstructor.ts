@@ -34,7 +34,8 @@ export class ContextReconstructor {
         id: execution.workflowId,
         versionId: execution.workflowVersionId ?? null,
         name: workflow?.name,
-        variables: asRecord(definition.workflowVariables)
+        variables: asRecord(definition.workflowVariables),
+        environment: asRecord(definition.environmentVariables)
       },
       execution: {
         id: execution.id,

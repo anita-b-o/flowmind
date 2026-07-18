@@ -76,6 +76,29 @@ describe("visual draft validation and history", () => {
     expect(codes(draft)).toContain("invalid_expression");
   });
 
+  it("validates variable node scope, names and unsafe values", () => {
+    const base = workflowVersionToDraft(workflow(), undefined);
+    const draft = withValidation({
+      ...base,
+      stepOrder: ["set_bad"],
+      stepsByKey: {
+        set_bad: {
+          id: "set_bad",
+          key: "set_bad",
+          name: "Set bad",
+          type: "set_variable",
+          expanded: true,
+          config: { scope: "execution", name: "__proto__", valueKind: "literal", valueType: "json", value: "{\"ok\":true}" },
+          retryPolicy: { maxAttempts: 1, backoffMs: 1000, strategy: "fixed" },
+          timeoutSeconds: 30
+        }
+      },
+      edges: []
+    });
+
+    expect(codes(draft)).toContain("invalid_variable_name");
+  });
+
   it("duplicates without edges and restores deletion with undo", () => {
     const draft = workflowVersionToDraft(workflow(), graphVersion());
     const duplicated = duplicateStepInDraft(draft, "save");

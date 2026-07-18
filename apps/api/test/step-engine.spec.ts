@@ -10,6 +10,8 @@ import { HttpStepError } from "../../worker/src/engine/step-errors";
 import { DatabaseRecordHandler } from "../../worker/src/engine/handlers/database-record.handler";
 import { ExpressionResolver } from "../../worker/src/engine/expression-resolver";
 import { HttpRequestHandler } from "../../worker/src/engine/handlers/http-request.handler";
+import { ExecutionRuntimeContext } from "../../worker/src/engine/execution-runtime-context";
+import { AppendVariableHandler, GetVariableHandler, IncrementVariableHandler, SetVariableHandler } from "../../worker/src/engine/handlers/variables.handler";
 
 const prisma = new PrismaClient();
 
@@ -236,6 +238,133 @@ describe("step recovery engine", () => {
       ["route", StepExecutionStatus.Completed, undefined],
       ["vip", StepExecutionStatus.Skipped, "branch_not_selected"]
     ]);
+  });
+
+  it("keeps execution variables in one runtime context and omits them from terminal context cache", async () => {
+    const seed = await seedExecution(
+      [
+        { ...step("set_flag", StepType.SetVariable), config: { scope: "execution", name: "flag", expression: "{{trigger.body.ok}}" } },
+        { ...step("get_flag", StepType.GetVariable), config: { scope: "execution", name: "flag" } },
+        { ...step("check_flag", StepType.Conditional), config: { left: "{{variables.flag}}", operator: "equals", right: true } }
+      ],
+      {
+        workflowDefinitionSchemaVersion: 2,
+        graph: {
+          entryStepKey: "set_flag",
+          edges: [
+            { from: "set_flag", to: "get_flag", kind: "next" },
+            { from: "get_flag", to: "check_flag", kind: "next" }
+          ]
+        },
+        workflowVariables: { published: "unchanged" },
+        environmentVariables: { region: "test" }
+      }
+    );
+    const resolver = new ExpressionResolver();
+    const set = new SetVariableHandler(resolver);
+    const get = new GetVariableHandler(resolver);
+    const runner = runnerWith(
+      {
+        [StepType.SetVariable]: set.execute.bind(set),
+        [StepType.GetVariable]: get.execute.bind(get),
+        [StepType.Conditional]: async (workflowStep: WorkflowStepDefinition) => ({ status: StepExecutionStatus.Completed, output: { passed: workflowStep.config.left === true } })
+      },
+      resolver
+    );
+
+    await runner.run(seed.payload);
+
+    const getStep = await prisma.stepExecution.findFirstOrThrow({ where: { executionId: seed.executionId, stepKey: "get_flag" } });
+    expect(getStep.outputJson).toMatchObject({ exists: true, value: true, type: "boolean" });
+    const checkStep = await prisma.stepExecution.findFirstOrThrow({ where: { executionId: seed.executionId, stepKey: "check_flag" } });
+    expect(checkStep.outputJson).toEqual({ passed: true });
+    const execution = await prisma.execution.findUniqueOrThrow({ where: { id: seed.executionId } });
+    expect((execution.contextJson as any).__runtime).toBeUndefined();
+    expect((execution.contextJson as any).variables).toEqual({});
+    expect((execution.contextJson as any).workflow.variables.published).toBe("unchanged");
+    expect((execution.contextJson as any).workflow.environment.region).toBe("test");
+  });
+
+  it("rejects invalid increment and append operations as non retryable variable errors", async () => {
+    const resolver = new ExpressionResolver();
+    const runtime = new ExecutionRuntimeContext({ trigger: {}, steps: {}, metadata: {}, workflow: { variables: {} }, execution: {} });
+    runtime.set("execution", "count", "not-a-number");
+    runtime.set("execution", "items", "not-an-array");
+    const increment = new IncrementVariableHandler(resolver);
+    const append = new AppendVariableHandler(resolver);
+
+    await expect(increment.execute({ key: "inc", name: "Inc", type: StepType.IncrementVariable, position: 1, config: { scope: "execution", name: "count", amount: 1 } }, runtime.context)).rejects.toThrow("can only increment numbers");
+    await expect(append.execute({ key: "append", name: "Append", type: StepType.AppendVariable, position: 1, config: { scope: "execution", name: "items", value: "x" } }, runtime.context)).rejects.toThrow("can only append to arrays");
+  });
+
+  it("keeps variable maps isolated across concurrent runtime contexts", async () => {
+    const workflow = { id: "workflow-1", variables: { published: "yes" } };
+    const runtimeA = new ExecutionRuntimeContext({ trigger: {}, steps: {}, metadata: {}, workflow, execution: { id: "execution-a" } });
+    const runtimeB = new ExecutionRuntimeContext({ trigger: {}, steps: {}, metadata: {}, workflow, execution: { id: "execution-b" } });
+
+    await Promise.all([
+      Promise.resolve(runtimeA.set("execution", "foo", 1)),
+      Promise.resolve(runtimeB.set("execution", "foo", 2))
+    ]);
+
+    expect(runtimeA.get("execution", "foo")).toMatchObject({ exists: true, value: 1 });
+    expect(runtimeB.get("execution", "foo")).toMatchObject({ exists: true, value: 2 });
+    expect(runtimeA.get("workflow", "published")).toMatchObject({ exists: true, value: "yes" });
+    expect(runtimeB.get("workflow", "published")).toMatchObject({ exists: true, value: "yes" });
+  });
+
+  it("does not carry execution variables into a later execution", () => {
+    const first = new ExecutionRuntimeContext({ trigger: {}, steps: {}, metadata: {}, workflow: { variables: {} }, execution: { id: "execution-a" } });
+    first.set("execution", "foo", 1);
+    expect(first.snapshot({ includeRuntime: false }).variables).toEqual({});
+
+    const second = new ExecutionRuntimeContext({ trigger: {}, steps: {}, metadata: {}, workflow: { variables: {} }, execution: { id: "execution-b" } });
+    expect(second.get("execution", "foo")).toEqual({ exists: false, value: undefined, type: "undefined" });
+  });
+
+  it("mutates workflow variables only in the runtime copy", () => {
+    const published = { flag: "published" };
+    const runtime = new ExecutionRuntimeContext({ trigger: {}, steps: {}, metadata: {}, workflow: { variables: published }, execution: { id: "execution" } });
+
+    runtime.set("workflow", "flag", "runtime");
+
+    expect(runtime.get("workflow", "flag")).toMatchObject({ exists: true, value: "runtime" });
+    expect(published.flag).toBe("published");
+    const later = new ExecutionRuntimeContext({ trigger: {}, steps: {}, metadata: {}, workflow: { variables: published }, execution: { id: "later" } });
+    expect(later.get("workflow", "flag")).toMatchObject({ exists: true, value: "published" });
+  });
+
+  it("exposes guarded runtime context views and validates unsafe variable values", () => {
+    const runtime = new ExecutionRuntimeContext({
+      trigger: { body: { ok: true } },
+      steps: {},
+      metadata: {},
+      workflow: { variables: {}, environment: { region: "test" } },
+      execution: { id: "execution" }
+    });
+
+    expect(Object.isFrozen(runtime.context.trigger)).toBe(true);
+    expect(Object.isFrozen(runtime.context.workflow)).toBe(true);
+    expect(Object.isFrozen(runtime.context.workflow!.environment)).toBe(true);
+    expect(Object.isFrozen(runtime.context.execution)).toBe(true);
+    expect(Object.isFrozen(runtime.context.system)).toBe(true);
+    expect(() => ((runtime.context.variables as any).foo = "bad")).toThrow("read-only");
+    expect(() => ((runtime.context.execution!.variables as any).foo = "bad")).toThrow("read-only");
+    expect(() => ((runtime.context.workflow!.variables as any).foo = "bad")).toThrow("read-only");
+    expect(() => runtime.set("execution", "environment", "bad")).toThrow("reserved");
+    expect(() => runtime.set("execution", "bad", JSON.parse('{"__proto__":{"polluted":true}}'))).toThrow("not allowed");
+    expect(() => runtime.set("execution", "bad", Array.from({ length: 1_001 }, (_, index) => index))).toThrow("too many");
+  });
+
+  it("increments and appends missing variables using the documented initial values", () => {
+    const runtime = new ExecutionRuntimeContext({ trigger: {}, steps: {}, metadata: {}, workflow: { variables: {} }, execution: { id: "execution" } });
+    const item = { id: "a" };
+
+    expect(runtime.increment("execution", "count", 2)).toMatchObject({ exists: true, value: 2, type: "number" });
+    expect(runtime.append("execution", "items", item)).toMatchObject({ exists: true, value: [{ id: "a" }], type: "array" });
+    item.id = "mutated";
+    expect(runtime.get("execution", "items").value).toEqual([{ id: "a" }]);
+    expect(() => runtime.increment("execution", "count", Number.POSITIVE_INFINITY)).toThrow("finite number");
   });
 
   it("schedules and resumes graph delay without recalculating it", async () => {

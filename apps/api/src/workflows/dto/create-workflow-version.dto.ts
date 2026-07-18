@@ -50,4 +50,8 @@ export class CreateWorkflowVersionDto {
   @IsOptional()
   @IsObject()
   workflowVariables?: Record<string, unknown>;
+
+  @IsOptional()
+  @IsObject()
+  environmentVariables?: Record<string, unknown>;
 }

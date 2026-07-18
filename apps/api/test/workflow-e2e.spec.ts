@@ -237,6 +237,58 @@ describe("workflow webhook execution e2e", () => {
     expect(records[0].dataJson).toMatchObject({ sessionId: "session-42", version: 1, count: 7 });
   }, 30_000);
 
+  it("runs webhook -> transform -> variables -> conditional -> data store upsert -> database_record on graph v2", async () => {
+    const user = await register("variables-smoke@example.com", "Variables Smoke");
+    const workflow = await createWorkflow(user, "Variables workflow");
+    const store = await prisma.dataStore.create({
+      data: {
+        organizationId: user.organizationId,
+        name: "Variable state",
+        description: "Variables E2E smoke state"
+      }
+    });
+    const version = await createVariableDataStoreVersion(user, workflow.id, store.id);
+    const trigger = await createTrigger(user, workflow.id);
+    await request(app.getHttpServer())
+      .patch(`/workflows/${workflow.id}/versions/${version.id}/activate`)
+      .set(authHeaders(user))
+      .expect(200);
+
+    const webhook = await request(app.getHttpServer())
+      .post(`/webhooks/${workflow.id}/${trigger.token}`)
+      .set("Idempotency-Key", "variables-webhook-1")
+      .send({ sessionId: "session-99", email: "vars@example.com", count: 11 })
+      .expect(202);
+
+    const detail = await waitForExecution(webhook.body.executionId, "COMPLETED");
+    expect(detail.body.steps.map((step: any) => [step.stepKey, step.status])).toEqual([
+      ["shape", "COMPLETED"],
+      ["set_session", "COMPLETED"],
+      ["get_session", "COMPLETED"],
+      ["has_session", "COMPLETED"],
+      ["save_state", "COMPLETED"],
+      ["save_result", "COMPLETED"]
+    ]);
+
+    const getStep = await prisma.stepExecution.findFirstOrThrow({ where: { executionId: webhook.body.executionId, stepKey: "get_session" } });
+    expect(getStep.outputJson).toMatchObject({ exists: true, value: "session-99", type: "string" });
+    expect(getStep.debugJson).toMatchObject({ variable: { operation: "GET", scope: "execution", name: "session_id", type: "string", exists: true } });
+    expect(JSON.stringify(getStep.debugJson)).not.toContain("vars@example.com");
+
+    const record = await prisma.dataStoreRecord.findFirstOrThrow({
+      where: { organizationId: user.organizationId, dataStoreId: store.id, key: "session-99", deletedAt: null }
+    });
+    expect(record.valueJson).toMatchObject({ sessionId: "session-99", email: "vars@example.com", count: 11 });
+
+    const internal = await prisma.internalRecord.findMany({ where: { executionId: webhook.body.executionId, collection: "variables_smoke" } });
+    expect(internal).toHaveLength(1);
+    expect(internal[0].dataJson).toMatchObject({ sessionId: "session-99", stored: true });
+
+    const execution = await prisma.execution.findUniqueOrThrow({ where: { id: webhook.body.executionId } });
+    expect((execution.contextJson as any).__runtime).toBeUndefined();
+    expect((execution.contextJson as any).variables).toEqual({});
+  }, 30_000);
+
   it("prevents cross-tenant trigger and execution access", async () => {
     const userA = await register("tenant-a@example.com", "Tenant A");
     const userB = await register("tenant-b@example.com", "Tenant B");
@@ -431,6 +483,93 @@ describe("workflow webhook execution e2e", () => {
     return response.body;
   }
 
+  async function createVariableDataStoreVersion(user: TestUser, workflowId: string, dataStoreId: string) {
+    const response = await request(app.getHttpServer())
+      .post(`/workflows/${workflowId}/versions`)
+      .set(authHeaders(user))
+      .send({
+        trigger: { key: "webhook", name: "Webhook", type: "webhook_trigger", config: {} },
+        workflowDefinitionSchemaVersion: 2,
+        workflowVariables: { initial: "published" },
+        environmentVariables: { region: "test" },
+        graph: {
+          entryStepKey: "shape",
+          edges: [
+            { from: "shape", to: "set_session", kind: "next" },
+            { from: "set_session", to: "get_session", kind: "next" },
+            { from: "get_session", to: "has_session", kind: "next" },
+            { from: "has_session", to: "save_state", kind: "next" },
+            { from: "save_state", to: "save_result", kind: "next" }
+          ],
+          terminalStepKeys: ["save_result"]
+        },
+        steps: [
+          {
+            key: "shape",
+            name: "Shape state",
+            type: "transform",
+            config: {
+              mode: "OBJECT",
+              fields: {
+                sessionId: "{{trigger.body.sessionId}}",
+                email: "{{trigger.body.email}}",
+                count: "{{trigger.body.count}}"
+              },
+              outputType: "OBJECT"
+            }
+          },
+          {
+            key: "set_session",
+            name: "Set session variable",
+            type: "set_variable",
+            config: { scope: "execution", name: "session_id", expression: "{{steps.shape.output.sessionId}}" }
+          },
+          {
+            key: "get_session",
+            name: "Get session variable",
+            type: "get_variable",
+            config: { scope: "execution", name: "session_id" }
+          },
+          {
+            key: "has_session",
+            name: "Has session",
+            type: "conditional",
+            config: { left: "{{variables.session_id}}", operator: "equals", right: "session-99", skipNextOnFalse: true }
+          },
+          {
+            key: "save_state",
+            name: "Save variable state",
+            type: "data_store_upsert_record",
+            config: {
+              dataStoreId,
+              key: "{{variables.session_id}}",
+              value: {
+                sessionId: "{{variables.session_id}}",
+                email: "{{steps.shape.output.email}}",
+                count: "{{steps.shape.output.count}}"
+              },
+              metadata: { source: "variable-smoke" },
+              mode: "replace"
+            }
+          },
+          {
+            key: "save_result",
+            name: "Save result",
+            type: "database_record",
+            config: {
+              collection: "variables_smoke",
+              data: {
+                sessionId: "{{variables.session_id}}",
+                stored: "{{steps.save_state.output.created}}"
+              }
+            }
+          }
+        ]
+      })
+      .expect(201);
+    return response.body;
+  }
+
   async function createTrigger(user: TestUser, workflowId: string) {
     const response = await request(app.getHttpServer())
       .post(`/workflows/${workflowId}/triggers`)
@@ -443,14 +582,16 @@ describe("workflow webhook execution e2e", () => {
   }
 
   async function waitForExecution(executionId: string, status: string) {
+    let lastBody: any;
     for (let attempt = 0; attempt < 40; attempt += 1) {
       const response = await request(app.getHttpServer()).get(`/executions/${executionId}`).set(lastAuthHeaders()).expect(200);
+      lastBody = response.body;
       if (response.body.status === status) {
         return response;
       }
       await new Promise((resolve) => setTimeout(resolve, 250));
     }
-    throw new Error(`Execution ${executionId} did not reach ${status}`);
+    throw new Error(`Execution ${executionId} did not reach ${status}; last status=${lastBody?.status}; error=${JSON.stringify(lastBody?.errorJson ?? lastBody?.error ?? null)}`);
   }
 
   async function expectTransformExecution(executionId: string, expected: Record<string, string>) {

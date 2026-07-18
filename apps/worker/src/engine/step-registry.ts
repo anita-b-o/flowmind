@@ -17,6 +17,7 @@ import { DataStoreDeleteRecordHandler } from "./handlers/data-store/delete-recor
 import { DataStoreExistsRecordHandler } from "./handlers/data-store/exists-record.handler";
 import { DataStoreCountRecordsHandler } from "./handlers/data-store/count-records.handler";
 import { DataStoreListRecordsHandler } from "./handlers/data-store/list-records.handler";
+import { AppendVariableHandler, DeleteVariableHandler, GetVariableHandler, IncrementVariableHandler, SetVariableHandler } from "./handlers/variables.handler";
 
 @Injectable()
 export class StepRegistry implements OnModuleInit {
@@ -37,6 +38,11 @@ export class StepRegistry implements OnModuleInit {
     private readonly dataStoreExistsRecordHandler: DataStoreExistsRecordHandler,
     private readonly dataStoreCountRecordsHandler: DataStoreCountRecordsHandler,
     private readonly dataStoreListRecordsHandler: DataStoreListRecordsHandler,
+    private readonly setVariableHandler: SetVariableHandler,
+    private readonly getVariableHandler: GetVariableHandler,
+    private readonly deleteVariableHandler: DeleteVariableHandler,
+    private readonly incrementVariableHandler: IncrementVariableHandler,
+    private readonly appendVariableHandler: AppendVariableHandler,
     private readonly aiHandler: AiHandler,
     private readonly emailNotificationHandler: EmailNotificationHandler
   ) {}
@@ -57,6 +63,11 @@ export class StepRegistry implements OnModuleInit {
       this.dataStoreExistsRecordHandler,
       this.dataStoreCountRecordsHandler,
       this.dataStoreListRecordsHandler,
+      this.setVariableHandler,
+      this.getVariableHandler,
+      this.deleteVariableHandler,
+      this.incrementVariableHandler,
+      this.appendVariableHandler,
       this.emailNotificationHandler
     ].forEach(
       (handler) => this.handlers.set(handler.type, handler)

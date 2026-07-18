@@ -16,6 +16,11 @@ export const STEP_TYPES: Array<{ value: StepType; label: string }> = [
   { value: "data_store_exists_record", label: "Data Store: Exists" },
   { value: "data_store_count_records", label: "Data Store: Count" },
   { value: "data_store_list_records", label: "Data Store: List" },
+  { value: "set_variable", label: "Set Variable" },
+  { value: "get_variable", label: "Get Variable" },
+  { value: "delete_variable", label: "Delete Variable" },
+  { value: "increment_variable", label: "Increment Variable" },
+  { value: "append_variable", label: "Append Variable" },
   { value: "transform", label: "Transform" },
   { value: "if", label: "If" },
   { value: "switch", label: "Switch" },
@@ -71,6 +76,11 @@ export const workflowEditorSchema: z.ZodType<WorkflowEditorFormValue> = z
           "data_store_exists_record",
           "data_store_count_records",
           "data_store_list_records",
+          "set_variable",
+          "get_variable",
+          "delete_variable",
+          "increment_variable",
+          "append_variable",
           "transform",
           "conditional",
           "if",
@@ -285,6 +295,15 @@ export function defaultConfig(type: StepType): Record<string, unknown> {
       return { dataStoreId: "", dataStoreName: "", keyPrefix: "" };
     case "data_store_list_records":
       return { dataStoreId: "", dataStoreName: "", keyPrefix: "", limit: 20, offset: 0, sortBy: "key", direction: "asc" };
+    case "set_variable":
+      return { scope: "execution", name: "value", valueKind: "literal", valueType: "string", value: "", expression: "" };
+    case "get_variable":
+    case "delete_variable":
+      return { scope: "execution", name: "value" };
+    case "increment_variable":
+      return { scope: "execution", name: "counter", amount: 1, amountExpression: "" };
+    case "append_variable":
+      return { scope: "execution", name: "items", valueKind: "literal", valueType: "string", value: "", expression: "" };
     case "transform":
       return { mode: "OBJECT", fields: "{\n  \"result\": \"{{trigger.body}}\"\n}", source: "{{trigger.body}}", paths: "id,name", template: "{\n  \"item\": \"{{item}}\",\n  \"index\": \"{{index}}\"\n}", condition: "{{item.active}}", mergeSources: "[\"{{trigger.body}}\", \"{{steps.previous.output}}\"]", conflictPolicy: "LAST_WINS", outputType: "AUTO" };
     case "conditional":
@@ -385,6 +404,7 @@ export function toWorkflowDefinition(values: WorkflowEditorFormValue): WorkflowD
     workflowDefinitionSchemaVersion: graph ? 2 : 1,
     ...(graph ? { graph } : {}),
     workflowVariables: {},
+    environmentVariables: {},
     trigger: { key: "webhook", name: "Webhook", type: "webhook_trigger", config: {} },
     steps: values.steps.map((step, index) => stepFormToDto(step, index))
   };
@@ -457,6 +477,18 @@ export function serializeStepConfig(step: StepFormValue) {
       return dataStoreBaseConfig(config, { keyPrefix: String(config.keyPrefix ?? "") });
     case "data_store_list_records":
       return dataStoreBaseConfig(config, { keyPrefix: String(config.keyPrefix ?? ""), limit: Number(config.limit ?? 20), offset: Number(config.offset ?? 0), sortBy: String(config.sortBy ?? "key"), direction: String(config.direction ?? "asc") });
+    case "set_variable":
+      return variableValueConfig(config);
+    case "get_variable":
+    case "delete_variable":
+      return variableBaseConfig(config);
+    case "increment_variable":
+      return {
+        ...variableBaseConfig(config),
+        ...(config.amountExpression ? { amountExpression: String(config.amountExpression) } : { amount: Number(config.amount ?? 1) })
+      };
+    case "append_variable":
+      return variableValueConfig(config);
     case "transform":
       return serializeTransformConfig(config);
     case "conditional":
@@ -541,6 +573,27 @@ function dataStoreBaseConfig(config: Record<string, unknown>, extra: Record<stri
     ...(config.dataStoreName ? { dataStoreName: String(config.dataStoreName) } : {}),
     ...extra
   };
+}
+
+function variableBaseConfig(config: Record<string, unknown>) {
+  return {
+    scope: config.scope === "workflow" ? "workflow" : "execution",
+    name: String(config.name ?? "")
+  };
+}
+
+function variableValueConfig(config: Record<string, unknown>) {
+  const base = variableBaseConfig(config);
+  if (config.valueKind === "expression" || config.expression) return { ...base, expression: String(config.expression ?? "") };
+  return { ...base, value: parseVariableLiteral(config.value, String(config.valueType ?? "string")) };
+}
+
+function parseVariableLiteral(value: unknown, type: string) {
+  if (type === "number") return Number(value ?? 0);
+  if (type === "boolean") return value === true || value === "true";
+  if (type === "null") return null;
+  if (type === "json") return parseJson(value, {});
+  return String(value ?? "");
 }
 
 function parsePaths(value: unknown) {

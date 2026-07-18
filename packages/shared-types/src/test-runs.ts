@@ -50,6 +50,7 @@ export interface DebugStepInspector {
   retry: { attempt: number; attemptCount: number; maxAttempts: number; nextRetryAt: string | null };
   error: unknown;
   connection: { id?: string; name?: string; type?: string; status?: string } | null;
+  variable?: { operation?: string; scope?: string; name?: string; type?: string; exists?: boolean; summary?: unknown } | null;
 }
 
 export interface WorkflowTestRunSummary {

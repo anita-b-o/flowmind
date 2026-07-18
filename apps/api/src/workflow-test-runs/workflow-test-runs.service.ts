@@ -437,7 +437,8 @@ function inspector(step: any): DebugStepInspector {
       nextRetryAt: step.nextRetryAt?.toISOString() ?? null
     },
     error: sanitizePublic(step.errorJson),
-    connection: (isRecord(debug.connection) ? sanitizePublic(debug.connection) : null) as DebugStepInspector["connection"]
+    connection: (isRecord(debug.connection) ? sanitizePublic(debug.connection) : null) as DebugStepInspector["connection"],
+    variable: (isRecord(debug.variable) ? sanitizePublic(debug.variable) : null) as DebugStepInspector["variable"]
   };
 }
 

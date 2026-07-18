@@ -43,6 +43,7 @@ describe("workflow builder model", () => {
       expressionMode: "strict",
       workflowDefinitionSchemaVersion: 2,
       workflowVariables: {},
+      environmentVariables: {},
       trigger: { key: "webhook", name: "Webhook", type: "webhook_trigger", config: {} },
       graph: { entryStepKey: "save", edges: [], terminalStepKeys: ["save"] },
       steps: [
@@ -56,6 +57,26 @@ describe("workflow builder model", () => {
         }
       ]
     });
+  });
+
+  it("serializes variable nodes with structured controls", () => {
+    const values: WorkflowEditorFormValue = {
+      name: "Variable flow",
+      description: "",
+      steps: [
+        { ...emptyStep(0, "set_variable"), key: "set_customer", name: "Set customer", config: { scope: "execution", name: "customer_id", valueKind: "expression", expression: "{{trigger.body.customerId}}" } },
+        { ...emptyStep(1, "get_variable"), key: "get_customer", name: "Get customer", config: { scope: "execution", name: "customer_id" } },
+        { ...emptyStep(2, "increment_variable"), key: "increment", name: "Increment", config: { scope: "workflow", name: "count", amount: 2 } },
+        { ...emptyStep(3, "append_variable"), key: "append", name: "Append", config: { scope: "execution", name: "items", valueKind: "literal", valueType: "number", value: "7" } }
+      ]
+    };
+
+    expect(toWorkflowDefinition(values).steps.map((step) => step.config)).toEqual([
+      { scope: "execution", name: "customer_id", expression: "{{trigger.body.customerId}}" },
+      { scope: "execution", name: "customer_id" },
+      { scope: "workflow", name: "count", amount: 2 },
+      { scope: "execution", name: "items", value: 7 }
+    ]);
   });
 
   it("serializes if routing into graph v2", () => {

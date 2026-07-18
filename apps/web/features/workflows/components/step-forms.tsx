@@ -39,6 +39,9 @@ export function StepForm({ index, type, register, errors, disabled, setValue, ge
   if (type === "transform") {
     return <TransformStepForm index={index} register={register} errors={errors} disabled={disabled} setValue={setValue} getValues={getValues} />;
   }
+  if (type.endsWith("_variable")) {
+    return <VariableStepForm index={index} type={type} register={register} errors={errors} disabled={disabled} setValue={setValue} getValues={getValues} />;
+  }
   if (type === "if") {
     return <IfStepForm index={index} register={register} errors={errors} disabled={disabled} setValue={setValue} getValues={getValues} />;
   }
@@ -320,6 +323,102 @@ export function DataStoreStepForm({ index, type, register, errors, disabled, set
             </select>
           </label>
         </div>
+      )}
+    </div>
+  );
+}
+
+export function VariableStepForm({ index, type, register, errors, disabled, setValue, getValues }: StepFormProps & { type: string }) {
+  const entries = catalogForSteps(getValues("steps"), index);
+  const previousKeys = getValues("steps").slice(0, index).map((step) => step.key);
+  const [valueKind, setValueKind] = useState(String(getValues(`steps.${index}.config.valueKind`) ?? "literal"));
+  const [valueType, setValueType] = useState(String(getValues(`steps.${index}.config.valueType`) ?? "string"));
+  const valueKindField = register(`steps.${index}.config.valueKind`);
+  const valueTypeField = register(`steps.${index}.config.valueType`);
+  const hasValue = type === "set_variable" || type === "append_variable";
+  return (
+    <div className="stack">
+      <div className="workflow-form-grid">
+        <label>
+          Scope
+          <select disabled={disabled} {...register(`steps.${index}.config.scope`)}>
+            <option value="execution">Execution</option>
+            <option value="workflow">Workflow</option>
+          </select>
+          <FieldError message={configError(errors, index, "scope")} />
+        </label>
+        <label>
+          Name
+          <input disabled={disabled} placeholder="customer_id" {...register(`steps.${index}.config.name`)} />
+          <FieldError message={configError(errors, index, "name")} />
+        </label>
+        {type === "increment_variable" && (
+          <label>
+            Amount
+            <input type="number" step="any" disabled={disabled} {...register(`steps.${index}.config.amount`, { valueAsNumber: true })} />
+            <FieldError message={configError(errors, index, "amount")} />
+          </label>
+        )}
+      </div>
+      {type === "increment_variable" && (
+        <label>
+          Amount expression
+          <input disabled={disabled} placeholder="{{trigger.body.delta}}" {...register(`steps.${index}.config.amountExpression`)} />
+          <ExpressionTools field={`steps.${index}.config.amountExpression`} entries={entries} previousKeys={previousKeys} disabled={disabled} getValues={getValues} setValue={setValue} />
+        </label>
+      )}
+      {hasValue && (
+        <>
+          <div className="workflow-form-grid">
+            <label>
+              Value source
+              <select
+                disabled={disabled}
+                {...valueKindField}
+                onChange={(event) => {
+                  void valueKindField.onChange(event);
+                  setValueKind(event.target.value);
+                }}
+              >
+                <option value="literal">Literal</option>
+                <option value="expression">Expression</option>
+              </select>
+            </label>
+            {valueKind !== "expression" && (
+              <label>
+                Value type
+                <select
+                  disabled={disabled}
+                  {...valueTypeField}
+                  onChange={(event) => {
+                    void valueTypeField.onChange(event);
+                    setValueType(event.target.value);
+                  }}
+                >
+                  <option value="string">String</option>
+                  <option value="number">Number</option>
+                  <option value="boolean">Boolean</option>
+                  <option value="null">Null</option>
+                  <option value="json">JSON</option>
+                </select>
+              </label>
+            )}
+          </div>
+          {valueKind === "expression" ? (
+            <label>
+              Expression
+              <input disabled={disabled} placeholder="{{trigger.body.value}}" {...register(`steps.${index}.config.expression`)} />
+              <ExpressionTools field={`steps.${index}.config.expression`} entries={entries} previousKeys={previousKeys} disabled={disabled} getValues={getValues} setValue={setValue} />
+              <FieldError message={configError(errors, index, "expression")} />
+            </label>
+          ) : (
+            <label>
+              Value
+              {valueType === "json" ? <textarea rows={5} disabled={disabled} {...register(`steps.${index}.config.value`)} /> : <input disabled={disabled} {...register(`steps.${index}.config.value`)} />}
+              <FieldError message={configError(errors, index, "value")} />
+            </label>
+          )}
+        </>
       )}
     </div>
   );

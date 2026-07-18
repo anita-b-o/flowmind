@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
+import { assertVariableName, assertVariableValue, WorkflowVariableValidationError } from "@automation/shared-types";
 import { PrismaService } from "../prisma/prisma.service";
 
 @Injectable()
@@ -45,8 +46,11 @@ export class VariablesService {
   }
 
   assertVariableKey(key: string) {
-    if (!/^[A-Za-z_][A-Za-z0-9_-]{0,63}$/.test(key)) {
-      throw new BadRequestException("Variable key must be 1-64 chars using letters, numbers, _ or - and start with a letter or _");
+    try {
+      assertVariableName(key);
+    } catch (error) {
+      if (error instanceof WorkflowVariableValidationError) throw new BadRequestException(error.message);
+      throw error;
     }
   }
 
@@ -57,5 +61,5 @@ export class VariablesService {
 }
 
 export function variableJson(value: unknown): Prisma.InputJsonValue {
-  return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
+  return JSON.parse(JSON.stringify(assertVariableValue(value))) as Prisma.InputJsonValue;
 }

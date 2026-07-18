@@ -61,7 +61,12 @@ export enum StepType {
   DataStoreDeleteRecord = "data_store_delete_record",
   DataStoreExistsRecord = "data_store_exists_record",
   DataStoreCountRecords = "data_store_count_records",
-  DataStoreListRecords = "data_store_list_records"
+  DataStoreListRecords = "data_store_list_records",
+  SetVariable = "set_variable",
+  GetVariable = "get_variable",
+  DeleteVariable = "delete_variable",
+  IncrementVariable = "increment_variable",
+  AppendVariable = "append_variable"
 }
 
 export enum ConnectionType {
@@ -140,11 +145,16 @@ export interface WorkflowDefinitionUi {
 export interface ExecutionContext {
   trigger: JsonObject;
   steps: Record<string, { output: unknown; status: StepExecutionStatus }>;
+  variables?: JsonObject;
   metadata: JsonObject;
   workflow?: JsonObject;
   execution?: JsonObject;
   organization?: JsonObject;
   connection?: JsonObject;
+  system?: JsonObject;
+  timestamp?: string;
+  item?: unknown;
+  index?: number;
 }
 
 export type ExpressionMode = "legacy" | "strict";
@@ -153,6 +163,7 @@ export interface WorkflowDefinitionMetadata {
   workflowDefinitionSchemaVersion?: 1 | 2;
   expressionMode?: ExpressionMode;
   workflowVariables?: JsonObject;
+  environmentVariables?: JsonObject;
   graph?: WorkflowGraphDefinition;
   ui?: WorkflowDefinitionUi;
 }
@@ -190,3 +201,4 @@ export * from "./graph-validation";
 export * from "./execution-lifecycle";
 export * from "./transform-step";
 export * from "./data-store";
+export * from "./workflow-variables";

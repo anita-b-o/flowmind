@@ -4,6 +4,7 @@ import { Prisma } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import { StepExecutor } from "./step-executor";
 import { ContextReconstructor } from "./context-reconstructor";
+import { ExecutionRuntimeContext } from "./execution-runtime-context";
 import { ExecutionLeaseService } from "./execution-lease.service";
 import { LeaseLostError } from "./lease-lost.error";
 import { DeadLetterService } from "../dlq/dead-letter.service";
@@ -65,6 +66,7 @@ export class WorkflowRunner {
       data: { startedAt: execution.startedAt ?? new Date(), completedAt: null }
     });
 
+    let runtimeContext: ExecutionRuntimeContext | undefined;
     try {
       let skipNext = false;
       let current = await this.loadExecution(payload);
@@ -73,8 +75,9 @@ export class WorkflowRunner {
       }
       const definition = runtimeDefinition(current);
       const graph = parseRuntimeGraph(definition);
+      runtimeContext = await this.createRuntimeContext(current);
       if (graph) {
-        return await this.runGraph(payload, execution, current, graph, () => {
+        return await this.runGraph(payload, execution, current, graph, runtimeContext, () => {
           if (heartbeat) clearInterval(heartbeat);
         });
       }
@@ -131,23 +134,24 @@ export class WorkflowRunner {
             stepExecution,
             reason: "skipNextOnFalse"
           });
-          await this.updateContextCache(current.id);
+          runtimeContext.setStepResult(step.key, result.status, result.output);
+          await this.updateContextCache(current.id, runtimeContext);
           skipNext = false;
           current = await this.reload(payload);
           continue;
         }
 
-        const context = await this.reconstructContext(current);
         const outcome = await this.stepExecutor.execute({
           organizationId: current.organizationId,
           executionId: current.id,
           workflowStepId: dbStep.id,
           step,
-          context,
+          context: runtimeContext.context,
           stepExecution
         });
         await this.leaseService.assertOwned(current.id);
-        await this.updateContextCache(current.id);
+        if (outcome.outcome === "completed") runtimeContext.setStepResult(step.key, outcome.result.status, outcome.result.output);
+        await this.updateContextCache(current.id, runtimeContext);
 
         if (outcome.outcome === "retrying") {
           await this.markWaiting(current.id);
@@ -166,7 +170,7 @@ export class WorkflowRunner {
       }
 
       await this.leaseService.assertOwned(execution.id);
-      const context = await this.reconstructContextForExecution(execution.id);
+      const context = runtimeContext.snapshot({ includeRuntime: false });
       await this.assertNoFailedSteps(execution.id);
       const completed = await this.prisma.execution.updateMany({
         where: { id: execution.id, status: { in: ACTIVE_EXECUTION_STATUSES as any } },
@@ -193,7 +197,7 @@ export class WorkflowRunner {
         await this.leaseService.release(execution.id).catch(() => undefined);
         return { status: "completed" };
       }
-      const context = await this.reconstructContextForExecution(execution.id);
+      const context = runtimeContext?.snapshot({ includeRuntime: false }) ?? await this.reconstructContextForExecution(execution.id);
       const failedStep = await this.prisma.stepExecution.findFirst({
         where: { executionId: execution.id, status: StepExecutionStatus.Failed },
         orderBy: { updatedAt: "desc" }
@@ -274,6 +278,7 @@ export class WorkflowRunner {
     initialExecution: { id: string; startedAt?: Date | null; organizationId: string },
     currentExecution: Awaited<ReturnType<WorkflowRunner["loadExecution"]>> & {},
     graph: RuntimeGraph,
+    runtimeContext: ExecutionRuntimeContext,
     stopHeartbeat: () => void
   ): Promise<WorkflowRunResult> {
     const stepRows = runtimeStepRows(currentExecution).filter((step) => step.position > 0);
@@ -315,8 +320,9 @@ export class WorkflowRunner {
       }
 
       if (stepExecution.status === StepExecutionStatus.Retrying && isIntentionalWait(stepExecution)) {
-        await this.stepExecutor.completeWait({ step, stepExecution });
-        await this.updateContextCache(current.id);
+        const outcome = await this.stepExecutor.completeWait({ step, stepExecution });
+        runtimeContext.setStepResult(step.key, outcome.result.status, outcome.result.output);
+        await this.updateContextCache(current.id, runtimeContext);
         current = await this.reload(payload);
           stepExecution = current.steps.find((entry) => entry.stepKey === step.key) as typeof stepExecution;
       }
@@ -326,17 +332,17 @@ export class WorkflowRunner {
       }
 
       if (!isDone(stepExecution.status)) {
-        const context = await this.reconstructContext(current);
         const outcome = await this.stepExecutor.execute({
           organizationId: current.organizationId,
           executionId: current.id,
           workflowStepId: dbStep.id,
           step,
-          context,
+          context: runtimeContext.context,
           stepExecution
         });
         await this.leaseService.assertOwned(current.id);
-        await this.updateContextCache(current.id);
+        if (outcome.outcome === "completed") runtimeContext.setStepResult(step.key, outcome.result.status, outcome.result.output);
+        await this.updateContextCache(current.id, runtimeContext);
 
         if (outcome.outcome === "retrying") {
           await this.markWaiting(current.id);
@@ -360,7 +366,7 @@ export class WorkflowRunner {
             nextStepKey: selected
           });
           this.metrics?.recordBranch(step.type, String((outcome.result.output as any)?.branch ?? (outcome.result.output as any)?.matchedCaseKey ?? "default"));
-          await this.skipUnselectedBranches(current, graph, step.key, selected, stepRowsByKey);
+          await this.skipUnselectedBranches(current, graph, step.key, selected, stepRowsByKey, runtimeContext);
         }
         current = await this.reload(payload);
       }
@@ -379,7 +385,7 @@ export class WorkflowRunner {
     }
 
     await this.leaseService.assertOwned(initialExecution.id);
-    const context = await this.reconstructContextForExecution(initialExecution.id);
+    const context = runtimeContext.snapshot({ includeRuntime: false });
     await this.assertNoFailedSteps(initialExecution.id);
     const completed = await this.prisma.execution.updateMany({
       where: { id: initialExecution.id, status: { in: ACTIVE_EXECUTION_STATUSES as any } },
@@ -406,7 +412,8 @@ export class WorkflowRunner {
     graph: RuntimeGraph,
     controlStepKey: string,
     selectedStepKey: string,
-    stepRowsByKey: Map<string, RuntimeStepRow>
+    stepRowsByKey: Map<string, RuntimeStepRow>,
+    runtimeContext: ExecutionRuntimeContext
   ) {
     for (const skipKey of branchSkipKeys(graph, controlStepKey, selectedStepKey)) {
       const dbStep = stepRowsByKey.get(skipKey);
@@ -419,7 +426,7 @@ export class WorkflowRunner {
         step
       });
       if (isDone(stepExecution.status)) continue;
-      await this.stepExecutor.skip({
+      const { result } = await this.stepExecutor.skip({
         organizationId: execution.organizationId,
         executionId: execution.id,
         workflowStepId: dbStep.id,
@@ -427,6 +434,7 @@ export class WorkflowRunner {
         stepExecution,
         reason: "branch_not_selected"
       });
+      runtimeContext.setStepResult(step.key, result.status, result.output);
       this.logger?.info("worker.flow.branch_skipped", { stepKey: skipKey, controlStepKey });
     }
   }
@@ -453,6 +461,7 @@ export class WorkflowRunner {
     retryOfExecutionId?: string | null;
     startedAt?: Date | null;
     inputJson: unknown;
+    contextJson?: unknown;
     workflow?: { name: string; organization?: { id: string; slug?: string | null } } | null;
     testRun?: { snapshotDefinitionJson: unknown } | null;
     workflowVersion?: { definitionJson: unknown; workflow?: { name: string; organization?: { id: string; slug?: string | null } } | null } | null;
@@ -472,9 +481,20 @@ export class WorkflowRunner {
       variables: {
         ...((context.workflow?.variables as Record<string, unknown> | undefined) ?? {}),
         ...Object.fromEntries(workflowVariables.map((variable) => [variable.key, variable.valueJson]))
+      },
+      environment: {
+        ...((context.workflow?.environment as Record<string, unknown> | undefined) ?? {})
       }
     };
     return context;
+  }
+
+  private async createRuntimeContext(execution: Parameters<WorkflowRunner["reconstructContext"]>[0]) {
+    const context = await this.reconstructContext(execution);
+    const cached = execution.contextJson && typeof execution.contextJson === "object" && !Array.isArray(execution.contextJson)
+      ? (execution.contextJson as Record<string, unknown>).__runtime
+      : undefined;
+    return new ExecutionRuntimeContext(context, cached);
   }
 
   private async loadOrganizationVariables(organizationId: string) {
@@ -495,8 +515,8 @@ export class WorkflowRunner {
     }
   }
 
-  private async updateContextCache(executionId: string) {
-    const context = await this.reconstructContextForExecution(executionId);
+  private async updateContextCache(executionId: string, runtimeContext?: ExecutionRuntimeContext) {
+    const context = runtimeContext?.snapshot({ includeRuntime: true }) ?? await this.reconstructContextForExecution(executionId);
     await this.prisma.execution.update({ where: { id: executionId }, data: { contextJson: toJson(context) } });
   }
 

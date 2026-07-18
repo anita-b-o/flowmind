@@ -27,7 +27,12 @@ export type StepType =
   | "data_store_delete_record"
   | "data_store_exists_record"
   | "data_store_count_records"
-  | "data_store_list_records";
+  | "data_store_list_records"
+  | "set_variable"
+  | "get_variable"
+  | "delete_variable"
+  | "increment_variable"
+  | "append_variable";
 
 export type WorkflowVersionStatus = "DRAFT" | "ACTIVE" | "ARCHIVED";
 
@@ -83,6 +88,7 @@ export interface WorkflowDefinitionDto {
   ui?: WorkflowDefinitionUiDto;
   expressionMode?: "legacy" | "strict";
   workflowVariables?: Record<string, unknown>;
+  environmentVariables?: Record<string, unknown>;
 }
 
 export interface WorkflowGraphDto {
@@ -145,6 +151,7 @@ export interface DebugStepInspector {
   retry: { attempt: number; attemptCount: number; maxAttempts: number; nextRetryAt: string | null };
   error: unknown;
   connection: { id?: string; name?: string; type?: string; status?: string } | null;
+  variable?: { operation?: string; scope?: string; name?: string; type?: string; exists?: boolean; summary?: unknown } | null;
 }
 
 export interface WorkflowTestRunSummary {

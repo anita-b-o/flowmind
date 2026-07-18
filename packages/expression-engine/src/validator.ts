@@ -2,7 +2,7 @@ import { EXPRESSION_ERROR_CODES, ExpressionError } from "./errors";
 import { parseTemplate } from "./parser";
 import type { ExpressionNamespace, ExpressionValidationContext, ExpressionValidationIssue, ExpressionValidationResult } from "./types";
 
-const NAMESPACES = new Set<ExpressionNamespace>(["trigger", "workflow", "steps", "execution", "organization", "connection", "metadata"]);
+const NAMESPACES = new Set<ExpressionNamespace>(["trigger", "workflow", "steps", "execution", "variables", "system", "timestamp", "organization", "connection", "metadata"]);
 const CONNECTION_ALLOWED = new Set(["connection.id", "connection.name", "connection.type"]);
 const CONNECTION_BLOCKED = new Set(["secret", "secretValue", "password", "apiKey", "encryptedValue", "headers", "additionalHeaders", "authName"]);
 
@@ -33,6 +33,15 @@ export function validateExpressionString(value: string, context: ExpressionValid
       }
       if (namespace === "steps") {
         validateStepPath(path.segments, path.raw, context, issues);
+      }
+      if (namespace === "variables" && path.segments.length < 2) {
+        issues.push(issue(EXPRESSION_ERROR_CODES.syntaxInvalid, "variables expressions must include a variable name", path.raw, namespace));
+      }
+      if (namespace === "system" && path.segments.length < 2) {
+        issues.push(issue(EXPRESSION_ERROR_CODES.syntaxInvalid, "system expressions must include a field name", path.raw, namespace));
+      }
+      if (namespace === "timestamp" && path.segments.length > 1) {
+        issues.push(issue(EXPRESSION_ERROR_CODES.accessDenied, "timestamp is a scalar namespace and cannot be traversed", path.raw, namespace));
       }
       if (
         namespace === "trigger" &&

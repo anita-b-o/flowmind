@@ -42,6 +42,7 @@ import { DataStoreDeleteRecordHandler } from "./engine/handlers/data-store/delet
 import { DataStoreExistsRecordHandler } from "./engine/handlers/data-store/exists-record.handler";
 import { DataStoreCountRecordsHandler } from "./engine/handlers/data-store/count-records.handler";
 import { DataStoreListRecordsHandler } from "./engine/handlers/data-store/list-records.handler";
+import { AppendVariableHandler, DeleteVariableHandler, GetVariableHandler, IncrementVariableHandler, SetVariableHandler } from "./engine/handlers/variables.handler";
 
 const redisUrl = new URL(process.env.REDIS_URL ?? "redis://localhost:6379");
 
@@ -94,6 +95,11 @@ const redisUrl = new URL(process.env.REDIS_URL ?? "redis://localhost:6379");
     DataStoreExistsRecordHandler,
     DataStoreCountRecordsHandler,
     DataStoreListRecordsHandler,
+    SetVariableHandler,
+    GetVariableHandler,
+    DeleteVariableHandler,
+    IncrementVariableHandler,
+    AppendVariableHandler,
     AiHandler,
     EmailNotificationHandler
   ]

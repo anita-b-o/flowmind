@@ -72,6 +72,7 @@ export function draftToWorkflowDefinitionDto(draft: WorkflowDraftModel): Workflo
     expressionMode: "strict",
     workflowDefinitionSchemaVersion: 2,
     workflowVariables: {},
+    environmentVariables: {},
     graph,
     ui: draft.ui
   };

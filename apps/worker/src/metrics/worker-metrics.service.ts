@@ -186,6 +186,25 @@ export class WorkerMetricsService implements OnModuleInit, OnModuleDestroy {
     buckets: [0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5],
     registers: [this.registry]
   });
+  readonly variableOperations = new Counter({
+    name: "flowmind_variable_operations_total",
+    help: "Workflow variable operations by operation and outcome.",
+    labelNames: ["operation", "outcome"],
+    registers: [this.registry]
+  });
+  readonly variableErrors = new Counter({
+    name: "flowmind_variable_errors_total",
+    help: "Workflow variable operation errors by category.",
+    labelNames: ["operation", "error_category"],
+    registers: [this.registry]
+  });
+  readonly variableLatency = new Histogram({
+    name: "flowmind_variable_latency_seconds",
+    help: "Workflow variable operation latency.",
+    labelNames: ["operation", "outcome"],
+    buckets: [0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1],
+    registers: [this.registry]
+  });
 
   constructor() {
     this.registry.setDefaultLabels({ service: "worker" });
@@ -261,6 +280,14 @@ export class WorkerMetricsService implements OnModuleInit, OnModuleDestroy {
     if (errorCategory) this.dataStoreErrors.inc({ operation: safeOperation, error_category: safeReason(errorCategory) });
   }
 
+  recordVariable(operation: string, outcome: string, durationSeconds: number, errorCategory?: string) {
+    const safeOperation = safeVariableOperation(operation);
+    const safeOutcome = safeReason(outcome);
+    this.variableOperations.inc({ operation: safeOperation, outcome: safeOutcome });
+    this.variableLatency.observe({ operation: safeOperation, outcome: safeOutcome }, Math.max(0, durationSeconds));
+    if (errorCategory) this.variableErrors.inc({ operation: safeOperation, error_category: safeReason(errorCategory) });
+  }
+
   private hasCredential(authorization: string | undefined, header: string | string[] | undefined) {
     return Boolean(bearerToken(authorization) || headerValue(header));
   }
@@ -299,6 +326,11 @@ function safeReason(value: string) {
 
 function safeTransformMode(value: string | undefined) {
   return ["OBJECT", "PICK", "OMIT", "MAP_ARRAY", "FILTER_ARRAY", "MERGE"].includes(value ?? "") ? String(value).toLowerCase() : "unknown";
+}
+
+function safeVariableOperation(value: string) {
+  const operation = value.toLowerCase();
+  return ["set", "get", "delete", "increment", "append"].includes(operation) ? operation : "unknown";
 }
 
 function bearerToken(value: string | undefined) {
