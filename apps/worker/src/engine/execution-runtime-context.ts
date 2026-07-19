@@ -15,11 +15,15 @@ export class ExecutionRuntimeContext {
   readonly context: ExecutionContext;
   private readonly executionVariables: Record<string, unknown>;
   private readonly workflowVariables: Record<string, unknown>;
+  private readonly initialExecutionVariables: Record<string, unknown>;
+  private readonly initialWorkflowVariables: Record<string, unknown>;
 
   constructor(base: ExecutionContext, checkpoint?: unknown) {
     const runtime = checkpoint && typeof checkpoint === "object" && !Array.isArray(checkpoint) ? (checkpoint as Record<string, unknown>) : {};
     this.executionVariables = cloneRecord(runtime.variables ?? {});
-    this.workflowVariables = cloneRecord(base.workflow?.variables ?? {});
+    this.workflowVariables = cloneRecord(runtime.workflowVariables ?? base.workflow?.variables ?? {});
+    this.initialExecutionVariables = cloneRecord(runtime.initialExecutionVariables ?? this.executionVariables);
+    this.initialWorkflowVariables = cloneRecord(runtime.initialWorkflowVariables ?? this.workflowVariables);
     const executionVariablesView = readonlyRecord(this.executionVariables, "execution variables");
     const workflowVariablesView = readonlyRecord(this.workflowVariables, "workflow variables");
     const workflow = Object.freeze({
@@ -147,14 +151,24 @@ export class ExecutionRuntimeContext {
       index: undefined
     };
     if (options.includeRuntime) {
-      output.__runtime = { variables: cloneRecord(this.executionVariables) };
+      output.__runtime = { variables: cloneRecord(this.executionVariables), workflowVariables: cloneRecord(this.workflowVariables), initialExecutionVariables: cloneRecord(this.initialExecutionVariables), initialWorkflowVariables: cloneRecord(this.initialWorkflowVariables) };
     }
+    const checkpointValues = { executionVariables: this.executionVariables, workflowVariables: this.workflowVariables, initialExecutionVariables: this.initialExecutionVariables, initialWorkflowVariables: this.initialWorkflowVariables };
+    const complete = recoveryValuesAvailable(checkpointValues) && Buffer.byteLength(JSON.stringify(checkpointValues), "utf8") <= Number(process.env.PERSISTED_EXECUTION_PAYLOAD_MAX_BYTES ?? 65_536);
+    (output as any).recoveryCheckpoint = { schemaVersion: 1, complete, initialExecutionVariables: cloneRecord(this.initialExecutionVariables), initialWorkflowVariables: cloneRecord(this.initialWorkflowVariables), executionVariables: complete ? cloneRecord(this.executionVariables) : {}, workflowVariables: complete ? cloneRecord(this.workflowVariables) : {} };
     return output;
   }
 
   private target(scope: VariableScope) {
     return scope === "workflow" ? this.workflowVariables : this.executionVariables;
   }
+}
+
+function recoveryValuesAvailable(value: unknown): boolean {
+  if (typeof value === "string") return !["[redacted]", "[REDACTED]", "[TRUNCATED]"].includes(value);
+  if (!value || typeof value !== "object") return true;
+  if (!Array.isArray(value) && (value as any).truncated === true) return false;
+  return (Array.isArray(value) ? value : Object.values(value as Record<string, unknown>)).every(recoveryValuesAvailable);
 }
 
 export function getExecutionRuntimeContext(context: ExecutionContext) {

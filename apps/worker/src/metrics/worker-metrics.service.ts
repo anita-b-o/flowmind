@@ -52,6 +52,8 @@ export class WorkerMetricsService implements OnModuleInit, OnModuleDestroy {
     labelNames: ["error_category"],
     registers: [this.registry]
   });
+  readonly replayExecutions = new Counter({ name: "flowmind_execution_replays_total", help: "Replay execution lifecycle outcomes.", labelNames: ["mode", "outcome"], registers: [this.registry] });
+  readonly replayStepsReused = new Counter({ name: "flowmind_execution_replay_steps_reused_total", help: "Steps reused by recovery.", labelNames: ["step_type"], registers: [this.registry] });
   readonly executionsReconciled = new Counter({
     name: "flowmind_workflow_executions_reconciled_total",
     help: "Workflow executions recovered by reconciler.",

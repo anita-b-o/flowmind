@@ -8,7 +8,7 @@ import { RequireAuth } from "../../../features/auth/require-auth";
 import { useAuth } from "../../../features/auth/use-auth";
 import { useCancelExecution, useExecution, useExecutionTimeline, useExecutionTree } from "../../../features/executions/hooks";
 import { canCancelExecution, canRetryExecution } from "../../../features/auth/rbac";
-import { RetryExecutionDialog } from "../../../features/dead-letter-executions/components/retry-execution-dialog";
+import { ReplayExecutionDialog } from "../../../features/executions/components/replay-execution-dialog";
 import { ConfirmDialog } from "../../../components/confirm-dialog";
 import { ExecutionApprovalDetails } from "../../../features/executions/components/execution-approval-details";
 
@@ -34,6 +34,7 @@ export default function ExecutionDetailPage({ params }: { params: Promise<{ exec
             <section className="panel stack">
               <h1>Execution</h1>
               <StatusBadge status={detail.publicStatus ?? detail.status} />
+              {detail.replayMode && <StatusBadge status="REPLAY" />}
               {detail.deadLetter && <StatusBadge status={detail.deadLetter.active ? "DLQ ACTIVE" : "DLQ RESOLVED"} />}
               <p className="muted">{detail.id}</p>
               <p>Workflow: {detail.workflow.name}</p>
@@ -70,6 +71,8 @@ export default function ExecutionDetailPage({ params }: { params: Promise<{ exec
                   Retry of: <Link href={`/executions/${detail.retryOfExecution.id}`}>{detail.retryOfExecution.id}</Link>
                 </p>
               )}
+              {detail.replayOfExecution && <p>Replayed from: <Link href={`/executions/${detail.replayOfExecution.id}`}>{detail.replayOfExecution.id}</Link></p>}
+              {detail.replayMode && <p>Replay mode: {detail.replayMode}{detail.replayFromStepKey ? ` · from ${detail.replayFromStepKey}` : ""}</p>}
               {detail.retryRequestedAt && <p>Retry requested: {formatDate(detail.retryRequestedAt)}</p>}
               {detail.retryReason && <p>Retry reason: {detail.retryReason}</p>}
               {detail.deadLetter && (
@@ -77,9 +80,9 @@ export default function ExecutionDetailPage({ params }: { params: Promise<{ exec
                   Dead letter: <Link href={`/dead-letter-executions/${detail.deadLetter.id}`}>{detail.deadLetter.active ? "active" : "resolved"}</Link>
                 </p>
               )}
-              {(detail.status === "FAILED" || detail.deadLetter?.active) && canRetryExecution(role) && (
+              {["COMPLETED", "FAILED", "CANCELLED"].includes(detail.status) && canRetryExecution(role) && (
                 <button type="button" onClick={() => setRetryOpen(true)}>
-                  Retry execution
+                  Replay execution
                 </button>
               )}
               {["PENDING", "QUEUED", "RUNNING", "RETRYING"].includes(detail.status) && canCancelExecution(role) && (
@@ -99,6 +102,7 @@ export default function ExecutionDetailPage({ params }: { params: Promise<{ exec
                 ))}
               </section>
             )}
+            {!!detail.replayExecutions.length && <section className="panel stack"><h2>Replays</h2>{detail.replayExecutions.map((replay) => <p key={replay.id}><StatusBadge status={replay.status} /> <Link href={`/executions/${replay.id}`}>{replay.id}</Link></p>)}</section>}
 
             {!!detail.childExecutions.length && <section className="panel stack"><h2>Child workflows</h2>{detail.childExecutions.map((child) => <p key={child.id}><StatusBadge status={child.status} /> <Link href={`/executions/${child.id}`}>{child.id}</Link> · depth {child.depth}</p>)}</section>}
             <ExecutionApprovalDetails waitReason={detail.waitReason} approvals={detail.approvals} />
@@ -106,7 +110,7 @@ export default function ExecutionDetailPage({ params }: { params: Promise<{ exec
             <section className="panel stack">
               <h2>Timeline</h2>
               {timeline.isLoading && <p className="muted">Loading timeline...</p>}
-              {timeline.data?.items.map((event) => <div className="timeline-row" key={event.id}><span className={`timeline-dot ${(event.status ?? "pending").toLowerCase()}`} /><div><strong>{event.message}</strong><p className="muted">{formatDate(event.timestamp)}{event.executionPath ? ` · ${event.executionPath}` : ""}{event.iterationIndex !== null && event.iterationIndex !== undefined ? ` · iteration ${event.iterationIndex}` : ""}{event.durationMs !== null && event.durationMs !== undefined ? ` · ${event.durationMs}ms` : ""}</p>{event.relatedExecutionId && <Link href={`/executions/${event.relatedExecutionId}`}>Open child execution</Link>}</div></div>)}
+              {timeline.data?.items.map((event) => <div className="timeline-row" key={event.id}><span className={`timeline-dot ${(event.status ?? "pending").toLowerCase()}`} /><div><strong>{event.message}</strong><p className="muted">{formatDate(event.timestamp)}{event.executionPath ? ` · ${event.executionPath}` : ""}{event.iterationIndex !== null && event.iterationIndex !== undefined ? ` · iteration ${event.iterationIndex}` : ""}{event.durationMs !== null && event.durationMs !== undefined ? ` · ${event.durationMs}ms` : ""}</p>{event.relatedExecutionId && <Link href={`/executions/${event.relatedExecutionId}`}>Open child execution</Link>}{event.reusedFromExecutionId && <Link href={`/executions/${event.reusedFromExecutionId}`}>Open source execution</Link>}</div></div>)}
             </section>
 
             {tree.data && <section className="panel stack"><h2>Execution tree</h2><ExecutionTreeNode node={tree.data} currentId={executionId} /></section>}
@@ -146,7 +150,7 @@ export default function ExecutionDetailPage({ params }: { params: Promise<{ exec
                     <StatusBadge status={step.publicStatus ?? step.status} />
                   </div>
                   <p>
-                    Attempts: {step.attemptCount}/{step.maxAttempts}
+                    {step.reused ? <>Reused from <Link href={`/executions/${step.reusedFromExecutionId}`}>{step.reusedFromExecutionId}</Link> · no attempts created</> : <>Attempts: {step.attemptCount}/{step.maxAttempts}</>}
                   </p>
                   {step.nextRetryAt && <p>Next retry: {formatDate(step.nextRetryAt)}</p>}
                   {step.effectStatus && (
@@ -168,7 +172,7 @@ export default function ExecutionDetailPage({ params }: { params: Promise<{ exec
                 </div>
               ))}
             </section>
-            <RetryExecutionDialog open={retryOpen} executionId={detail.id} deadLetterId={detail.deadLetter?.id} onClose={() => setRetryOpen(false)} />
+            <ReplayExecutionDialog open={retryOpen} executionId={detail.id} failed={detail.status === "FAILED"} onClose={() => setRetryOpen(false)} />
             <ConfirmDialog
               open={cancelOpen}
               title="Cancel execution"

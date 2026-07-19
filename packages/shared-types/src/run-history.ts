@@ -1,4 +1,24 @@
-export type ExecutionTriggerType = "manual" | "webhook" | "scheduled" | "event" | "subworkflow" | "retry";
+export type ExecutionTriggerType = "manual" | "webhook" | "scheduled" | "event" | "subworkflow" | "retry" | "replay";
+export type ExecutionReplayModeValue = "FULL_REPLAY" | "RETRY_FROM_FAILURE";
+export type ReplaySafetyClass = "PURE" | "READ_ONLY" | "SIDE_EFFECT" | "WAITING_CONTROL";
+export interface ReplayStepSummary { stepKey: string; stepType: string; executionPath: string; iterationIndex: number | null; safety: ReplaySafetyClass; }
+export interface ExecutionReplayPreview {
+  possible: boolean;
+  mode: ExecutionReplayModeValue;
+  sourceExecutionId: string;
+  originalExecutionId: string;
+  workflowVersionId: string | null;
+  startingPoint: { stepKey: string; executionPath: string; iterationIndex: number | null } | null;
+  startingStep: { stepKey: string; executionPath: string; iterationIndex: number | null } | null;
+  reusedSteps: ReplayStepSummary[];
+  reexecutedSteps: ReplayStepSummary[];
+  sideEffects: ReplayStepSummary[];
+  sideEffectWarnings: string[];
+  warnings: string[];
+  missingCheckpointData: string[];
+  blockedReasons: string[];
+  reason: string | null;
+}
 export type ExecutionRelationship = "root" | "child";
 
 export interface SafeExecutionError {
@@ -21,6 +41,8 @@ export interface ExecutionTimelineEvent {
   waitReason?: string | null;
   relatedExecutionId?: string;
   approvalId?: string;
+  reusedFromExecutionId?: string;
+  reusedFromStepExecutionId?: string;
   message: string;
 }
 

@@ -98,6 +98,16 @@ export class ForEachExecutionService {
           const row = input.stepRowsByKey.get(nextStepKey);
           if (!row) throw new NonRetryableStepError(`FOR_EACH Body references missing step ${nextStepKey}`);
           const step = toStep(row);
+          const reused = await this.reused(input.executionId, executionPath, step.key);
+          if (reused) {
+            frame.steps[step.key] = { status: reused.status as StepExecutionStatus, output: reused.outputJson };
+            lastOutput = reused.outputJson; lastStatus = reused.status as StepExecutionStatus;
+            if (step.type === "try_catch") nextStepKey = input.graph.edges.find((edge) => edge.from === step.key && edge.kind === "try_done")?.to ?? input.doneStepKey;
+            else nextStepKey = selectedNextStepKey(input.graph, step.key, reused.outputJson) ?? input.doneStepKey;
+            state.currentStepKey = nextStepKey === input.doneStepKey ? undefined : nextStepKey;
+            await this.checkpoint(input.loopStepExecution.id, state, summary(state, config));
+            continue;
+          }
           let stepExecution = await this.stepExecutor.ensure({
             organizationId: input.organizationId,
             executionId: input.executionId,
@@ -106,6 +116,7 @@ export class ForEachExecutionService {
             executionPath,
             iterationIndex
           });
+          if (step.type === "try_catch" || step.type === "for_each") stepExecution = await this.hydrateControl(input.executionId, stepExecution as any, step.key, executionPath) as any;
           if (step.type === "try_catch") {
             if (!this.tryCatch) throw new NonRetryableStepError("TRY_CATCH runtime service is unavailable");
             const doneEdge = input.graph.edges.find((edge) => edge.from === step.key && edge.kind === "try_done");
@@ -262,6 +273,21 @@ export class ForEachExecutionService {
 
   private checkpoint(stepExecutionId: string, state: LoopState, output: ForEachOutput) {
     return this.prisma.stepExecution.update({ where: { id: stepExecutionId }, data: { inputJson: json({ forEachState: state }), outputJson: json(output), debugJson: json({ loop: { ...output, currentIteration: state.nextIndex, results: undefined, errors: output.errors?.slice(0, 5) } }) } });
+  }
+
+  private async reused(executionId: string, executionPath: string, stepKey: string) {
+    if (!(this.prisma as any).executionStepReuse) return null;
+    const reuse = await this.prisma.executionStepReuse.findUnique({ where: { recoveryExecutionId_stepKey_executionPath: { recoveryExecutionId: executionId, stepKey, executionPath } }, include: { sourceStepExecution: true } });
+    return reuse ? { ...reuse.sourceStepExecution, status: reuse.status } : null;
+  }
+  private async hydrateControl(executionId: string, target: any, stepKey: string, executionPath: string) {
+    const recovery = await this.prisma.execution.findUnique({ where: { id: executionId }, select: { replayOfExecutionId: true, replayFromStepKey: true, replayFromExecutionPath: true } });
+    if (!recovery?.replayOfExecutionId || target.inputJson && Object.keys(target.inputJson).length) return target;
+    const source = await this.prisma.stepExecution.findFirst({ where: { executionId: recovery.replayOfExecutionId, stepKey, executionPath }, select: { inputJson: true } });
+    if (!source?.inputJson) return target;
+    const value: any = JSON.parse(JSON.stringify(source.inputJson));
+    if (value.tryState && recovery.replayFromExecutionPath?.includes(`/try[${stepKey}]/`)) { const region = recovery.replayFromExecutionPath.split(`/try[${stepKey}]/`)[1]?.split("/")[0]; value.tryState.phase = region; value.tryState.currentStepKey = recovery.replayFromStepKey; if (region === "catch" && value.tryState.originalPrimary) value.tryState.primary = value.tryState.originalPrimary; }
+    return this.prisma.stepExecution.update({ where: { id: target.id }, data: { inputJson: value } });
   }
 
   private audit(input: Parameters<ForEachExecutionService["execute"]>[0], action: string, output: ForEachOutput) {

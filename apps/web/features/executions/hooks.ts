@@ -3,7 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "../../lib/api-client";
 import { useAuth } from "../auth/use-auth";
-import type { CancelExecutionResponse, ExecutionDetail, ExecutionListResponse, ExecutionStatus, ExecutionTimelineResponse, ManualExecutionResponse } from "./types";
+import type { CancelExecutionResponse, ExecutionDetail, ExecutionListResponse, ExecutionReplayMode, ExecutionReplayPreview, ExecutionStatus, ExecutionTimelineResponse, ManualExecutionResponse } from "./types";
 
 export function useExecutions(params: {
   cursor?: string;
@@ -73,4 +73,14 @@ export function useCancelExecution(executionId: string) {
       void queryClient.invalidateQueries({ queryKey: ["executions"] });
     }
   });
+}
+
+export function useReplayPreview(executionId: string, mode: ExecutionReplayMode, enabled = true) {
+  const { activeOrganizationId } = useAuth();
+  return useQuery({ queryKey: ["execution-replay-preview", activeOrganizationId, executionId, mode], queryFn: () => apiClient.get<ExecutionReplayPreview>(`/executions/${executionId}/replay-preview`, { mode }), enabled: Boolean(activeOrganizationId && executionId && enabled) });
+}
+
+export function useReplayExecution(executionId: string) {
+  const queryClient = useQueryClient(); const { activeOrganizationId } = useAuth();
+  return useMutation({ mutationFn: (input: { mode: ExecutionReplayMode; reason?: string }) => apiClient.post<{ execution: { id: string } }>(`/executions/${executionId}/replay`, input), onSuccess: () => { void queryClient.invalidateQueries({ queryKey: ["executions"] }); void queryClient.invalidateQueries({ queryKey: ["execution", activeOrganizationId, executionId] }); void queryClient.invalidateQueries({ queryKey: ["audit-logs"] }); } });
 }

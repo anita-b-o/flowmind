@@ -54,6 +54,27 @@ describe("ForEachExecutionService", () => {
     if (result.outcome === "completed") expect(result.output).toMatchObject({ total: 2, succeeded: 1, failed: 1 });
     expect([...rows.values()].find((entry) => entry.iterationIndex === 0)?.errorHandled).toBe(true);
   });
+
+  it("resumes from the durable iteration cursor without rerunning completed iterations", async () => {
+    const rows = new Map<string, any>();
+    const loopRow = row("loop-id", "loop", "root", null, StepExecutionStatus.Failed);
+    loopRow.inputJson = { forEachState: { items: ["a", "b", "c"], nextIndex: 1, currentStepKey: "body", succeeded: 1, failed: 0, skipped: 0, results: [{ item: "a", index: 0 }], errors: [], resultsTruncated: false, errorsTruncated: false, startedAt: new Date().toISOString() } };
+    rows.set(loopRow.id, loopRow);
+    const prisma = fakePrisma(rows);
+    const seen: number[] = [];
+    const stepExecutor = fakeStepExecutor(rows, async (input: any) => {
+      seen.push(input.context.index);
+      return { outcome: "completed", result: { status: StepExecutionStatus.Completed, output: { item: input.context.item, index: input.context.index } } };
+    });
+    const service = new ForEachExecutionService(prisma as any, stepExecutor as any, new ExpressionResolver());
+    const runtime = new ExecutionRuntimeContext({ trigger: {}, steps: {}, variables: {}, metadata: { expressionMode: "strict" }, workflow: { variables: {} }, execution: {} });
+
+    const result = await service.execute({ organizationId: "org", executionId: "recovery", loopStep: { key: "loop", name: "Loop", type: StepType.ForEach, position: 1, config: { source: [], collectResults: true } }, loopStepExecution: loopRow, graph: { entryStepKey: "loop", edges: [{ from: "loop", to: "body", kind: "for_each_body" }, { from: "loop", to: "done", kind: "for_each_done" }, { from: "body", to: "done", kind: "next" }] }, bodyEntryStepKey: "body", doneStepKey: "done", bodyStepKeys: new Set(["body"]), stepRowsByKey: new Map([["body", { id: "body-step", key: "body", name: "Body", type: StepType.Transform, position: 2, configJson: {}, retryPolicyJson: null, timeoutSeconds: 30 }]]), runtimeContext: runtime });
+
+    expect(seen).toEqual([1, 2]);
+    expect(result).toMatchObject({ outcome: "completed", output: { total: 3, succeeded: 3, results: [{ item: "a", index: 0 }, { item: "b", index: 1 }, { item: "c", index: 2 }] } });
+    expect([...rows.values()].some((entry) => entry.iterationIndex === 0 && entry.stepKey === "body")).toBe(false);
+  });
 });
 
 function row(id: string, stepKey: string, executionPath: string, iterationIndex: number | null, status: StepExecutionStatus) {

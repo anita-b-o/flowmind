@@ -3,6 +3,7 @@ import { BadRequestException, ConflictException, Injectable, NotFoundException, 
 import {
   ACTIVE_EXECUTION_STATUSES,
   ExecutionMode,
+  ExecutionReplayMode,
   ExecutionStatus,
   StepExecutionStatus,
   executionStatusFromPublic,
@@ -24,6 +25,7 @@ import { AuditLogsService } from "../audit-logs/audit-logs.service";
 import { publicError, sanitizePublic } from "../common/public-sanitizer";
 import { publicDeadLetterReason } from "../dead-letter/dead-letter-reasons";
 import { validateWorkflowGraph } from "../workflows/workflow-graph-validator";
+import { containsUnavailableRecoveryValue, replayStep } from "./replay-safety";
 
 const IDEMPOTENCY_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
@@ -184,7 +186,7 @@ export class ExecutionsService {
       take: limit + 1,
       select: {
         id: true, workflowId: true, workflowVersionId: true, correlationId: true, status: true, waitReason: true, executionMode: true,
-        startedAt: true, completedAt: true, createdAt: true, updatedAt: true, runAttempt: true, retryOfExecutionId: true,
+        startedAt: true, completedAt: true, createdAt: true, updatedAt: true, runAttempt: true, retryOfExecutionId: true, replayOfExecutionId: true, replayMode: true, replayFromStepKey: true, replayFromExecutionPath: true, replayFromIterationIndex: true,
         parentExecutionId: true, rootExecutionId: true, depth: true, webhookEventId: true, scheduledTriggerId: true, eventDeliveryId: true,
         manualExecutionKey: true, startedByUserId: true,
         workflow: { select: { id: true, name: true } }, workflowVersion: { select: { id: true, versionNumber: true } },
@@ -214,6 +216,9 @@ export class ExecutionsService {
         steps: { orderBy: [{ workflowStep: { position: "asc" } }, { createdAt: "asc" }] },
         retryOfExecution: { select: { id: true, status: true, createdAt: true, completedAt: true, correlationId: true } },
         retryExecutions: { select: { id: true, status: true, createdAt: true, completedAt: true, correlationId: true }, orderBy: { createdAt: "desc" } },
+        replayOfExecution: { select: { id: true, status: true, createdAt: true, completedAt: true, correlationId: true } },
+        replayExecutions: { select: { id: true, status: true, createdAt: true, completedAt: true, correlationId: true, replayMode: true }, orderBy: { createdAt: "desc" } },
+        recoveryStepReuses: { include: { sourceStepExecution: true }, orderBy: { createdAt: "asc" } },
         parentExecution: { select: { id: true, status: true, workflowId: true, completedAt: true } },
         parentStepExecution: { select: { id: true, stepKey: true, executionPath: true } },
         childExecutions: { select: { id: true, status: true, workflowId: true, workflowVersionId: true, depth: true, createdAt: true, startedAt: true, completedAt: true }, orderBy: { createdAt: "asc" } },
@@ -274,7 +279,13 @@ export class ExecutionsService {
       cancelRequestedBy: actor(execution.cancelRequestedBy),
       retryRequestedAt: execution.retryRequestedAt,
       retryReason: execution.retryReason,
-      steps: execution.steps.map((step) => ({
+      steps: [...execution.recoveryStepReuses.map((reuse) => ({
+        id: `reuse:${reuse.id}`, workflowStepId: reuse.sourceStepExecution.workflowStepId, stepKey: reuse.stepKey, stepType: reuse.stepType,
+        executionPath: reuse.executionPath, iterationIndex: reuse.iterationIndex, status: reuse.status, errorHandled: false, publicStatus: "reused",
+        attempt: 0, attemptCount: 0, maxAttempts: 0, nextRetryAt: null, effectStatus: "reused", startedAt: null, completedAt: reuse.createdAt,
+        finishedAt: reuse.createdAt, durationMs: 0, errorCategory: null, error: null, artifact: safeStepArtifact(reuse.sourceStepExecution), payloads: payloadMetadata(reuse.sourceStepExecution),
+        reused: true, reusedFromExecutionId: reuse.sourceExecutionId, reusedFromStepExecutionId: reuse.sourceStepExecutionId
+      })), ...execution.steps.map((step) => ({
         id: step.id,
         workflowStepId: step.workflowStepId,
         stepKey: step.stepKey,
@@ -297,10 +308,17 @@ export class ExecutionsService {
         error: step.errorJson ? publicError(step.errorJson) : null,
         artifact: safeStepArtifact(step),
         payloads: payloadMetadata(step)
-      })),
+      }))],
       retryOfExecutionId: execution.retryOfExecutionId,
       retryOfExecution: relation(execution.retryOfExecution),
       retryExecutions: execution.retryExecutions.map(relation),
+      replayOfExecutionId: execution.replayOfExecutionId,
+      replayMode: execution.replayMode,
+      replayFromStepKey: execution.replayFromStepKey,
+      replayFromExecutionPath: execution.replayFromExecutionPath,
+      replayFromIterationIndex: execution.replayFromIterationIndex,
+      replayOfExecution: relation(execution.replayOfExecution),
+      replayExecutions: execution.replayExecutions.map(relation),
       parentExecutionId: execution.parentExecutionId,
       parentStepExecutionId: execution.parentStepExecutionId,
       rootExecutionId: execution.rootExecutionId ?? execution.id,
@@ -328,6 +346,11 @@ export class ExecutionsService {
   }
 
   async stepDetail(organizationId: string, executionId: string, stepExecutionId: string) {
+    if (stepExecutionId.startsWith("reuse:")) {
+      const reuse = await this.prisma.executionStepReuse.findFirst({ where: { id: stepExecutionId.slice(6), recoveryExecutionId: executionId, organizationId }, include: { sourceStepExecution: { include: { attempts: true } } } });
+      if (!reuse) throw new NotFoundException("Step execution not found");
+      return { ...safeStepDetail({ ...reuse.sourceStepExecution, attempts: [] }), id: `reuse:${reuse.id}`, status: reuse.status, publicStatus: "reused", attempt: 0, attemptCount: 0, maxAttempts: 0, attempts: [], historyComplete: true, reused: true, reusedFromExecutionId: reuse.sourceExecutionId, reusedFromStepExecutionId: reuse.sourceStepExecutionId };
+    }
     const step = await this.prisma.stepExecution.findFirst({ where: { id: stepExecutionId, executionId, organizationId, execution: { executionMode: ExecutionMode.Real } }, include: { attempts: { orderBy: { attempt: "asc" } } } });
     if (!step) throw new NotFoundException("Step execution not found");
     return safeStepDetail(step);
@@ -350,7 +373,7 @@ export class ExecutionsService {
   async timeline(organizationId: string, executionId: string, query: ExecutionTimelineQueryDto) {
     const execution = await this.prisma.execution.findFirst({
       where: { id: executionId, organizationId, executionMode: ExecutionMode.Real },
-      include: { steps: { include: { attempts: { orderBy: { attempt: "asc" } } } }, approvalRequests: true, childExecutions: { include: { workflow: { select: { name: true } } } }, deadLetters: true, eventDelivery: { include: { internalEvent: true } } }
+      include: { steps: { include: { attempts: { orderBy: { attempt: "asc" } } } }, recoveryStepReuses: { include: { sourceStepExecution: true } }, approvalRequests: true, childExecutions: { include: { workflow: { select: { name: true } } } }, deadLetters: true, eventDelivery: { include: { internalEvent: true } } }
     });
     if (!execution) throw new NotFoundException("Execution not found");
     const sourceEvents = await this.prisma.internalEvent.findMany({ where: { organizationId, envelopeJson: { path: ["data", "executionId"], equals: executionId } }, select: { id: true }, take: 20 });
@@ -432,6 +455,85 @@ export class ExecutionsService {
   }
 
   async retry(organizationId: string, userId: string, executionId: string, reason?: string, idempotencyKey?: string) {
+    return this.replay(organizationId, userId, executionId, ExecutionReplayMode.FullReplay, reason, idempotencyKey);
+  }
+
+  async replayPreview(organizationId: string, executionId: string, mode: ExecutionReplayMode) {
+    const source = await this.prisma.execution.findFirst({
+      where: { id: executionId, organizationId, executionMode: ExecutionMode.Real },
+      include: {
+        workflowVersion: { include: { steps: { orderBy: { position: "asc" } } } },
+        steps: { orderBy: [{ createdAt: "asc" }, { id: "asc" }] },
+        approvalRequests: { select: { stepExecutionId: true, status: true } }
+      }
+    });
+    if (!source?.workflowVersion || source.workflowVersion.organizationId !== organizationId || source.workflowVersion.workflowId !== source.workflowId) throw new NotFoundException("Execution not found");
+    const definitions = source.workflowVersion.steps.filter((step) => step.position > 0).map((step) => replayStep({ key: step.key, type: step.type, configJson: step.configJson }));
+    const sideEffects = definitions.filter((step) => step.safety === "SIDE_EFFECT");
+    const blockedReasons: string[] = [];
+    const missingCheckpointData: string[] = [];
+    let startingPoint: { stepKey: string; executionPath: string; iterationIndex: number | null } | null = null;
+    let reusedSteps: ReturnType<typeof replayStep>[] = [];
+    let reexecutedSteps = definitions;
+    if (!source.inputJson || containsUnavailableRecoveryValue(source.inputJson)) { blockedReasons.push("INPUT_UNAVAILABLE"); missingCheckpointData.push("safe input"); }
+    if (mode === ExecutionReplayMode.FullReplay) {
+      const checkpoint = recoveryCheckpoint(source.contextJson);
+      if (!checkpoint || checkpoint.complete !== true) { blockedReasons.push("INITIAL_CONTEXT_UNAVAILABLE"); missingCheckpointData.push("initial variable checkpoint"); }
+    }
+    if (mode === ExecutionReplayMode.RetryFromFailure) {
+      if (source.status !== ExecutionStatus.Failed) blockedReasons.push("SOURCE_NOT_FAILED");
+      const failed = source.steps
+        .filter((step) => step.status === StepExecutionStatus.Failed && !step.errorHandled)
+        .sort((left, right) => failureCandidateRank(right) - failureCandidateRank(left) || left.createdAt.getTime() - right.createdAt.getTime())[0];
+      if (!failed) blockedReasons.push("UNHANDLED_FAILURE_NOT_FOUND");
+      else {
+        startingPoint = { stepKey: failed.stepKey, executionPath: failed.executionPath, iterationIndex: failed.iterationIndex };
+        const loopKey = failed.executionPath.match(/^root\/([^/[]+)\[\d+\]/)?.[1];
+        if (loopKey) {
+          const control = source.steps.find((step) => step.stepKey === loopKey && step.executionPath === "root");
+          if (!record(control?.inputJson).forEachState) { blockedReasons.push("FOR_EACH_CHECKPOINT_INCOMPLETE"); missingCheckpointData.push(`FOR_EACH ${loopKey}`); }
+        }
+        const tryMatch = failed.executionPath.match(/\/try\[([^\]]+)]\/(body|catch|finally)/);
+        if (tryMatch) {
+          const controlPath = failed.executionPath.split(`/try[${tryMatch[1]}]`)[0] || "root";
+          const control = source.steps.find((step) => step.stepKey === tryMatch[1] && step.executionPath === controlPath);
+          const tryState = record(record(control?.inputJson).tryState);
+          if (!Object.keys(tryState).length || tryMatch[2] === "catch" && !tryState.originalPrimary) { blockedReasons.push("TRY_CATCH_CHECKPOINT_INCOMPLETE"); missingCheckpointData.push(`TRY_CATCH ${tryMatch[1]}`); }
+        }
+      }
+      const checkpoint = recoveryCheckpoint(source.contextJson);
+      if (!checkpoint || checkpoint.complete !== true || !record(source.contextJson).__runtime) { blockedReasons.push("CHECKPOINT_INCOMPLETE"); missingCheckpointData.push("runtime variable checkpoint"); }
+      const before = failed ? source.steps.slice(0, source.steps.indexOf(failed)).filter((step) => step.status === "COMPLETED" || step.status === "SKIPPED") : [];
+      const unavailable = before.filter((step) => containsUnavailableRecoveryValue(step.outputJson));
+      if (unavailable.length) { blockedReasons.push("REUSED_OUTPUT_UNAVAILABLE"); missingCheckpointData.push(...unavailable.map((step) => `${step.executionPath}:${step.stepKey}`)); }
+      const reusableApprovalIds = new Set(
+        source.approvalRequests
+          .filter((approval) => approval.status === "APPROVED" || approval.status === "REJECTED")
+          .map((approval) => approval.stepExecutionId)
+      );
+      const unavailableApprovals = before.filter((step) => step.stepType === "approval" && !reusableApprovalIds.has(step.id));
+      if (unavailableApprovals.length) {
+        blockedReasons.push("APPROVAL_DECISION_UNAVAILABLE");
+        missingCheckpointData.push(...unavailableApprovals.map((step) => `${step.executionPath}:${step.stepKey}`));
+      }
+      reusedSteps = before.map((step) => replayStep(step));
+      const reusedIds = new Set(before.map((step) => `${step.executionPath}:${step.stepKey}`));
+      reexecutedSteps = definitions.filter((step) => !reusedIds.has(`root:${step.stepKey}`));
+    }
+    const result = {
+      possible: blockedReasons.length === 0, mode, sourceExecutionId: source.id, originalExecutionId: source.id, workflowVersionId: source.workflowVersionId,
+      startingPoint, startingStep: startingPoint, reusedSteps, reexecutedSteps, sideEffects,
+      warnings: mode === ExecutionReplayMode.FullReplay && sideEffects.length ? ["This replay may repeat side effects."] : [],
+      sideEffectWarnings: mode === ExecutionReplayMode.FullReplay && sideEffects.length ? ["This replay may repeat side effects."] : [],
+      missingCheckpointData: [...new Set(missingCheckpointData)], blockedReasons: [...new Set(blockedReasons)], reason: blockedReasons[0] ?? null
+    };
+    for (const blocked of result.blockedReasons) this.metrics?.recordReplayPreviewBlocked(mode, blocked);
+    return result;
+  }
+
+  async replay(organizationId: string, userId: string, executionId: string, mode: ExecutionReplayMode, reason?: string, idempotencyKey?: string) {
+    const preview = await this.replayPreview(organizationId, executionId, mode);
+    if (!preview.possible) { this.metrics?.recordReplay(mode, "rejected"); throw new ConflictException({ message: "Execution cannot be replayed safely", preview }); }
     const original = await this.prisma.execution.findFirst({
       where: { id: executionId, organizationId, executionMode: ExecutionMode.Real },
       include: { deadLetters: { where: { resolvedAt: null } } }
@@ -440,38 +542,17 @@ export class ExecutionsService {
       this.metrics?.recordManualRetry("not_found");
       throw new NotFoundException("Execution not found");
     }
-    const eligible = original.status === ExecutionStatus.Failed || original.deadLetters.length > 0;
-    if (!eligible) {
-      this.metrics?.recordManualRetry("conflict");
-      throw new ConflictException("Execution is not retryable");
-    }
+    const eligible = mode === ExecutionReplayMode.FullReplay || original.status === ExecutionStatus.Failed;
+    if (!eligible) throw new ConflictException("Execution is not replayable");
+    const replayRequestHash = sha256(JSON.stringify({ mode, reason: reason ?? null }));
     const existingIdempotent = idempotencyKey
       ? await this.prisma.idempotencyKey.findUnique({
-          where: { organizationId_scope_key: { organizationId, scope: `retry:${original.id}`, key: sanitizeIdempotencyKey(idempotencyKey) } }
+          where: { organizationId_scope_key: { organizationId, scope: `replay:${original.id}:${mode}`, key: sanitizeIdempotencyKey(idempotencyKey) } }
         })
       : null;
+    if (existingIdempotent?.requestHash && existingIdempotent.requestHash !== replayRequestHash) throw new ConflictException("Idempotency key was already used with a different request");
     if (existingIdempotent?.responseJson) return existingIdempotent.responseJson as any;
-
-    const activeRetry = await this.prisma.execution.findFirst({
-      where: {
-        retryOfExecutionId: original.id,
-        organizationId,
-        status: { in: ACTIVE_EXECUTION_STATUSES as any }
-      }
-    });
-    if (activeRetry) {
-      this.metrics?.recordManualRetry("conflict");
-      throw new ConflictException({
-        message: "A retry is already active for this execution",
-        execution: {
-          id: activeRetry.id,
-          status: activeRetry.status,
-          publicStatus: publicExecutionStatus(activeRetry.status),
-          retryOfExecutionId: activeRetry.retryOfExecutionId,
-          correlationId: activeRetry.correlationId
-        }
-      });
-    }
+    if (existingIdempotent) throw new ConflictException("A replay request with this idempotency key is still being processed");
 
     const correlationId = original.correlationId ?? this.requestContext?.getCorrelationId() ?? newTraceId();
     const idemKey = idempotencyKey ? sanitizeIdempotencyKey(idempotencyKey) : undefined;
@@ -480,9 +561,9 @@ export class ExecutionsService {
         await tx.idempotencyKey.create({
           data: {
             organizationId,
-            scope: `retry:${original.id}`,
+            scope: `replay:${original.id}:${mode}`,
             key: idemKey,
-            requestHash: sha256(JSON.stringify({ reason: reason ?? null })),
+            requestHash: replayRequestHash,
             status: "PROCESSING",
             expiresAt: new Date(Date.now() + IDEMPOTENCY_TTL_MS)
           }
@@ -495,6 +576,11 @@ export class ExecutionsService {
           workflowVersionId: original.workflowVersionId,
           webhookEventId: original.webhookEventId,
           retryOfExecutionId: original.id,
+          replayOfExecutionId: original.id,
+          replayMode: mode,
+          replayFromStepKey: preview.startingPoint?.stepKey,
+          replayFromExecutionPath: preview.startingPoint?.executionPath,
+          replayFromIterationIndex: preview.startingPoint?.iterationIndex,
           retryRequestedByUserId: userId,
           retryRequestedAt: new Date(),
           retryReason: reason,
@@ -502,9 +588,13 @@ export class ExecutionsService {
           status: ExecutionStatus.Queued,
           executionMode: ExecutionMode.Real,
           inputJson: original.inputJson as Prisma.InputJsonValue,
-          contextJson: toJson({ trigger: (original.inputJson as any)?.trigger ?? {}, steps: {}, metadata: {} })
+          contextJson: toJson(replayContext(original.contextJson, original.inputJson, mode))
         }
       });
+      if (mode === ExecutionReplayMode.RetryFromFailure && preview.reusedSteps.length) {
+        const reusable = await tx.stepExecution.findMany({ where: { executionId: original.id, organizationId, OR: preview.reusedSteps.map((step) => ({ stepKey: step.stepKey, executionPath: step.executionPath })) } });
+        await tx.executionStepReuse.createMany({ data: reusable.map((step) => ({ organizationId, recoveryExecutionId: created.id, sourceExecutionId: original.id, sourceStepExecutionId: step.id, stepKey: step.stepKey, stepType: step.stepType, executionPath: step.executionPath, iterationIndex: step.iterationIndex, status: step.status })) });
+      }
       const resolved = await tx.deadLetterExecution.findMany({
         where: { executionId: original.id, organizationId, resolvedAt: null },
         select: { id: true, reason: true }
@@ -517,11 +607,11 @@ export class ExecutionsService {
         {
           organizationId,
           actorUserId: userId,
-          action: "execution.retry_requested",
+          action: "execution.replay_requested",
           resourceType: "Execution",
           resourceId: original.id,
           correlationId,
-          metadata: { originalExecutionId: original.id, retryExecutionId: created.id, reason: reason ?? null }
+          metadata: { mode, sourceStatus: original.status, startingStep: preview.startingPoint?.stepKey ?? null, originalExecutionId: original.id, replayExecutionId: created.id }
         },
         tx
       );
@@ -539,8 +629,13 @@ export class ExecutionsService {
           tx
         );
       }
+      if (idemKey) await tx.idempotencyKey.update({ where: { organizationId_scope_key: { organizationId, scope: `replay:${original.id}:${mode}`, key: idemKey } }, data: { responseJson: toJson(retryResponse(created, original.id, correlationId)) } });
       return created;
+    }).catch(async (error) => {
+      if ((error as any)?.code === "P2002" && idemKey) return { __idempotentResponse: await this.waitForIdempotentResponse(organizationId, `replay:${original.id}:${mode}`, idemKey, replayRequestHash) } as any;
+      throw error;
     });
+    if ((next as any).__idempotentResponse) return (next as any).__idempotentResponse;
 
     try {
       await this.queueService.enqueueExecution({
@@ -564,11 +659,12 @@ export class ExecutionsService {
     const response = retryResponse(next, original.id, correlationId);
     if (idemKey) {
       await this.prisma.idempotencyKey.update({
-        where: { organizationId_scope_key: { organizationId, scope: `retry:${original.id}`, key: idemKey } },
+        where: { organizationId_scope_key: { organizationId, scope: `replay:${original.id}:${mode}`, key: idemKey } },
         data: { status: "ENQUEUED", responseJson: toJson(response) }
       });
     }
     this.metrics?.recordManualRetry("success");
+    this.metrics?.recordReplay(mode, "success");
     this.logger?.info("api.execution.retry_requested", { organizationId, userId, executionId: original.id, retryExecutionId: next.id, workflowId: next.workflowId });
     return response;
   }
@@ -706,6 +802,11 @@ function summary(item: any, counts?: StepCount) {
     runAttempt: item.runAttempt,
     cancelled: item.status === ExecutionStatus.Cancelled,
     retryOfExecutionId: item.retryOfExecutionId,
+    replayOfExecutionId: item.replayOfExecutionId ?? null,
+    replayMode: item.replayMode ?? null,
+    replayFromStepKey: item.replayFromStepKey ?? null,
+    replayFromExecutionPath: item.replayFromExecutionPath ?? null,
+    replayFromIterationIndex: item.replayFromIterationIndex ?? null,
     cancelRequestedAt: item.cancelRequestedAt,
     cancelledAt: item.cancelledAt
   };
@@ -784,6 +885,7 @@ function durationMs(start?: Date | null, end?: Date | null) {
 
 function triggerType(item: any) {
   if (item.parentExecutionId) return "subworkflow";
+  if (item.replayOfExecutionId) return "replay";
   if (item.retryOfExecutionId) return "retry";
   if (item.eventDeliveryId) return "event";
   if (item.scheduledTriggerId) return "scheduled";
@@ -795,6 +897,7 @@ function triggerWhere(value?: string): Prisma.ExecutionWhereInput {
   if (!value) return {};
   if (value === "subworkflow") return { parentExecutionId: { not: null } };
   if (value === "retry") return { retryOfExecutionId: { not: null } };
+  if (value === "replay") return { replayOfExecutionId: { not: null } };
   if (value === "event") return { eventDeliveryId: { not: null } };
   if (value === "scheduled") return { scheduledTriggerId: { not: null } };
   if (value === "webhook") return { webhookEventId: { not: null } };
@@ -845,12 +948,13 @@ function safeStepDetail(step: any) {
   };
 }
 
-type TimelineEvent = { id: string; type: string; timestamp: string; status?: string; stepExecutionId?: string; stepKey?: string; executionPath?: string; iterationIndex?: number | null; attempt?: number; durationMs?: number | null; waitReason?: string | null; relatedExecutionId?: string; approvalId?: string; message: string };
+type TimelineEvent = { id: string; type: string; timestamp: string; status?: string; stepExecutionId?: string; stepKey?: string; executionPath?: string; iterationIndex?: number | null; attempt?: number; durationMs?: number | null; waitReason?: string | null; relatedExecutionId?: string; approvalId?: string; reusedFromExecutionId?: string; reusedFromStepExecutionId?: string; message: string };
 
 function buildTimeline(execution: any, notifications: any[] = []): TimelineEvent[] {
   const events: TimelineEvent[] = [{ id: `execution:${execution.id}:created`, type: "execution_created", timestamp: execution.createdAt.toISOString(), status: execution.status, message: "Execution created" }];
   if (execution.startedAt) events.push({ id: `execution:${execution.id}:started`, type: "execution_started", timestamp: execution.startedAt.toISOString(), status: "RUNNING", message: "Execution started" });
   if (execution.eventDelivery) events.push({ id: `event:${execution.eventDelivery.id}`, type: "event_trigger", timestamp: execution.eventDelivery.createdAt.toISOString(), status: execution.eventDelivery.status, message: `Triggered by ${execution.eventDelivery.internalEvent.eventType}` });
+  for (const reuse of execution.recoveryStepReuses ?? []) events.push({ id: `reuse:${reuse.id}`, type: "reused_step", timestamp: reuse.createdAt.toISOString(), status: "REUSED", stepExecutionId: `reuse:${reuse.id}`, stepKey: reuse.stepKey, executionPath: reuse.executionPath, iterationIndex: reuse.iterationIndex, reusedFromExecutionId: reuse.sourceExecutionId, reusedFromStepExecutionId: reuse.sourceStepExecutionId, message: `${reuse.stepKey} reused from source execution` });
   for (const step of execution.steps) {
     if (!step.attempts.length) {
       const timestamp = step.startedAt ?? step.createdAt;
@@ -868,7 +972,7 @@ function buildTimeline(execution: any, notifications: any[] = []): TimelineEvent
   return events;
 }
 
-const TIMELINE_TYPE_PRIORITY: Record<string, number> = { event_trigger: 0, execution_created: 10, execution_started: 20, step_attempt: 30, wait: 40, approval_requested: 50, approval_decided: 60, subworkflow: 70, notification: 80, dead_letter: 90, execution_completed: 100 };
+const TIMELINE_TYPE_PRIORITY: Record<string, number> = { event_trigger: 0, execution_created: 10, execution_started: 20, reused_step: 25, step_attempt: 30, wait: 40, approval_requested: 50, approval_decided: 60, subworkflow: 70, notification: 80, dead_letter: 90, execution_completed: 100 };
 function compareTimeline(a: TimelineEvent, b: TimelineEvent) { return a.timestamp.localeCompare(b.timestamp) || (TIMELINE_TYPE_PRIORITY[a.type] ?? 50) - (TIMELINE_TYPE_PRIORITY[b.type] ?? 50) || a.id.localeCompare(b.id); }
 function encodeTimelineCursor(event: TimelineEvent) { return Buffer.from(JSON.stringify({ v: 1, timestamp: event.timestamp, type: event.type, id: event.id })).toString("base64url"); }
 function decodeTimelineCursor(value: string): TimelineEvent { try { const parsed = JSON.parse(Buffer.from(value, "base64url").toString("utf8")); if (parsed.v !== 1 || typeof parsed.timestamp !== "string" || typeof parsed.type !== "string" || typeof parsed.id !== "string") throw new Error(); return { timestamp: parsed.timestamp, type: parsed.type, id: parsed.id, message: "" }; } catch { throw new BadRequestException("Invalid timeline cursor"); } }
@@ -877,6 +981,38 @@ function safeToken(value: unknown) { return typeof value === "string" && /^[a-z0
 
 function sanitizePayload(value: unknown) {
   return sanitizePublic(value);
+}
+
+function recoveryCheckpoint(value: unknown): Record<string, any> | null {
+  const checkpoint = record(value).recoveryCheckpoint;
+  return checkpoint && typeof checkpoint === "object" && !Array.isArray(checkpoint) ? checkpoint as Record<string, any> : null;
+}
+
+function failureCandidateRank(step: { stepType: string; executionPath: string }) {
+  const depth = step.executionPath.split("/").length;
+  return depth * 10 + (step.stepType === "for_each" || step.stepType === "try_catch" ? 0 : 1);
+}
+
+function replayContext(contextJson: unknown, inputJson: unknown, mode: ExecutionReplayMode) {
+  const input = record(inputJson);
+  const source = record(contextJson);
+  if (mode === ExecutionReplayMode.RetryFromFailure) {
+    return {
+      trigger: input.trigger ?? {}, steps: {}, metadata: input.metadata ?? {},
+      __runtime: source.__runtime ?? {}, recoveryCheckpoint: source.recoveryCheckpoint,
+      replayBootstrap: { sourceCheckpoint: source.recoveryCheckpoint }
+    };
+  }
+  const checkpoint = recoveryCheckpoint(source);
+  return {
+    trigger: input.trigger ?? {}, steps: {}, metadata: input.metadata ?? {},
+    __runtime: { variables: record(checkpoint?.initialExecutionVariables), workflowVariables: record(checkpoint?.initialWorkflowVariables), initialExecutionVariables: record(checkpoint?.initialExecutionVariables), initialWorkflowVariables: record(checkpoint?.initialWorkflowVariables) },
+    recoveryCheckpoint: checkpoint ? { ...checkpoint, currentStepKey: null, executionPath: "root", iterationIndex: null } : undefined
+  };
+}
+
+function record(value: unknown): Record<string, any> {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, any> : {};
 }
 
 function loopInputSummary(value: unknown) {

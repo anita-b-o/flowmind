@@ -98,13 +98,14 @@ describe("DLQ, retry and audit log API", () => {
     expect(next.inputJson).toEqual(original.inputJson);
     expect(next.correlationId).toBe(original.correlationId);
     expect(await prisma.deadLetterExecution.count({ where: { id: seed.deadLetterId, resolvedAt: { not: null }, resolution: "RETRIED" } })).toBe(1);
-    expect(await prisma.auditLog.count({ where: { organizationId: seed.organizationId, action: "execution.retry_requested" } })).toBe(1);
+    expect(await prisma.auditLog.count({ where: { organizationId: seed.organizationId, action: "execution.replay_requested" } })).toBe(1);
     expect(await prisma.auditLog.count({ where: { organizationId: seed.organizationId, action: "dead_letter.resolved" } })).toBe(1);
 
-    await request(app.getHttpServer()).post(`/executions/${seed.executionId}/retry`).set(authHeaders(editor, seed.organizationId)).send({}).expect(409);
+    await request(app.getHttpServer()).post(`/executions/${seed.executionId}/retry`).set(authHeaders(editor, seed.organizationId)).send({}).expect(201);
+    expect(await prisma.execution.count({ where: { retryOfExecutionId: seed.executionId } })).toBe(2);
   });
 
-  it("returns a recoverable enqueue error without creating another execution on repeat", async () => {
+  it("returns a recoverable enqueue error and permits a distinct repeated human action", async () => {
     const seed = await seedFailure();
     const editor = await addMember(seed.organizationId, OrganizationRole.Editor, "editor2@example.com");
     queue.enqueueExecution.mockRejectedValueOnce(new Error("redis down"));
@@ -114,8 +115,8 @@ describe("DLQ, retry and audit log API", () => {
     expect(response.body.execution.id).toBeDefined();
     expect(await prisma.execution.count({ where: { retryOfExecutionId: seed.executionId } })).toBe(1);
 
-    await request(app.getHttpServer()).post(`/executions/${seed.executionId}/retry`).set(authHeaders(editor, seed.organizationId)).send({}).expect(409);
-    expect(await prisma.execution.count({ where: { retryOfExecutionId: seed.executionId } })).toBe(1);
+    await request(app.getHttpServer()).post(`/executions/${seed.executionId}/retry`).set(authHeaders(editor, seed.organizationId)).send({}).expect(201);
+    expect(await prisma.execution.count({ where: { retryOfExecutionId: seed.executionId } })).toBe(2);
   });
 
   it("exposes audit logs to admins only with sanitized metadata and filters", async () => {
@@ -203,7 +204,7 @@ describe("DLQ, retry and audit log API", () => {
         correlationId: "correlation-dlq-1",
         status: ExecutionStatus.Failed,
         inputJson: { trigger: { body: { lead: "Ada" } } },
-        contextJson: { trigger: { body: { lead: "Ada" } }, steps: {}, metadata: {} },
+        contextJson: replayableContext({ body: { lead: "Ada" } }),
         errorJson: { message: "failed" },
         lockedBy: "worker-1"
       }
@@ -257,6 +258,10 @@ describe("DLQ, retry and audit log API", () => {
 
 async function expectAudit(organizationId: string, action: string) {
   expect(await prisma.auditLog.count({ where: { organizationId, action } })).toBe(1);
+}
+
+function replayableContext(trigger: Record<string, unknown>): any {
+  return { trigger, steps: {}, metadata: {}, __runtime: { variables: {}, workflowVariables: {}, initialExecutionVariables: {}, initialWorkflowVariables: {} }, recoveryCheckpoint: { schemaVersion: 1, complete: true, initialExecutionVariables: {}, initialWorkflowVariables: {}, executionVariables: {}, workflowVariables: {} } };
 }
 
 function authHeaders(user: { accessToken: string }, organizationId: string) {

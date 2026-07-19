@@ -82,7 +82,7 @@ describe("operability controls", () => {
     expect(await prisma.deadLetterExecution.count({ where: { executionId: seed.executionId, resolvedAt: null } })).toBe(1);
   });
 
-  it("manual retry creates a new execution, resolves DLQ, writes audit, and blocks a second active retry", async () => {
+  it("manual retry creates independent executions, resolves DLQ, and writes audit", async () => {
     const seed = await seedExecution();
     await prisma.execution.update({ where: { id: seed.executionId }, data: { status: ExecutionStatus.Failed } });
     await prisma.deadLetterExecution.create({
@@ -113,9 +113,11 @@ describe("operability controls", () => {
     expect(next.retryOfExecutionId).toBe(original.id);
     expect(next.workflowVersionId).toBe(original.workflowVersionId);
     expect(next.inputJson).toEqual(original.inputJson);
-    expect(await prisma.auditLog.count({ where: { action: "execution.retry_requested", resourceId: original.id } })).toBe(1);
+    expect(await prisma.auditLog.count({ where: { action: "execution.replay_requested", resourceId: original.id } })).toBe(1);
     expect(await prisma.deadLetterExecution.count({ where: { executionId: original.id, resolution: "RETRIED" } })).toBe(1);
-    await expect(service.retry(seed.organizationId, seed.userId, seed.executionId, "again")).rejects.toBeInstanceOf(ConflictException);
+    const second = await service.retry(seed.organizationId, seed.userId, seed.executionId, "again");
+    expect(second.execution.id).not.toBe(next.id);
+    expect(await prisma.execution.count({ where: { retryOfExecutionId: original.id } })).toBe(2);
   });
 });
 
@@ -163,7 +165,7 @@ async function seedExecution() {
       workflowVersionId: version.id,
       status: ExecutionStatus.Queued,
       inputJson: { trigger: { body: { ok: true } } },
-      contextJson: { trigger: { body: { ok: true } }, steps: {}, metadata: {} }
+      contextJson: replayableContext({ body: { ok: true } })
     }
   });
   return {
@@ -174,6 +176,10 @@ async function seedExecution() {
     executionId: execution.id,
     stepId: version.steps[0].id
   };
+}
+
+function replayableContext(trigger: Record<string, unknown>): any {
+  return { trigger, steps: {}, metadata: {}, __runtime: { variables: {}, workflowVariables: {}, initialExecutionVariables: {}, initialWorkflowVariables: {} }, recoveryCheckpoint: { schemaVersion: 1, complete: true, initialExecutionVariables: {}, initialWorkflowVariables: {}, executionVariables: {}, workflowVariables: {} } };
 }
 
 async function cleanDatabase() {

@@ -1,6 +1,9 @@
 export type ExecutionStatus = "PENDING" | "QUEUED" | "RUNNING" | "RETRYING" | "COMPLETED" | "FAILED" | "CANCELLED";
 export type PublicExecutionStatus = "queued" | "running" | "waiting" | "completed" | "failed" | "cancelled";
-export type StepStatus = ExecutionStatus | "SKIPPED" | "RETRYING";
+export type StepStatus = ExecutionStatus | "SKIPPED" | "RETRYING" | "REUSED";
+export type ExecutionReplayMode = "FULL_REPLAY" | "RETRY_FROM_FAILURE";
+export interface ReplayStepSummary { stepKey: string; stepType: string; executionPath: string; iterationIndex: number | null; safety: "PURE" | "READ_ONLY" | "SIDE_EFFECT" | "WAITING_CONTROL"; }
+export interface ExecutionReplayPreview { possible: boolean; mode: ExecutionReplayMode; sourceExecutionId: string; originalExecutionId: string; workflowVersionId: string | null; startingPoint: { stepKey: string; executionPath: string; iterationIndex: number | null } | null; startingStep: { stepKey: string; executionPath: string; iterationIndex: number | null } | null; reusedSteps: ReplayStepSummary[]; reexecutedSteps: ReplayStepSummary[]; sideEffects: ReplayStepSummary[]; warnings: string[]; sideEffectWarnings: string[]; missingCheckpointData: string[]; blockedReasons: string[]; reason: string | null; }
 
 export const EXECUTION_STATUSES: ExecutionStatus[] = ["PENDING", "QUEUED", "RUNNING", "RETRYING", "COMPLETED", "FAILED", "CANCELLED"];
 
@@ -29,7 +32,12 @@ export interface ExecutionSummary {
   attempts?: number;
   cancelled?: boolean;
   waitReason?: string | null;
-  triggerType?: "manual" | "webhook" | "scheduled" | "event" | "subworkflow" | "retry";
+  triggerType?: "manual" | "webhook" | "scheduled" | "event" | "subworkflow" | "retry" | "replay";
+  replayOfExecutionId?: string | null;
+  replayMode?: ExecutionReplayMode | null;
+  replayFromStepKey?: string | null;
+  replayFromExecutionPath?: string | null;
+  replayFromIterationIndex?: number | null;
   relationship?: "root" | "child";
   parentExecutionId?: string | null;
   rootExecutionId?: string;
@@ -67,6 +75,9 @@ export interface StepExecutionDetail {
   completedAt: string | null;
   finishedAt?: string | null;
   durationMs: number | null;
+  reused?: boolean;
+  reusedFromExecutionId?: string;
+  reusedFromStepExecutionId?: string;
 }
 
 export interface ExecutionDetail extends ExecutionSummary {
@@ -86,6 +97,8 @@ export interface ExecutionDetail extends ExecutionSummary {
   retryExecutions: ExecutionRelation[];
   retryRequestedAt: string | null;
   retryReason: string | null;
+  replayOfExecution: ExecutionRelation | null;
+  replayExecutions: ExecutionRelation[];
   deadLetter: ExecutionDeadLetter | null;
   deadLetters: ExecutionDeadLetter[];
   steps: StepExecutionDetail[];
@@ -101,7 +114,7 @@ export interface ExecutionDetail extends ExecutionSummary {
   notifications: Array<{ id: string; type: string; channel: string; status: string; attempts: number; createdAt: string; updatedAt: string; lastAttemptAt: string | null; sentAt: string | null; failedAt: string | null; errorCategory: string | null; errorMessageSafe: string | null }>;
 }
 
-export interface ExecutionTimelineEvent { id: string; type: string; timestamp: string; status?: string; stepExecutionId?: string; stepKey?: string; executionPath?: string; iterationIndex?: number | null; attempt?: number; durationMs?: number | null; waitReason?: string | null; relatedExecutionId?: string; approvalId?: string; message: string }
+export interface ExecutionTimelineEvent { id: string; type: string; timestamp: string; status?: string; stepExecutionId?: string; stepKey?: string; executionPath?: string; iterationIndex?: number | null; attempt?: number; durationMs?: number | null; waitReason?: string | null; relatedExecutionId?: string; approvalId?: string; reusedFromExecutionId?: string; reusedFromStepExecutionId?: string; message: string }
 export interface ExecutionTimelineResponse { items: ExecutionTimelineEvent[]; nextCursor: string | null; hasMore: boolean }
 
 export interface ExecutionActor {

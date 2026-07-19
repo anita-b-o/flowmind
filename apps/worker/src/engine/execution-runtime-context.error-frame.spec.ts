@@ -18,3 +18,16 @@ describe("ExecutionRuntimeContext error frames", () => {
     expect(frame.error?.category).toBe("retryable");
   });
 });
+
+describe("ExecutionRuntimeContext recovery checkpoint", () => {
+  it("keeps independent initial/current execution and workflow variables", () => {
+    const runtime = new ExecutionRuntimeContext({ trigger: {}, steps: {}, variables: {}, metadata: {}, workflow: { variables: { workflowValue: 1 } }, execution: {} });
+    runtime.set("execution", "count", 1);
+    runtime.set("workflow", "workflowValue", 2);
+    const snapshot = runtime.snapshot({ includeRuntime: true }) as any;
+    expect(snapshot.recoveryCheckpoint).toMatchObject({ schemaVersion: 1, complete: true, initialExecutionVariables: {}, initialWorkflowVariables: { workflowValue: 1 }, executionVariables: { count: 1 }, workflowVariables: { workflowValue: 2 } });
+    const recovered = new ExecutionRuntimeContext({ trigger: {}, steps: {}, variables: {}, metadata: {}, workflow: { variables: {} }, execution: {} }, snapshot.__runtime);
+    recovered.set("execution", "count", 3);
+    expect(snapshot.__runtime.variables.count).toBe(1);
+  });
+});

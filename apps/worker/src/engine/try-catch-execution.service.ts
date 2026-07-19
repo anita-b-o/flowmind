@@ -44,7 +44,8 @@ export class TryCatchExecutionService {
       await recordStepAttempt(this.prisma, { organizationId: input.organizationId, executionId: input.executionId, stepExecutionId: input.tryStepExecution.id, attempt: 1, status: StepExecutionStatus.Running, startedAt: new Date(state.startedAt), effectStatus: "running" });
       await this.audit(input, "try.started", { outcome: "started", handled: false });
     }
-    let primary: StructuredStepFailure | undefined = state.primary ? new StructuredStepFailure(state.primary.error, state.primary.id) : undefined;
+    const initialPrimary = state.phase === "catch" && state.originalPrimary ? state.originalPrimary : state.primary;
+    let primary: StructuredStepFailure | undefined = initialPrimary ? new StructuredStepFailure(initialPrimary.error, initialPrimary.id) : undefined;
     try {
       if (state.phase === "body") {
         try {
@@ -54,6 +55,7 @@ export class TryCatchExecutionService {
         } catch (error) {
           primary = await this.asFailure(input, error);
           state.primary = { id: primary.stepExecutionId, error: primary.safeError };
+          state.originalPrimary ??= state.primary;
           state.bodyStatus = "failed"; state.phase = "catch"; state.currentStepKey = undefined;
           await this.audit(input, "try.body_failed", { outcome: "failed", category: primary.safeError.category, handled: false });
         }
@@ -68,6 +70,7 @@ export class TryCatchExecutionService {
           await this.prisma.stepExecution.update({ where: { id: primary!.stepExecutionId }, data: { errorHandled: true } });
           await this.audit(input, "try.handled", { outcome: "handled", category: primary!.safeError.category, handled: true });
         } catch (error) {
+          state.originalPrimary ??= state.primary;
           primary = await this.asFailure(input, error);
           state.primary = { id: primary.stepExecutionId, error: primary.safeError };
           state.catchStatus = "failed"; state.phase = finallyEntry ? "finally" : "failed"; state.currentStepKey = undefined;
@@ -117,7 +120,15 @@ export class TryCatchExecutionService {
       if (!region.keys.has(next)) throw new Error(`TRY_CATCH ${region.name} escaped to ${next}`);
       const row = input.stepRowsByKey.get(next); if (!row) throw new Error(`Missing step ${next}`);
       const step = toStep(row);
+      const reused = await this.reused(input.executionId, executionPath, step.key);
+      if (reused) {
+        context.steps[step.key] = { status: reused.status as StepExecutionStatus, output: reused.outputJson };
+        if (step.type === "for_each") next = input.graph.edges.find((edge) => edge.from === step.key && edge.kind === "for_each_done")?.to ?? region.exit;
+        else next = selectedNextStepKey(input.graph, step.key, reused.outputJson) ?? region.exit;
+        state.currentStepKey = next === region.exit ? undefined : next; await this.checkpoint(input, state); continue;
+      }
       let execution = await this.stepExecutor.ensure({ organizationId: input.organizationId, executionId: input.executionId, workflowStepId: row.id, step, executionPath, iterationIndex: input.iterationIndex });
+      if (step.type === "for_each" || step.type === "try_catch") execution = await this.hydrateControl(input.executionId, execution as any, step.key, executionPath) as any;
       if (step.type === "for_each") {
         const body = input.graph.edges.find((edge) => edge.from === step.key && edge.kind === "for_each_body")!, done = input.graph.edges.find((edge) => edge.from === step.key && edge.kind === "for_each_done")!;
         if (execution.status === StepExecutionStatus.Completed) { context.steps[step.key] = { status: StepExecutionStatus.Completed, output: execution.outputJson }; next = done.to; continue; }
@@ -156,6 +167,8 @@ export class TryCatchExecutionService {
   }
 
   private checkpoint(input: Parameters<TryCatchExecutionService["execute"]>[0], state: any) { return this.prisma.stepExecution.update({ where: { id: input.tryStepExecution.id }, data: { inputJson: json({ tryState: state }), outputJson: json(summary(state)) } }); }
+  private async reused(executionId: string, executionPath: string, stepKey: string) { if (!(this.prisma as any).executionStepReuse) return null; const reuse = await this.prisma.executionStepReuse.findUnique({ where: { recoveryExecutionId_stepKey_executionPath: { recoveryExecutionId: executionId, stepKey, executionPath } }, include: { sourceStepExecution: true } }); return reuse ? { ...reuse.sourceStepExecution, status: reuse.status } : null; }
+  private async hydrateControl(executionId: string, target: any, stepKey: string, executionPath: string) { const recovery = await this.prisma.execution.findUnique({ where: { id: executionId }, select: { replayOfExecutionId: true, replayFromStepKey: true, replayFromExecutionPath: true, replayFromIterationIndex: true } }); if (!recovery?.replayOfExecutionId || target.inputJson && Object.keys(target.inputJson).length) return target; const source = await this.prisma.stepExecution.findFirst({ where: { executionId: recovery.replayOfExecutionId, stepKey, executionPath }, select: { inputJson: true } }); if (!source?.inputJson) return target; const value: any = JSON.parse(JSON.stringify(source.inputJson)); if (value.forEachState) { if (typeof recovery.replayFromIterationIndex === "number") value.forEachState.nextIndex = recovery.replayFromIterationIndex; value.forEachState.currentStepKey = recovery.replayFromStepKey; } return this.prisma.stepExecution.update({ where: { id: target.id }, data: { inputJson: value } }); }
   private async asFailure(input: Parameters<TryCatchExecutionService["execute"]>[0], error: unknown, id?: string) { if (error instanceof StructuredStepFailure) return error; if (id) return this.failureFromRow(id, error); const row = await this.prisma.stepExecution.findFirst({ where: { executionId: input.executionId, status: StepExecutionStatus.Failed, errorHandled: false }, orderBy: { updatedAt: "desc" } }); if (!row) throw error; return this.failureFromRow(row.id, error); }
   private async failureFromRow(id: string, cause?: unknown) { const row = await this.prisma.stepExecution.findUniqueOrThrow({ where: { id } }); const e = record(row.errorJson); const category = String(e.classification ?? "unknown"); const safe: SafeStepError = { message: safeMessage(e.message), category, ...(typeof e.code === "string" ? { code: e.code.slice(0, 100) } : {}), stepKey: row.stepKey, executionPath: row.executionPath, retryable: category === "retryable", attempts: row.attemptCount }; return new StructuredStepFailure(safe, row.id, cause); }
   private audit(input: Parameters<TryCatchExecutionService["execute"]>[0], action: string, metadata: Record<string, unknown>) { return this.prisma.auditLog.create({ data: { organizationId: input.organizationId, actorUserId: null, action, resourceType: "StepExecution", resourceId: input.tryStepExecution.id, correlationId: input.correlationId ?? null, metadataJson: json(sanitizeForLog(metadata)) } }).catch(() => undefined); }

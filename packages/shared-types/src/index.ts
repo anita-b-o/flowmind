@@ -42,6 +42,11 @@ export enum ExecutionMode {
   Test = "TEST"
 }
 
+export enum ExecutionReplayMode {
+  FullReplay = "FULL_REPLAY",
+  RetryFromFailure = "RETRY_FROM_FAILURE"
+}
+
 export enum StepType {
   WebhookTrigger = "webhook_trigger",
   HttpRequest = "http_request",

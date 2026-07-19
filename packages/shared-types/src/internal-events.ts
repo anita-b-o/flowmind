@@ -24,6 +24,7 @@ export interface DataStoreRecordEventData {
 export interface ExecutionEventData {
   executionId: string; workflowId: string; workflowVersionId: string | null; status: "COMPLETED" | "FAILED";
   origin: ExecutionEventOrigin; startedAt: string | null; completedAt: string; durationMs: number | null; parentExecutionId: string | null;
+  replayOfExecutionId?: string | null; replayMode?: "FULL_REPLAY" | "RETRY_FROM_FAILURE" | null;
 }
 export interface ApprovalEventData {
   approvalId: string; executionId: string; workflowId: string; workflowVersionId: string | null; stepKey: string;

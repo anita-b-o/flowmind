@@ -82,6 +82,8 @@ export class ApiMetricsService implements OnModuleInit, OnModuleDestroy {
     labelNames: ["outcome"],
     registers: [this.registry]
   });
+  readonly replayRequests = new Counter({ name: "flowmind_execution_replay_requests_total", help: "Execution replay requests.", labelNames: ["mode", "outcome"], registers: [this.registry] });
+  readonly replayPreviewBlocked = new Counter({ name: "flowmind_execution_replay_preview_blocked_total", help: "Execution replay previews blocked by safe reason.", labelNames: ["mode", "reason"], registers: [this.registry] });
   readonly manualExecutions = new Counter({
     name: "flowmind_manual_executions_total",
     help: "Manual execution requests.",
@@ -217,6 +219,9 @@ export class ApiMetricsService implements OnModuleInit, OnModuleDestroy {
     this.manualRetries.inc({ outcome });
   }
 
+  recordReplay(mode: string, outcome: string) { this.replayRequests.inc({ mode: safeReplayMode(mode), outcome }); }
+  recordReplayPreviewBlocked(mode: string, reason: string) { this.replayPreviewBlocked.inc({ mode: safeReplayMode(mode), reason: /^[A-Z_]{1,64}$/.test(reason) ? reason : "UNKNOWN" }); }
+
   recordManualExecution(outcome: "success" | "conflict" | "enqueue_failed" | "rejected") {
     this.manualExecutions.inc({ outcome });
   }
@@ -286,6 +291,8 @@ export class ApiMetricsService implements OnModuleInit, OnModuleDestroy {
     return left.length === right.length && timingSafeEqual(left, right);
   }
 }
+
+function safeReplayMode(value: string) { return value === "RETRY_FROM_FAILURE" ? value : "FULL_REPLAY"; }
 
 function bearerToken(value: string | undefined) {
   const match = value?.match(/^Bearer\s+(.+)$/i);

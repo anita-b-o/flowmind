@@ -9,6 +9,7 @@ import { RolesGuard } from "../rbac/roles.guard";
 import { ListExecutionsQueryDto } from "./dto/list-executions-query.dto";
 import { ExecutionTimelineQueryDto } from "./dto/execution-timeline-query.dto";
 import { RetryExecutionDto } from "./dto/retry-execution.dto";
+import { ReplayExecutionDto, ReplayPreviewQueryDto } from "./dto/replay-execution.dto";
 import { CancelExecutionDto } from "./dto/cancel-execution.dto";
 import { CreateManualExecutionDto } from "./dto/create-manual-execution.dto";
 import { ExecutionsService } from "./executions.service";
@@ -61,6 +62,18 @@ export class ExecutionsController {
     @Headers("idempotency-key") idempotencyKey?: string
   ) {
     return this.executionsService.retry(org.organizationId, user.userId, executionId, dto.reason, idempotencyKey ?? dto.idempotencyKey);
+  }
+
+  @Get(":executionId/replay-preview")
+  @Roles(OrganizationRole.Viewer)
+  replayPreview(@OrganizationContext() org: OrganizationContext, @Param("executionId") executionId: string, @Query() query: ReplayPreviewQueryDto) {
+    return this.executionsService.replayPreview(org.organizationId, executionId, query.mode);
+  }
+
+  @Post(":executionId/replay")
+  @Roles(OrganizationRole.Editor)
+  replay(@OrganizationContext() org: OrganizationContext, @CurrentUser() user: CurrentUserType, @Param("executionId") executionId: string, @Body() dto: ReplayExecutionDto, @Headers("idempotency-key") idempotencyKey?: string) {
+    return this.executionsService.replay(org.organizationId, user.userId, executionId, dto.mode, dto.reason, idempotencyKey);
   }
 
   @Post(":executionId/cancel")

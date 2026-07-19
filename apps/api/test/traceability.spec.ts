@@ -133,7 +133,7 @@ describe("traceability", () => {
         status: "FAILED",
         correlationId: "retry-correlation-1",
         inputJson: { trigger: { body: { ok: true } } },
-        contextJson: { trigger: {}, steps: {}, metadata: {} }
+        contextJson: replayableContext({})
       }
     });
 
@@ -145,7 +145,7 @@ describe("traceability", () => {
       .expect(201);
 
     const retry = await prisma.execution.findUniqueOrThrow({ where: { id: response.body.execution.id } });
-    const audit = await prisma.auditLog.findFirstOrThrow({ where: { resourceId: execution.id, action: "execution.retry_requested" } });
+    const audit = await prisma.auditLog.findFirstOrThrow({ where: { resourceId: execution.id, action: "execution.replay_requested" } });
     expect(retry.retryOfExecutionId).toBe(execution.id);
     expect(retry.correlationId).toBe("retry-correlation-1");
     expect(audit.correlationId).toBe("retry-correlation-1");
@@ -203,6 +203,10 @@ async function register(email: string, organizationName: string): Promise<TestUs
     .send({ email, name: email.split("@")[0], password: "password123", organizationName })
     .expect(201);
   return { accessToken: response.body.accessToken, organizationId: response.body.defaultOrganizationId };
+}
+
+function replayableContext(trigger: Record<string, unknown>): any {
+  return { trigger, steps: {}, metadata: {}, __runtime: { variables: {}, workflowVariables: {}, initialExecutionVariables: {}, initialWorkflowVariables: {} }, recoveryCheckpoint: { schemaVersion: 1, complete: true, initialExecutionVariables: {}, initialWorkflowVariables: {}, executionVariables: {}, workflowVariables: {} } };
 }
 
 function authHeaders(user: TestUser) {

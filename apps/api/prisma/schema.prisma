@@ -62,6 +62,11 @@ enum ExecutionMode {
   TEST
 }
 
+enum ExecutionReplayMode {
+  FULL_REPLAY
+  RETRY_FROM_FAILURE
+}
+
 enum ApprovalStatus {
   PENDING
   APPROVED
@@ -203,6 +208,7 @@ model Organization {
   executions           Execution[]
   stepExecutions       StepExecution[]
   stepExecutionAttempts StepExecutionAttempt[]
+  recoveryStepReuses ExecutionStepReuse[]
   deadLetterExecutions DeadLetterExecution[]
   connections          Connection[]
   secrets              Secret[]
@@ -369,6 +375,11 @@ model Execution {
   scheduledFor           DateTime?       @map("scheduled_for")
   correlationId          String?         @map("correlation_id")
   retryOfExecutionId     String?         @map("retry_of_execution_id")
+  replayOfExecutionId    String?         @map("replay_of_execution_id")
+  replayMode             ExecutionReplayMode? @map("replay_mode")
+  replayFromStepKey      String?         @map("replay_from_step_key")
+  replayFromExecutionPath String?        @map("replay_from_execution_path")
+  replayFromIterationIndex Int?          @map("replay_from_iteration_index")
   parentExecutionId      String?         @map("parent_execution_id")
   parentStepExecutionId  String?         @map("parent_step_execution_id")
   rootExecutionId        String?         @map("root_execution_id")
@@ -409,6 +420,8 @@ model Execution {
   scheduledTrigger Trigger?              @relation("ScheduledTriggerExecutions", fields: [scheduledTriggerId], references: [id], onDelete: SetNull)
   retryOfExecution Execution?            @relation("ExecutionRetries", fields: [retryOfExecutionId], references: [id])
   retryExecutions  Execution[]           @relation("ExecutionRetries")
+  replayOfExecution Execution?           @relation("ExecutionReplays", fields: [replayOfExecutionId], references: [id], onDelete: Restrict)
+  replayExecutions  Execution[]           @relation("ExecutionReplays")
   parentExecution  Execution?            @relation("ExecutionChildren", fields: [parentExecutionId], references: [id], onDelete: SetNull)
   childExecutions  Execution[]           @relation("ExecutionChildren")
   rootExecution    Execution?            @relation("ExecutionRoot", fields: [rootExecutionId], references: [id], onDelete: SetNull)
@@ -426,6 +439,8 @@ model Execution {
   triggerLastFor   Trigger[]              @relation("TriggerLastExecution")
   approvalRequests ApprovalRequest[]
   eventDelivery    InternalEventDelivery? @relation("EventDeliveryExecution", fields: [eventDeliveryId], references: [id], onDelete: SetNull)
+  recoveryStepReuses ExecutionStepReuse[] @relation("RecoveryExecutionStepReuses")
+  sourceStepReuses   ExecutionStepReuse[] @relation("SourceExecutionStepReuses")
 
   @@index([organizationId, workflowId, status])
   @@index([organizationId, workflowId, executionMode, createdAt])
@@ -434,6 +449,7 @@ model Execution {
   @@index([organizationId, scheduledTriggerId, scheduledFor])
   @@index([status, lockedUntil])
   @@index([retryOfExecutionId, status])
+  @@index([organizationId, replayOfExecutionId, createdAt])
   @@index([parentExecutionId])
   @@index([parentStepExecutionId])
   @@index([rootExecutionId])
@@ -546,10 +562,35 @@ model StepExecution {
   childExecutions Execution[]           @relation("StepExecutionChildren")
   approvalRequest ApprovalRequest?
   attempts        StepExecutionAttempt[]
+  sourceReuses    ExecutionStepReuse[]
 
   @@unique([executionId, stepKey, executionPath])
   @@index([organizationId, executionId])
   @@map("step_executions")
+}
+
+model ExecutionStepReuse {
+  id                    String              @id @default(uuid())
+  organizationId        String              @map("organization_id")
+  recoveryExecutionId   String              @map("recovery_execution_id")
+  sourceExecutionId     String              @map("source_execution_id")
+  sourceStepExecutionId String              @map("source_step_execution_id")
+  stepKey               String              @map("step_key")
+  stepType              String              @map("step_type")
+  executionPath         String              @default("root") @map("execution_path")
+  iterationIndex        Int?                @map("iteration_index")
+  status                StepExecutionStatus
+  createdAt             DateTime            @default(now()) @map("created_at")
+
+  organization          Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  recoveryExecution     Execution           @relation("RecoveryExecutionStepReuses", fields: [recoveryExecutionId], references: [id], onDelete: Cascade)
+  sourceExecution       Execution           @relation("SourceExecutionStepReuses", fields: [sourceExecutionId], references: [id], onDelete: Restrict)
+  sourceStepExecution   StepExecution       @relation(fields: [sourceStepExecutionId], references: [id], onDelete: Restrict)
+
+  @@unique([recoveryExecutionId, stepKey, executionPath])
+  @@index([organizationId, recoveryExecutionId])
+  @@index([sourceExecutionId])
+  @@map("execution_step_reuses")
 }
 
 model StepExecutionAttempt {

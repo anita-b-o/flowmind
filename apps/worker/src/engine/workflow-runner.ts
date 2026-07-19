@@ -68,6 +68,13 @@ export class WorkflowRunner {
     if (!execution) {
       throw new Error(`Execution ${payload.executionId} not found`);
     }
+    if ((execution as any).replayMode) {
+      this.metrics?.replayExecutions.inc({ mode: (execution as any).replayMode, outcome: "started" });
+      if (execution.runAttempt === 1) {
+        await this.recordAudit(execution.organizationId, "execution.replay_started", "Execution", execution.id, (execution as any).correlationId, { mode: (execution as any).replayMode, sourceExecutionId: (execution as any).replayOfExecutionId, startingStep: (execution as any).replayFromStepKey ?? null });
+        for (const reuse of (execution as any).recoveryStepReuses ?? []) this.metrics?.replayStepsReused.inc({ step_type: safeMetricStepType(reuse.stepType) });
+      }
+    }
     if ([ExecutionStatus.Completed, ExecutionStatus.Failed, ExecutionStatus.Cancelled].includes(execution.status as ExecutionStatus)) {
       await this.leaseService.release(execution.id);
       if (heartbeat) clearInterval(heartbeat);
@@ -106,6 +113,12 @@ export class WorkflowRunner {
         }
 
         const step = toStepDefinition(dbStep);
+        const reused = recoveryReuse(current, step.key, "root");
+        if (reused) {
+          runtimeContext.setStepResult(step.key, reused.status as StepExecutionStatus, reused.outputJson);
+          skipNext = shouldSkipNext(step, reused.outputJson);
+          continue;
+        }
         let stepExecution = await this.stepExecutor.ensure({
           organizationId: current.organizationId,
           executionId: current.id,
@@ -194,6 +207,7 @@ export class WorkflowRunner {
         workflowVersionId: execution.workflowVersionId
       });
       if ((execution as any).executionMode !== "TEST") this.metrics?.executionsCompleted.inc();
+      if ((execution as any).replayMode) this.metrics?.replayExecutions.inc({ mode: (execution as any).replayMode, outcome: "completed" });
       await this.wakeParent(execution.id);
       return { status: "completed" };
     } catch (error) {
@@ -207,7 +221,7 @@ export class WorkflowRunner {
         await this.leaseService.release(execution.id).catch(() => undefined);
         return { status: "completed" };
       }
-      const context = runtimeContext?.snapshot({ includeRuntime: false }) ?? await this.reconstructContextForExecution(execution.id);
+      const context = runtimeContext?.snapshot({ includeRuntime: true }) ?? await this.reconstructContextForExecution(execution.id);
       const failedStep = await this.prisma.stepExecution.findFirst({
         where: { executionId: execution.id, status: StepExecutionStatus.Failed },
         orderBy: { updatedAt: "desc" }
@@ -251,6 +265,7 @@ export class WorkflowRunner {
         reason: failedStep?.effectStatus === "ambiguous" ? "ambiguous" : "failed"
       });
       if ((execution as any).executionMode !== "TEST") this.metrics?.executionsFailed.inc({ error_category: (failedStep?.errorJson as any)?.classification ?? "unknown" });
+      if ((execution as any).replayMode) this.metrics?.replayExecutions.inc({ mode: (execution as any).replayMode, outcome: "failed" });
       await this.leaseService.release(execution.id);
       throw error;
     }
@@ -263,7 +278,8 @@ export class WorkflowRunner {
         workflow: { include: { organization: true } },
         testRun: { select: { snapshotDefinitionJson: true } },
         workflowVersion: { include: { workflow: { include: { organization: true } }, steps: { orderBy: { position: "asc" } } } },
-        steps: { orderBy: { createdAt: "asc" } }
+        steps: { orderBy: { createdAt: "asc" } },
+        recoveryStepReuses: { include: { sourceStepExecution: true } }
       }
     });
   }
@@ -302,12 +318,21 @@ export class WorkflowRunner {
         throw new Error(`Workflow graph references missing step ${nextStepKey}`);
       }
       const step = toStepDefinition(dbStep);
+      const reused = recoveryReuse(current, step.key, "root");
+      if (reused) {
+        runtimeContext.setStepResult(step.key, reused.status as StepExecutionStatus, reused.outputJson);
+        if (step.type === "for_each") nextStepKey = graph.edges.find((edge) => edge.from === step.key && edge.kind === "for_each_done")?.to;
+        else if (step.type === "try_catch") nextStepKey = graph.edges.find((edge) => edge.from === step.key && edge.kind === "try_done")?.to;
+        else nextStepKey = selectedNextStepKey(graph, step.key, reused.outputJson);
+        continue;
+      }
       let stepExecution = await this.stepExecutor.ensure({
         organizationId: current.organizationId,
         executionId: current.id,
         workflowStepId: dbStep.id,
         step
       });
+      if (step.type === "for_each" || step.type === "try_catch") stepExecution = await this.hydrateRecoveryControl(current as any, stepExecution as any, step.key, "root") as any;
 
       if (step.type === "for_each") {
         if (!this.forEach) throw new Error("FOR_EACH runtime service is unavailable");
@@ -528,6 +553,7 @@ export class WorkflowRunner {
     workflowVersionId?: string | null;
     correlationId?: string | null;
     retryOfExecutionId?: string | null;
+    replayMode?: string | null;
     startedAt?: Date | null;
     inputJson: unknown;
     contextJson?: unknown;
@@ -537,7 +563,7 @@ export class WorkflowRunner {
     steps: Array<{ stepKey: string; status: string; outputJson: unknown }>;
   }) {
     const context = this.contextReconstructor.reconstruct(withRuntimeDefinition(execution), execution.steps.filter((step: any) => (step.executionPath ?? "root") === "root"));
-    const [organizationVariables, workflowVariables] = await Promise.all([
+    const [organizationVariables, workflowVariables] = execution.replayMode ? [[], []] : await Promise.all([
       this.loadOrganizationVariables(execution.organizationId),
       this.loadWorkflowVariables(execution.organizationId, execution.workflowId)
     ]);
@@ -563,6 +589,9 @@ export class WorkflowRunner {
     const cached = execution.contextJson && typeof execution.contextJson === "object" && !Array.isArray(execution.contextJson)
       ? (execution.contextJson as Record<string, unknown>).__runtime
       : undefined;
+    for (const reuse of (execution as any).recoveryStepReuses ?? []) {
+      if (reuse.executionPath === "root") context.steps[reuse.stepKey] = { status: reuse.status, output: reuse.sourceStepExecution.outputJson };
+    }
     return new ExecutionRuntimeContext(context, cached);
   }
 
@@ -589,6 +618,25 @@ export class WorkflowRunner {
     await this.prisma.execution.update({ where: { id: executionId }, data: { contextJson: toJson(context) } });
   }
 
+  private async hydrateRecoveryControl(execution: any, target: any, stepKey: string, executionPath: string) {
+    if (!execution.replayOfExecutionId || target.inputJson && Object.keys(target.inputJson as object).length) return target;
+    const source = await this.prisma.stepExecution.findFirst({ where: { executionId: execution.replayOfExecutionId, stepKey, executionPath }, select: { inputJson: true } });
+    if (!source?.inputJson) return target;
+    const value = JSON.parse(JSON.stringify(source.inputJson));
+    if (value.forEachState && execution.replayFromExecutionPath?.includes(`/${stepKey}[`)) {
+      if (typeof execution.replayFromIterationIndex === "number") value.forEachState.nextIndex = execution.replayFromIterationIndex;
+      value.forEachState.currentStepKey = execution.replayFromStepKey;
+    }
+    if (value.tryState && execution.replayFromExecutionPath?.includes(`/try[${stepKey}]/`)) {
+      const region = String(execution.replayFromExecutionPath).split(`/try[${stepKey}]/`)[1]?.split("/")[0];
+      if (["body", "catch", "finally"].includes(region)) value.tryState.phase = region;
+      value.tryState.currentStepKey = execution.replayFromStepKey;
+      if (region === "catch" && value.tryState.originalPrimary) value.tryState.primary = value.tryState.originalPrimary;
+      if (region === "finally" && value.tryState.bodyStatus === "succeeded") delete value.tryState.primary;
+    }
+    return this.prisma.stepExecution.update({ where: { id: target.id }, data: { inputJson: value as Prisma.InputJsonValue } });
+  }
+
   private markWaiting(executionId: string, waitReason?: string) {
     return this.prisma.execution.updateMany({
       where: { id: executionId, status: { in: ACTIVE_EXECUTION_STATUSES as any } },
@@ -612,7 +660,7 @@ export class WorkflowRunner {
         const type = status === ExecutionStatus.Completed ? "EXECUTION_COMPLETED" : "EXECUTION_FAILED";
         await this.internalEvents?.emit(tx, {
           organizationId: execution.organizationId, type, source: { type: "execution", id: execution.id }, subject: { type: "execution", id: execution.id },
-          data: { executionId: execution.id, workflowId: execution.workflowId, workflowVersionId: execution.workflowVersionId, status, origin: executionOrigin(execution), startedAt: execution.startedAt?.toISOString() ?? null, completedAt: completedAt.toISOString(), durationMs: execution.startedAt ? completedAt.getTime() - execution.startedAt.getTime() : null, parentExecutionId: execution.parentExecutionId ?? null },
+          data: { executionId: execution.id, workflowId: execution.workflowId, workflowVersionId: execution.workflowVersionId, status, origin: executionOrigin(execution), startedAt: execution.startedAt?.toISOString() ?? null, completedAt: completedAt.toISOString(), durationMs: execution.startedAt ? completedAt.getTime() - execution.startedAt.getTime() : null, parentExecutionId: execution.parentExecutionId ?? null, replayOfExecutionId: execution.replayOfExecutionId ?? null, replayMode: execution.replayMode ?? null },
           causality: execution.eventRootId ? { rootEventId: execution.eventRootId, causationId: execution.eventCausationId, depth: execution.eventDepth, correlationId: execution.correlationId } : { correlationId: execution.correlationId }
         });
       }
@@ -644,7 +692,13 @@ export class WorkflowRunner {
 }
 
 function randomCorrelationId() { return `subworkflow-${Date.now()}-${Math.random().toString(16).slice(2)}`; }
-function executionOrigin(execution: any) { if (execution.eventDeliveryId) return "event"; if (execution.parentExecutionId) return "subworkflow"; if (execution.retryOfExecutionId) return "retry"; if (execution.scheduledTriggerId) return "scheduled"; if (execution.webhookEventId) return "webhook"; return "manual"; }
+function executionOrigin(execution: any) { if (execution.eventDeliveryId) return "event"; if (execution.parentExecutionId) return "subworkflow"; if (execution.replayOfExecutionId || execution.retryOfExecutionId) return "retry"; if (execution.scheduledTriggerId) return "scheduled"; if (execution.webhookEventId) return "webhook"; return "manual"; }
+
+function recoveryReuse(execution: any, stepKey: string, executionPath: string) {
+  const reuse = execution.recoveryStepReuses?.find((entry: any) => entry.stepKey === stepKey && entry.executionPath === executionPath);
+  return reuse ? { ...reuse.sourceStepExecution, status: reuse.status } : null;
+}
+function safeMetricStepType(value: unknown) { const text = String(value ?? "unknown"); return /^[a-z0-9_]{1,64}$/.test(text) ? text : "unknown"; }
 
 function toStepDefinition(dbStep: RuntimeStepRow): WorkflowStepDefinition {
   return {
