@@ -28,6 +28,8 @@ export function workflowVersionToDraft(workflow: Pick<WorkflowDetail, "name" | "
   const base: WorkflowDraftModel = {
     workflowMeta: { name: form.name, description: form.description },
     trigger,
+    workflowVariables: definition?.workflowVariables ?? {},
+    environmentVariables: definition?.environmentVariables ?? {},
     stepsByKey,
     stepOrder,
     edges: graphEdges.filter((edge) => stepsByKey[edge.source] && stepsByKey[edge.target]),
@@ -72,8 +74,8 @@ export function draftToWorkflowDefinitionDto(draft: WorkflowDraftModel): Workflo
     steps: form.steps.map((step, index) => stepFormToDto(step, index)),
     expressionMode: "strict",
     workflowDefinitionSchemaVersion: 2,
-    workflowVariables: {},
-    environmentVariables: {},
+    workflowVariables: draft.workflowVariables,
+    environmentVariables: draft.environmentVariables,
     graph,
     ui: draft.ui
   };

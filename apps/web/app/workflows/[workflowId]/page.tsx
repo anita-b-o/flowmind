@@ -13,6 +13,7 @@ import { WebhookTriggersPanel } from "../../../features/triggers/webhook-trigger
 import { EventTriggersPanel } from "../../../features/triggers/event-triggers-panel";
 import { useWorkflow } from "../../../features/workflows/hooks";
 import { WorkflowEditor } from "../../../features/workflows/components/workflow-editor";
+import { VersionHistory } from "../../../features/workflows/components/version-history";
 
 export default function WorkflowDetailPage({ params }: { params: Promise<{ workflowId: string }> }) {
   const { workflowId } = use(params);
@@ -41,6 +42,7 @@ export default function WorkflowDetailPage({ params }: { params: Promise<{ workf
         </section>
 
         {workflow.data && <WorkflowEditor workflow={workflow.data} onRefresh={() => workflow.refetch()} />}
+        {workflow.data && <VersionHistory workflowId={workflowId} role={role} onRefresh={() => workflow.refetch()} />}
 
         <WebhookTriggersPanel workflowId={workflowId} canManage={role === "owner" || role === "admin" || role === "editor"} onSecret={setSecret} />
         <ScheduledTriggersPanel workflowId={workflowId} canManage={role === "owner" || role === "admin" || role === "editor"} />

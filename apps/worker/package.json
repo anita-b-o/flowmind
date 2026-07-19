@@ -6,7 +6,7 @@
     "dev": "nest start --watch",
     "build": "nest build",
     "lint": "tsc -p tsconfig.json --noEmit",
-    "test": "jest --passWithNoTests",
+    "test": "jest --passWithNoTests --runInBand",
     "test:unit": "jest --passWithNoTests --runInBand --testRegex 'src/(?!.*\\.integration\\.spec\\.ts$).*\\.spec\\.ts$'",
     "test:integration": "flock -x /tmp/flowmind-worker-db-tests.lock jest --passWithNoTests --runInBand --testRegex '.*\\.integration\\.spec\\.ts$'",
     "test:e2e": "jest --passWithNoTests --runInBand --testRegex '.*\\.e2e-spec\\.ts$'",

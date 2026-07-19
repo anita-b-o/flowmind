@@ -119,19 +119,15 @@ describe("WorkflowEditor", () => {
     expect(screen.getByRole("textbox", { name: /workflow name/i })).toHaveValue("Lead intake");
   });
 
-  it("opens read-only history and activates versions explicitly", async () => {
-    const onRefresh = vi.fn();
-    activateVersion.mutateAsync.mockResolvedValue({});
-    render(<WorkflowEditor workflow={workflow()} onRefresh={onRefresh} />);
+  it("opens archived history read-only and does not allow direct reactivation", async () => {
+    render(<WorkflowEditor workflow={workflow()} onRefresh={vi.fn()} />);
 
     await userEvent.click(screen.getByRole("button", { name: /v1 archived/i }));
     expect(screen.getByText(/read-only/i)).toBeInTheDocument();
     expect(screen.getByLabelText("Workflow name")).toBeDisabled();
 
-    await userEvent.click(screen.getByRole("button", { name: /activate version/i }));
-    await userEvent.click(screen.getAllByRole("button", { name: /^activate version$/i }).at(-1)!);
-    await waitFor(() => expect(activateVersion.mutateAsync).toHaveBeenCalledWith("version-1"));
-    expect(onRefresh).toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: /publish version/i })).not.toBeInTheDocument();
+    expect(activateVersion.mutateAsync).not.toHaveBeenCalled();
   });
 
   it("shows save errors and prevents duplicate save requests while pending", async () => {

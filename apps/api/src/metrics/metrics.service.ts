@@ -84,6 +84,9 @@ export class ApiMetricsService implements OnModuleInit, OnModuleDestroy {
   });
   readonly replayRequests = new Counter({ name: "flowmind_execution_replay_requests_total", help: "Execution replay requests.", labelNames: ["mode", "outcome"], registers: [this.registry] });
   readonly replayPreviewBlocked = new Counter({ name: "flowmind_execution_replay_preview_blocked_total", help: "Execution replay previews blocked by safe reason.", labelNames: ["mode", "reason"], registers: [this.registry] });
+  readonly workflowVersionDiffRequests = new Counter({ name: "flowmind_workflow_version_diff_requests_total", help: "Workflow version diff requests.", labelNames: ["outcome", "max_severity"], registers: [this.registry] });
+  readonly workflowVersionRestores = new Counter({ name: "flowmind_workflow_version_restores_total", help: "Workflow version restore requests.", labelNames: ["outcome"], registers: [this.registry] });
+  readonly workflowVersionRestorePreviews = new Counter({ name: "flowmind_workflow_version_restore_previews_total", help: "Workflow version restore preview requests.", labelNames: ["outcome", "publishable"], registers: [this.registry] });
   readonly manualExecutions = new Counter({
     name: "flowmind_manual_executions_total",
     help: "Manual execution requests.",
@@ -221,6 +224,9 @@ export class ApiMetricsService implements OnModuleInit, OnModuleDestroy {
 
   recordReplay(mode: string, outcome: string) { this.replayRequests.inc({ mode: safeReplayMode(mode), outcome }); }
   recordReplayPreviewBlocked(mode: string, reason: string) { this.replayPreviewBlocked.inc({ mode: safeReplayMode(mode), reason: /^[A-Z_]{1,64}$/.test(reason) ? reason : "UNKNOWN" }); }
+  recordWorkflowVersionDiff(outcome: string, severity: string) { this.workflowVersionDiffRequests.inc({ outcome: safeMetricValue(outcome), max_severity: ["SAFE", "WARNING", "BREAKING"].includes(severity) ? severity : "SAFE" }); }
+  recordWorkflowVersionRestore(outcome: string) { this.workflowVersionRestores.inc({ outcome: safeMetricValue(outcome) }); }
+  recordWorkflowVersionRestorePreview(outcome: string, publishable: boolean) { this.workflowVersionRestorePreviews.inc({ outcome: safeMetricValue(outcome), publishable: String(publishable) }); }
 
   recordManualExecution(outcome: "success" | "conflict" | "enqueue_failed" | "rejected") {
     this.manualExecutions.inc({ outcome });
@@ -293,6 +299,7 @@ export class ApiMetricsService implements OnModuleInit, OnModuleDestroy {
 }
 
 function safeReplayMode(value: string) { return value === "RETRY_FROM_FAILURE" ? value : "FULL_REPLAY"; }
+function safeMetricValue(value: string) { return /^[a-z_]{1,32}$/.test(value) ? value : "unknown"; }
 
 function bearerToken(value: string | undefined) {
   const match = value?.match(/^Bearer\s+(.+)$/i);

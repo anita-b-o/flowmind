@@ -17,6 +17,8 @@ export type WorkflowDraftModel = {
     description: string;
   };
   trigger: WorkflowStepDto;
+  workflowVariables: Record<string, unknown>;
+  environmentVariables: Record<string, unknown>;
   stepsByKey: Record<string, StepFormValue>;
   stepOrder: string[];
   edges: DraftEdge[];

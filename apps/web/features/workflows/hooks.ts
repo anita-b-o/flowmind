@@ -12,7 +12,7 @@ import type {
   WorkflowTestRunComparison,
   WorkflowTestRunDetail,
   WorkflowTestRunListResponse
-  ,InvocableWorkflow
+  ,InvocableWorkflow, WorkflowVersionHistoryResponse, WorkflowVersionDiff, WorkflowRestorePreview, WorkflowVersion
 } from "./types";
 
 export function useWorkflows() {
@@ -20,6 +20,23 @@ export function useWorkflows() {
     queryKey: ["workflows"],
     queryFn: () => apiClient.get<Workflow[]>("/workflows")
   });
+}
+
+export function useWorkflowVersions(workflowId: string) {
+  return useQuery({ queryKey: ["workflows", workflowId, "versions"], queryFn: () => apiClient.get<WorkflowVersionHistoryResponse>(`/workflows/${workflowId}/versions?limit=100`), enabled: Boolean(workflowId) });
+}
+
+export function useWorkflowVersionDiff(workflowId: string, fromId?: string, toId?: string) {
+  return useQuery({ queryKey: ["workflows", workflowId, "version-diff", fromId, toId], queryFn: () => apiClient.get<WorkflowVersionDiff>(`/workflows/${workflowId}/versions/${fromId}/diff/${toId}`), enabled: Boolean(workflowId && fromId && toId && fromId !== toId) });
+}
+
+export function useWorkflowRestorePreview(workflowId: string, versionId?: string) {
+  return useQuery({ queryKey: ["workflows", workflowId, "restore-preview", versionId], queryFn: () => apiClient.get<WorkflowRestorePreview>(`/workflows/${workflowId}/versions/${versionId}/restore-preview`), enabled: Boolean(workflowId && versionId) });
+}
+
+export function useRestoreWorkflowVersion(workflowId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({ mutationFn: (versionId: string) => apiClient.post<WorkflowVersion>(`/workflows/${workflowId}/versions/${versionId}/restore`, {}), onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["workflows", workflowId] }); queryClient.invalidateQueries({ queryKey: ["workflows", workflowId, "versions"] }); } });
 }
 
 export function useInvocableWorkflows() {

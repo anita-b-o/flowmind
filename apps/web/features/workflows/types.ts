@@ -49,6 +49,18 @@ export interface WorkflowVersionSummary {
   activatedAt?: string | null;
 }
 
+export interface WorkflowVersionHistoryItem extends WorkflowVersionSummary {
+  publishedAt?: string | null;
+  isActive: boolean;
+  createdBy?: { id: string; email: string; name?: string | null };
+  restoredFromVersion?: { id: string; versionNumber: number } | null;
+  triggerHistoryAvailable: boolean;
+}
+export interface WorkflowVersionHistoryResponse { items: WorkflowVersionHistoryItem[]; pageSize: number; nextCursor: string | null; hasMore: boolean; }
+export interface WorkflowFieldChange { fieldPath: string; changeType: "ADDED" | "REMOVED" | "MODIFIED"; before?: unknown; after?: unknown; sensitive?: boolean; changed?: true; }
+export interface WorkflowVersionDiff { fromVersion: WorkflowVersionSummary; toVersion: WorkflowVersionSummary; triggerHistoryAvailable: boolean; summary: { maxSeverity: "SAFE" | "WARNING" | "BREAKING"; totalChanges: number; heuristic: true }; findings: Array<{ severity: "SAFE" | "WARNING" | "BREAKING"; code: string; message: string; stepKey?: string }>; groups: Record<string, unknown[]>; }
+export interface WorkflowRestorePreview { possible: boolean; publishable: boolean; sourceVersion: WorkflowVersionSummary; currentActiveVersion: WorkflowVersionSummary | null; diffSummary: WorkflowVersionDiff["summary"] | null; breakingWarnings: WorkflowVersionDiff["findings"]; missingDependencies: Array<Record<string, unknown>>; invalidReferences: Array<Record<string, unknown>>; unverifiableReferences: Array<Record<string, unknown>>; triggerHistoryAvailable: boolean; }
+
 export interface WorkflowStep {
   id: string;
   key: string;

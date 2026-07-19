@@ -331,9 +331,9 @@ export function WorkflowEditor({ workflow, onRefresh }: { workflow: WorkflowDeta
                 {hasUnsavedChanges() && <span className="status-badge">Unsaved draft</span>}
               </div>
             </div>
-            {selectedVersion && workflow.activeVersionId !== selectedVersion.id && (
+            {selectedVersion?.status === "DRAFT" && workflow.activeVersionId !== selectedVersion.id && (
               <button type="button" onClick={() => setActivateVersionId(selectedVersion.id)} disabled={activateVersion.isPending}>
-                Activate version
+                Publish version
               </button>
             )}
           </div>

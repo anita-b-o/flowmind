@@ -32,9 +32,12 @@ describe("internal event workflow flows", () => {
   }, 30_000);
 
   afterAll(async () => {
-    await workerContext?.close(); await app?.close(); await cleanDatabase(); await prisma.$disconnect();
+    await workerContext?.close();
+    await app?.close();
+    await cleanDatabase();
+    await prisma.$disconnect();
     delete process.env.INTERNAL_EVENT_POLL_INTERVAL_MS;
-  });
+  }, 30_000);
 
   it("cuts A -> Data Store -> A at the configured causal depth and remains operational", async () => {
     const owner = await createOwner("loop-self");

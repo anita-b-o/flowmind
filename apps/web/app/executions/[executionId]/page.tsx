@@ -38,7 +38,7 @@ export default function ExecutionDetailPage({ params }: { params: Promise<{ exec
               {detail.deadLetter && <StatusBadge status={detail.deadLetter.active ? "DLQ ACTIVE" : "DLQ RESOLVED"} />}
               <p className="muted">{detail.id}</p>
               <p>Workflow: {detail.workflow.name}</p>
-              <p>Version: {detail.workflowVersion?.versionNumber ?? "-"}</p>
+              <p>Version: {detail.workflowVersion ? <Link href={`/workflows/${detail.workflow.id}?version=${detail.workflowVersion.id}`}>v{detail.workflowVersion.versionNumber} · View executed workflow version</Link> : "-"}</p>
               <p>Mode: {detail.mode ?? "REAL"}</p>
               <p>Trigger: {detail.triggerType ?? "manual"}</p>
               <p>Subworkflow depth: {detail.depth}</p>

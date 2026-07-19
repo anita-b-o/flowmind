@@ -285,6 +285,8 @@ model WorkflowVersion {
   createdByUserId String                @map("created_by_user_id")
   createdAt       DateTime              @default(now()) @map("created_at")
   activatedAt     DateTime?             @map("activated_at")
+  restoredFromVersionId String?         @map("restored_from_version_id")
+  materializedTriggerSnapshotJson Json? @map("materialized_trigger_snapshot_json")
 
   organization         Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   workflow             Workflow              @relation("WorkflowVersions", fields: [workflowId], references: [id], onDelete: Cascade)
@@ -296,9 +298,12 @@ model WorkflowVersion {
   internalRecords      InternalRecord[]
   deadLetterExecutions DeadLetterExecution[]
   approvalRequests     ApprovalRequest[]
+  restoredFrom         WorkflowVersion?       @relation("WorkflowVersionRestore", fields: [restoredFromVersionId], references: [id], onDelete: Restrict)
+  restoredVersions     WorkflowVersion[]      @relation("WorkflowVersionRestore")
 
   @@unique([workflowId, versionNumber])
   @@index([organizationId, workflowId])
+  @@index([restoredFromVersionId])
   @@map("workflow_versions")
 }
 

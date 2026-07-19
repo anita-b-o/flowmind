@@ -13,6 +13,7 @@ export function canRetryExecution(role: OrganizationRole) {
 export function canRunWorkflow(role: OrganizationRole) {
   return roleRank(role) >= rank.editor;
 }
+export function canRestoreWorkflowVersion(role: OrganizationRole) { return roleRank(role) >= rank.editor; }
 
 export function canCancelExecution(role: OrganizationRole) {
   return roleRank(role) >= rank.editor;

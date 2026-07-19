@@ -439,6 +439,45 @@ describe("workflow webhook execution e2e", () => {
     await request(app.getHttpServer()).get(`/executions/${webhook.body.executionId}`).set(authHeaders(userB)).expect(404);
   }, 30_000);
 
+  it("lists, compares and restores immutable workflow versions without changing the active version", async () => {
+    const user = await register("version-restore@example.com", "Version Restore");
+    const workflow = await createWorkflow(user, "Versioned workflow");
+    const v1 = await createVersion(user, workflow.id);
+    await request(app.getHttpServer()).patch(`/workflows/${workflow.id}/versions/${v1.id}/activate`).set(authHeaders(user)).expect(200);
+    const v2Definition = JSON.parse(JSON.stringify(v1.definitionJson));
+    v2Definition.steps[0].config.right = "urgent";
+    const v2 = (await request(app.getHttpServer()).post(`/workflows/${workflow.id}/versions`).set(authHeaders(user)).send(v2Definition).expect(201)).body;
+    await request(app.getHttpServer()).patch(`/workflows/${workflow.id}/versions/${v2.id}/activate`).set(authHeaders(user)).expect(200);
+
+    const history = await request(app.getHttpServer()).get(`/workflows/${workflow.id}/versions?limit=2`).set(authHeaders(user)).expect(200);
+    expect(history.body.items.map((item: any) => item.versionNumber)).toEqual([2, 1]);
+    expect(history.body.items[0].isActive).toBe(true);
+    const diff = await request(app.getHttpServer()).get(`/workflows/${workflow.id}/versions/${v1.id}/diff/${v2.id}`).set(authHeaders(user)).expect(200);
+    expect(diff.body.groups.STEPS_MODIFIED[0].stepKey).toBe("check_priority");
+    const preview = await request(app.getHttpServer()).get(`/workflows/${workflow.id}/versions/${v1.id}/restore-preview`).set(authHeaders(user)).expect(200);
+    expect(preview.body.possible).toBe(true);
+    const viewerRegistration = await register("version-viewer@example.com", "Viewer Home");
+    const viewerUser = await prisma.user.findUniqueOrThrow({ where: { email: "version-viewer@example.com" } });
+    await prisma.organizationMember.create({ data: { organizationId: user.organizationId, userId: viewerUser.id, role: "viewer" } });
+    const viewer = { accessToken: viewerRegistration.accessToken, organizationId: user.organizationId };
+    await request(app.getHttpServer()).get(`/workflows/${workflow.id}/versions/${v1.id}/diff/${v2.id}`).set(authHeaders(viewer)).expect(200);
+    await request(app.getHttpServer()).get(`/workflows/${workflow.id}/versions/${v1.id}/restore-preview`).set(authHeaders(viewer)).expect(200);
+    await request(app.getHttpServer()).post(`/workflows/${workflow.id}/versions/${v1.id}/restore`).set(authHeaders(viewer)).send({}).expect(403);
+
+    const [restored, concurrentRestore] = await Promise.all([
+      request(app.getHttpServer()).post(`/workflows/${workflow.id}/versions/${v1.id}/restore`).set(authHeaders(user)).send({}),
+      request(app.getHttpServer()).post(`/workflows/${workflow.id}/versions/${v1.id}/restore`).set(authHeaders(user)).send({})
+    ]);
+    expect(restored.status).toBe(201); expect(concurrentRestore.status).toBe(201);
+    expect([restored.body.versionNumber, concurrentRestore.body.versionNumber].sort()).toEqual([3, 4]);
+    expect(restored.body).toMatchObject({ status: "DRAFT", restoredFromVersionId: v1.id });
+    expect(restored.body.definitionJson).toEqual(v1.definitionJson);
+    const after = await prisma.workflow.findUniqueOrThrow({ where: { id: workflow.id }, include: { versions: { orderBy: { versionNumber: "asc" } } } });
+    expect(after.activeVersionId).toBe(v2.id);
+    expect(after.versions.map((version) => version.status)).toEqual(["ARCHIVED", "ACTIVE", "DRAFT", "DRAFT"]);
+    await request(app.getHttpServer()).patch(`/workflows/${workflow.id}/versions/${v1.id}/activate`).set(authHeaders(user)).expect(409);
+  }, 30_000);
+
   async function register(email: string, organizationName: string) {
     const response = await request(app.getHttpServer())
       .post("/auth/register")
