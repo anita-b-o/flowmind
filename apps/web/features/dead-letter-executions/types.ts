@@ -29,7 +29,7 @@ export interface DeadLetterListResponse {
 export interface PublicError {
   category: string;
   code: string;
-  message: string;
+  messageSafe: string;
 }
 
 export interface DeadLetterDetail extends DeadLetterSummary {
@@ -52,7 +52,6 @@ export interface DeadLetterDetail extends DeadLetterSummary {
     updatedAt: string;
   };
   lastError: PublicError;
-  lastErrorMetadata: unknown;
   retryExecution: {
     id: string;
     status: string;

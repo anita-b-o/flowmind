@@ -3,21 +3,34 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "../../lib/api-client";
 import { useAuth } from "../auth/use-auth";
-import type { CancelExecutionResponse, ExecutionDetail, ExecutionListResponse, ExecutionStatus, ManualExecutionResponse } from "./types";
+import type { CancelExecutionResponse, ExecutionDetail, ExecutionListResponse, ExecutionStatus, ExecutionTimelineResponse, ManualExecutionResponse } from "./types";
 
 export function useExecutions(params: {
-  page: number;
-  pageSize: number;
+  cursor?: string;
+  limit: number;
   workflowId?: string;
   status?: ExecutionStatus | "";
   from?: string;
   to?: string;
+  triggerType?: string;
+  relationship?: string;
+  waiting?: string;
 }) {
   const { activeOrganizationId } = useAuth();
   return useQuery({
     queryKey: ["executions", activeOrganizationId, params],
     queryFn: () => apiClient.get<ExecutionListResponse>("/executions", params)
   });
+}
+
+export function useExecutionTimeline(executionId: string) {
+  const { activeOrganizationId } = useAuth();
+  return useQuery({ queryKey: ["execution-timeline", activeOrganizationId, executionId], queryFn: () => apiClient.get<ExecutionTimelineResponse>(`/executions/${executionId}/timeline`, { limit: 100 }), enabled: Boolean(activeOrganizationId && executionId) });
+}
+
+export function useExecutionTree(executionId: string) {
+  const { activeOrganizationId } = useAuth();
+  return useQuery({ queryKey: ["execution-tree", activeOrganizationId, executionId], queryFn: () => apiClient.get<any>(`/executions/${executionId}/tree`), enabled: Boolean(activeOrganizationId && executionId) });
 }
 
 export function useExecution(executionId: string) {

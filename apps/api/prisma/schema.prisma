@@ -202,6 +202,7 @@ model Organization {
   webhookReplayNonces  WebhookReplayNonce[]
   executions           Execution[]
   stepExecutions       StepExecution[]
+  stepExecutionAttempts StepExecutionAttempt[]
   deadLetterExecutions DeadLetterExecution[]
   connections          Connection[]
   secrets              Secret[]
@@ -417,6 +418,7 @@ model Execution {
   startedBy        User?                 @relation("ExecutionStartedBy", fields: [startedByUserId], references: [id])
   cancelRequestedBy User?                @relation("ExecutionCancelRequestedBy", fields: [cancelRequestedByUserId], references: [id])
   steps            StepExecution[]
+  stepAttempts     StepExecutionAttempt[]
   internalRecords  InternalRecord[]
   deadLetters      DeadLetterExecution[] @relation("DeadLetterOriginalExecution")
   retryDeadLetters DeadLetterExecution[] @relation("DeadLetterRetryExecution")
@@ -543,10 +545,39 @@ model StepExecution {
   deadLetters     DeadLetterExecution[] @relation("DeadLetterFailedStep")
   childExecutions Execution[]           @relation("StepExecutionChildren")
   approvalRequest ApprovalRequest?
+  attempts        StepExecutionAttempt[]
 
   @@unique([executionId, stepKey, executionPath])
   @@index([organizationId, executionId])
   @@map("step_executions")
+}
+
+model StepExecutionAttempt {
+  id              String              @id @default(uuid())
+  organizationId  String              @map("organization_id")
+  executionId     String              @map("execution_id")
+  stepExecutionId String              @map("step_execution_id")
+  attempt         Int
+  status          StepExecutionStatus
+  startedAt       DateTime?           @map("started_at")
+  completedAt     DateTime?           @map("completed_at")
+  durationMs      Int?                @map("duration_ms")
+  nextRetryAt     DateTime?           @map("next_retry_at")
+  waitReason      String?             @map("wait_reason")
+  effectStatus    String?             @map("effect_status")
+  errorCategory   String?             @map("error_category")
+  errorCodeSafe   String?             @map("error_code_safe")
+  errorMessageSafe String?            @map("error_message_safe")
+  createdAt       DateTime            @default(now()) @map("created_at")
+  updatedAt       DateTime            @updatedAt @map("updated_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  execution    Execution    @relation(fields: [executionId], references: [id], onDelete: Cascade)
+  stepExecution StepExecution @relation(fields: [stepExecutionId], references: [id], onDelete: Cascade)
+
+  @@unique([stepExecutionId, attempt])
+  @@index([organizationId, executionId, startedAt, id])
+  @@map("step_execution_attempts")
 }
 
 model ApprovalRequest {

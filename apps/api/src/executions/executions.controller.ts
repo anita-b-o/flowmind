@@ -7,6 +7,7 @@ import { OrganizationContext } from "../organizations/organization-context.decor
 import { OrganizationGuard } from "../organizations/organization.guard";
 import { RolesGuard } from "../rbac/roles.guard";
 import { ListExecutionsQueryDto } from "./dto/list-executions-query.dto";
+import { ExecutionTimelineQueryDto } from "./dto/execution-timeline-query.dto";
 import { RetryExecutionDto } from "./dto/retry-execution.dto";
 import { CancelExecutionDto } from "./dto/cancel-execution.dto";
 import { CreateManualExecutionDto } from "./dto/create-manual-execution.dto";
@@ -21,13 +22,33 @@ export class ExecutionsController {
   constructor(private readonly executionsService: ExecutionsService) {}
 
   @Get()
+  @Roles(OrganizationRole.Viewer)
   list(@OrganizationContext() org: OrganizationContext, @Query() query: ListExecutionsQueryDto) {
     return this.executionsService.list(org.organizationId, query);
   }
 
   @Get(":executionId")
+  @Roles(OrganizationRole.Viewer)
   getDetail(@OrganizationContext() org: OrganizationContext, @Param("executionId") executionId: string) {
     return this.executionsService.getDetail(org.organizationId, executionId);
+  }
+
+  @Get(":executionId/timeline")
+  @Roles(OrganizationRole.Viewer)
+  timeline(@OrganizationContext() org: OrganizationContext, @Param("executionId") executionId: string, @Query() query: ExecutionTimelineQueryDto) {
+    return this.executionsService.timeline(org.organizationId, executionId, query);
+  }
+
+  @Get(":executionId/tree")
+  @Roles(OrganizationRole.Viewer)
+  tree(@OrganizationContext() org: OrganizationContext, @Param("executionId") executionId: string) {
+    return this.executionsService.tree(org.organizationId, executionId);
+  }
+
+  @Get(":executionId/steps/:stepExecutionId")
+  @Roles(OrganizationRole.Viewer)
+  stepDetail(@OrganizationContext() org: OrganizationContext, @Param("executionId") executionId: string, @Param("stepExecutionId") stepExecutionId: string) {
+    return this.executionsService.stepDetail(org.organizationId, executionId, stepExecutionId);
   }
 
   @Post(":executionId/retry")

@@ -76,7 +76,7 @@ describe("workflow webhook execution e2e", () => {
     expect(await prisma.internalEvent.count({ where: { eventType: "EXECUTION_COMPLETED", envelopeJson: { path: ["data", "executionId"], equals: executionId } } })).toBe(1);
 
     const list = await request(app.getHttpServer()).get("/executions").set(authHeaders(user)).expect(200);
-    expect(list.body.total).toBe(1);
+    expect(list.body.items).toHaveLength(1);
   }, 30_000);
 
   it("does not duplicate executions or records for the same Idempotency-Key", async () => {
@@ -302,10 +302,16 @@ describe("workflow webhook execution e2e", () => {
     ] }).expect(202);
     const detail = await waitForExecution(webhook.body.executionId, "COMPLETED");
     const loop = detail.body.steps.find((step: any) => step.stepKey === "loop");
-    expect(loop.output).toMatchObject({ total: 3, succeeded: 3, failed: 0, skipped: 0, mode: "SEQUENTIAL" });
+    expect(loop.artifact).toMatchObject({ kind: "loop", total: 3, completed: 3, failed: 0 });
     const bodyRows = detail.body.steps.filter((step: any) => step.executionPath !== "root");
     expect(bodyRows.filter((step: any) => step.stepKey === "shape").map((step: any) => step.iterationIndex)).toEqual([0, 1, 2]);
     expect(new Set(bodyRows.map((step: any) => step.executionPath)).size).toBe(3);
+    const shapeDetails = await Promise.all(bodyRows.filter((step: any) => step.stepKey === "shape").map((step: any) => request(app.getHttpServer()).get(`/executions/${webhook.body.executionId}/steps/${step.id}`).set(authHeaders(user)).expect(200)));
+    expect(shapeDetails.map((response) => ({ path: response.body.executionPath, index: response.body.iterationIndex, attempts: response.body.attempts.map((attempt: any) => [attempt.attempt, attempt.status]) }))).toEqual([
+      { path: "root/loop[0]", index: 0, attempts: [[1, "COMPLETED"]] },
+      { path: "root/loop[1]", index: 1, attempts: [[1, "COMPLETED"]] },
+      { path: "root/loop[2]", index: 2, attempts: [[1, "COMPLETED"]] }
+    ]);
     expect(await prisma.dataStoreRecord.count({ where: { organizationId: user.organizationId, dataStoreId: store.id, deletedAt: null } })).toBe(3);
     expect(await prisma.internalRecord.count({ where: { executionId: webhook.body.executionId, collection: "loop_summary" } })).toBe(1);
     expect(await prisma.stepExecution.count({ where: { executionId: webhook.body.executionId, stepKey: "count_done", executionPath: "root" } })).toBe(1);
@@ -326,9 +332,41 @@ describe("workflow webhook execution e2e", () => {
     const failed = detail.body.steps.find((step: any) => step.stepKey === "missing");
     expect(failed).toMatchObject({ status: "FAILED", executionPath: "root/try[guard]/body" });
     expect((await prisma.stepExecution.findFirstOrThrow({ where: { executionId: webhook.body.executionId, stepKey: "missing" } })).errorHandled).toBe(true);
-    expect(detail.body.steps.find((step: any) => step.stepKey === "guard").output).toMatchObject({ status: "handled", errorHandled: true, bodyStatus: "failed", catchStatus: "succeeded", finallyStatus: "succeeded" });
+    const failedDetail = await request(app.getHttpServer()).get(`/executions/${webhook.body.executionId}/steps/${failed.id}`).set(authHeaders(user)).expect(200);
+    expect(failedDetail.body).toMatchObject({ status: "FAILED", errorHandled: true, attempts: [expect.objectContaining({ attempt: 1, status: "FAILED", errorCategory: "non_retryable" })] });
+    expect(JSON.stringify(failedDetail.body)).not.toMatch(/inputJson|outputJson|contextJson|debugJson|stack|must-not-leak/i);
+    const catchStep = detail.body.steps.find((step: any) => step.stepKey === "caught");
+    const catchDetail = await request(app.getHttpServer()).get(`/executions/${webhook.body.executionId}/steps/${catchStep.id}`).set(authHeaders(user)).expect(200);
+    expect(catchDetail.body.attempts).toEqual([expect.objectContaining({ attempt: 1, status: "COMPLETED" })]);
+    expect(detail.body.steps.find((step: any) => step.stepKey === "guard").artifact).toMatchObject({ kind: "try_catch", status: "handled", errorHandled: true, bodyStatus: "failed", catchStatus: "succeeded", finallyStatus: "succeeded" });
     expect(await prisma.internalRecord.count({ where: { executionId: webhook.body.executionId, collection: "try_finally" } })).toBe(1);
     expect(await prisma.stepExecution.count({ where: { executionId: webhook.body.executionId, stepKey: "done", executionPath: "root" } })).toBe(1);
+  }, 30_000);
+
+  it("Smoke A: exposes Webhook -> FOR_EACH -> TRY_CATCH -> Data Store through Run History", async () => {
+    const user = await register("run-history-a@example.com", "Run History A");
+    const workflow = await createWorkflow(user, "Run History smoke A");
+    const store = await prisma.dataStore.create({ data: { organizationId: user.organizationId, name: "Run History A Store" } });
+    const version = await createRunHistoryAVersion(user, workflow.id, store.id);
+    const trigger = await createTrigger(user, workflow.id);
+    await request(app.getHttpServer()).patch(`/workflows/${workflow.id}/versions/${version.id}/activate`).set(authHeaders(user)).expect(200);
+    const webhook = await request(app.getHttpServer()).post(`/webhooks/${workflow.id}/${trigger.token}`).set("Idempotency-Key", "run-history-a").send({ authorization: "Bearer must-not-leak", items: [{ id: "ok", fail: false }, { id: "bad", fail: true }] }).expect(202);
+    const detail = await waitForExecution(webhook.body.executionId, "COMPLETED");
+    const history = await request(app.getHttpServer()).get(`/executions?workflowId=${workflow.id}`).set(authHeaders(user)).expect(200);
+    expect(history.body.items).toEqual([expect.objectContaining({ id: webhook.body.executionId, status: "COMPLETED", triggerType: "webhook", relationship: "root" })]);
+    const failed = detail.body.steps.find((step: any) => step.stepKey === "missing");
+    expect(failed).toMatchObject({ status: "FAILED", errorHandled: true, iterationIndex: 1, executionPath: "root/loop[1]/try[guard]/body" });
+    const successfulStore = detail.body.steps.find((step: any) => step.stepKey === "upsert" && step.iterationIndex === 0);
+    expect(successfulStore).toMatchObject({ status: "COMPLETED", executionPath: "root/loop[0]/try[guard]/body" });
+    const failedStep = await request(app.getHttpServer()).get(`/executions/${webhook.body.executionId}/steps/${failed.id}`).set(authHeaders(user)).expect(200);
+    expect(failedStep.body.attempts).toEqual([expect.objectContaining({ attempt: 1, status: "FAILED", errorCategory: "non_retryable" })]);
+    const timeline = await request(app.getHttpServer()).get(`/executions/${webhook.body.executionId}/timeline?limit=100`).set(authHeaders(user)).expect(200);
+    expect(timeline.body.items).toEqual(expect.arrayContaining([expect.objectContaining({ stepKey: "loop" }), expect.objectContaining({ stepKey: "guard", executionPath: "root/loop[0]" }), expect.objectContaining({ stepKey: "guard", executionPath: "root/loop[1]" }), expect.objectContaining({ stepKey: "caught", iterationIndex: 1 })]));
+    const failedIndex = timeline.body.items.findIndex((item: any) => item.stepExecutionId === failed.id);
+    const catchIndex = timeline.body.items.findIndex((item: any) => item.stepKey === "caught" && item.iterationIndex === 1);
+    expect(failedIndex).toBeGreaterThanOrEqual(0); expect(catchIndex).toBeGreaterThan(failedIndex);
+    expect(isTimelineOrdered(timeline.body.items)).toBe(true);
+    expect(JSON.stringify({ detail: detail.body, timeline: timeline.body, step: failedStep.body })).not.toMatch(/Bearer must-not-leak|inputJson|outputJson|contextJson|debugJson|stack/i);
   }, 30_000);
 
   it("executes a published child workflow with isolated executions and explicit output", async () => {
@@ -365,6 +403,15 @@ describe("workflow webhook execution e2e", () => {
     expect(childExecution).toMatchObject({ parentExecutionId: started.body.execution.id, rootExecutionId: started.body.execution.id, depth: 1, status: "COMPLETED", outputJson: { customerId: "customer-1", processed: true } });
     expect(childExecution.steps.map((step) => step.stepKey).sort()).toEqual(["return", "shape"]);
     expect((await prisma.execution.findUniqueOrThrow({ where: { id: started.body.execution.id }, include: { steps: true } })).steps.map((step) => step.stepKey).sort()).toEqual(["call", "save"]);
+    const callStep = detail.body.steps.find((step: any) => step.stepKey === "call");
+    const callDetail = await request(app.getHttpServer()).get(`/executions/${started.body.execution.id}/steps/${callStep.id}`).set(authHeaders(user)).expect(200);
+    expect(callDetail.body.attempts).toEqual([expect.objectContaining({ attempt: 1, status: "COMPLETED" })]);
+    expect(JSON.stringify(callDetail.body)).not.toMatch(/inputJson|outputJson|contextJson|debugJson|customer-1/i);
+    const childDetail = await request(app.getHttpServer()).get(`/executions/${childExecution.id}`).set(authHeaders(user)).expect(200);
+    for (const step of childDetail.body.steps) {
+      const stepDetail = await request(app.getHttpServer()).get(`/executions/${childExecution.id}/steps/${step.id}`).set(authHeaders(user)).expect(200);
+      expect(stepDetail.body.attempts).toEqual([expect.objectContaining({ attempt: 1, status: "COMPLETED" })]);
+    }
   }, 30_000);
 
   it("prevents cross-tenant trigger and execution access", async () => {
@@ -535,6 +582,35 @@ describe("workflow webhook execution e2e", () => {
         { from: "missing", to: "cleanup", kind: "next" }, { from: "caught", to: "cleanup", kind: "next" }, { from: "cleanup", to: "done", kind: "next" }
       ], terminalStepKeys: ["done"] }
     }).expect(201);
+    return response.body;
+  }
+
+  async function createRunHistoryAVersion(user: TestUser, workflowId: string, dataStoreId: string) {
+    const response = await request(app.getHttpServer()).post(`/workflows/${workflowId}/versions`).set(authHeaders(user)).send({
+      workflowDefinitionSchemaVersion: 2, expressionMode: "strict",
+      trigger: { key: "webhook", name: "Webhook", type: "webhook_trigger", config: {} },
+      steps: [
+        { key: "loop", name: "Loop", type: "for_each", config: { source: "{{trigger.body.items}}", mode: "SEQUENTIAL", continueOnError: false, maxItems: 10 } },
+        { key: "guard", name: "Guard", type: "try_catch", config: {} },
+        { key: "route", name: "Route", type: "if", config: { left: "{{item.fail}}", operator: "equals", right: true, trueStepKey: "missing", falseStepKey: "upsert" } },
+        { key: "missing", name: "Controlled failure", type: "data_store_get_record", config: { dataStoreId, key: "missing", failIfMissing: true } },
+        { key: "upsert", name: "Persist success", type: "data_store_upsert_record", config: { dataStoreId, key: "{{item.id}}", value: { ok: true }, mode: "replace" } },
+        { key: "caught", name: "Catch", type: "set_variable", config: { scope: "execution", name: "handled", value: true } },
+        { key: "cleanup", name: "Finally", type: "transform", config: { mode: "OBJECT", fields: { cleaned: true }, outputType: "OBJECT" } },
+        { key: "iteration_done", name: "Iteration done", type: "transform", config: { mode: "OBJECT", fields: { done: true }, outputType: "OBJECT" } },
+        { key: "done", name: "Done", type: "data_store_count_records", config: { dataStoreId } }
+      ],
+      graph: { entryStepKey: "loop", edges: [
+        { from: "loop", to: "guard", kind: "for_each_body" }, { from: "loop", to: "done", kind: "for_each_done" },
+        { from: "guard", to: "route", kind: "try_body" }, { from: "guard", to: "caught", kind: "try_catch" },
+        { from: "guard", to: "cleanup", kind: "try_finally" }, { from: "guard", to: "iteration_done", kind: "try_done" },
+        { from: "route", to: "missing", kind: "if_true" }, { from: "route", to: "upsert", kind: "if_false" },
+        { from: "missing", to: "cleanup", kind: "next" }, { from: "upsert", to: "cleanup", kind: "next" }, { from: "caught", to: "cleanup", kind: "next" },
+        { from: "cleanup", to: "iteration_done", kind: "next" },
+        { from: "iteration_done", to: "done", kind: "next" }
+      ], terminalStepKeys: ["done"] }
+    });
+    if (response.status !== 201) throw new Error(`Run History Smoke A definition rejected: ${JSON.stringify(response.body)}`);
     return response.body;
   }
 
@@ -754,6 +830,11 @@ function authHeaders(user: TestUser) {
 
 function lastAuthHeaders() {
   return authHeaders(lastUser);
+}
+
+function isTimelineOrdered(items: any[]) {
+  const priority: Record<string, number> = { event_trigger: 0, execution_created: 10, execution_started: 20, step_attempt: 30, wait: 40, approval_requested: 50, approval_decided: 60, subworkflow: 70, notification: 80, dead_letter: 90, execution_completed: 100 };
+  return items.every((item, index) => { if (index === 0) return true; const previous = items[index - 1]; return previous.timestamp < item.timestamp || (previous.timestamp === item.timestamp && ((priority[previous.type] ?? 50) < (priority[item.type] ?? 50) || ((priority[previous.type] ?? 50) === (priority[item.type] ?? 50) && previous.id <= item.id))); });
 }
 
 async function cleanDatabase() {

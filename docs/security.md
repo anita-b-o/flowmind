@@ -46,6 +46,8 @@ Structured logs redact sensitive fields case-insensitively, including `authoriza
 
 Logs must not include full webhook bodies, prompts, provider inputs, provider outputs, cookies, bearer tokens, refresh tokens, webhook tokens, internal API keys, or secrets. Persisted execution errors remain operational data, but log events should include only sanitized summaries and categories.
 
+Production Run History is metadata-only. API projections use allowlists and never return arbitrary execution input, context, output, debug JSON, raw provider objects, request/response bodies, causes, or stacks. Admin and Owner roles do not bypass this boundary. Credential-shaped strings, URL userinfo, JWTs, PEM private keys, Authorization values, cookies, SMTP credentials and connection secrets are redacted defensively.
+
 OpenAI provider errors are mapped to sanitized public categories such as `authentication`, `rate_limit`, `timeout`, `validation`, `external_4xx`, and `external_5xx`. Raw OpenAI error bodies, request payloads, prompts, and headers must not be returned to clients.
 
 Metrics are separate from logs and AuditLog. They use bounded labels only and must not contain `requestId`, `correlationId`, organization/user/workflow/execution IDs, emails, hostnames, IPs, full URLs, cookies, tokens, or free-form error messages. See `docs/observability.md`.

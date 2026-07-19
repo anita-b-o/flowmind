@@ -264,7 +264,7 @@ describe("APPROVAL PostgreSQL integration", () => {
     expect((await prisma.stepExecution.findUniqueOrThrow({ where: { id: approval.stepExecutionId } })).errorHandled).toBe(false);
   }, 40_000);
 
-  it("materializes Scheduled → APPROVAL without waiting for cron and resumes the same execution", async () => {
+  it("Smoke B: materializes Scheduled → APPROVAL without waiting for cron and resumes the same execution", async () => {
     const owner = await register("approval-scheduled@example.com", "Approval Scheduled");
     const workflow = (await request(app.getHttpServer()).post("/workflows").set(headers(owner)).send({ name: "Scheduled approval" }).expect(201)).body;
     const definition = approvalDefinition(["editor"]);
@@ -279,9 +279,24 @@ describe("APPROVAL PostgreSQL integration", () => {
     expect(waiting).toMatchObject({ status: "RETRYING", waitReason: "approval" });
     expect(waitingStep).toMatchObject({ status: "RETRYING", effectStatus: "approval_waiting", nextRetryAt: null });
     expect(approval.status).toBe("PENDING");
+    const history = await request(app.getHttpServer()).get(`/executions?workflowId=${workflow.id}&waiting=true`).set(headers(owner)).expect(200);
+    expect(history.body.items).toEqual([expect.objectContaining({ id: materialized.executionId, triggerType: "scheduled", waitReason: "approval" })]);
+    const waitingDetail = await request(app.getHttpServer()).get(`/executions/${materialized.executionId}`).set(headers(owner)).expect(200);
+    const approvalSummary = waitingDetail.body.steps.find((step: any) => step.stepKey === "approval");
+    const waitingStepDetail = await request(app.getHttpServer()).get(`/executions/${materialized.executionId}/steps/${approvalSummary.id}`).set(headers(owner)).expect(200);
+    expect(waitingStepDetail.body).toMatchObject({ id: approval.stepExecutionId, attemptCount: 1, retryState: "approval", attempts: [expect.objectContaining({ attempt: 1, status: "RETRYING", waitReason: "approval" })] });
+    const waitingTimeline = await request(app.getHttpServer()).get(`/executions/${materialized.executionId}/timeline`).set(headers(owner)).expect(200);
+    expect(waitingTimeline.body.items.map((item: any) => item.type)).toEqual(expect.arrayContaining(["wait", "approval_requested"]));
     expect(await prisma.internalRecord.count({ where: { executionId: materialized.executionId } })).toBe(0);
     await request(app.getHttpServer()).post(`/approvals/${approval.id}/approve`).set(headers(owner)).send({}).expect(201);
     await waitStatus(materialized.executionId, "COMPLETED", owner);
+    const completedDetail = await request(app.getHttpServer()).get(`/executions/${materialized.executionId}`).set(headers(owner)).expect(200);
+    const completedApproval = completedDetail.body.steps.find((step: any) => step.id === approval.stepExecutionId);
+    const completedStepDetail = await request(app.getHttpServer()).get(`/executions/${materialized.executionId}/steps/${completedApproval.id}`).set(headers(owner)).expect(200);
+    expect(completedStepDetail.body).toMatchObject({ attemptCount: 1, attempts: [expect.objectContaining({ attempt: 1, status: "COMPLETED" })] });
+    const completedTimeline = await request(app.getHttpServer()).get(`/executions/${materialized.executionId}/timeline`).set(headers(owner)).expect(200);
+    expect(completedTimeline.body.items).toEqual(expect.arrayContaining([expect.objectContaining({ type: "approval_requested" }), expect.objectContaining({ type: "approval_decided", status: "APPROVED" })]));
+    expect(JSON.stringify(completedDetail.body)).not.toMatch(/authorization|must-not-surface|inputJson|contextJson|outputJson|debugJson|comment/i);
     expect((await prisma.approvalRequest.findUniqueOrThrow({ where: { id: approval.id } })).status).toBe("APPROVED");
     expect(await prisma.internalRecord.count({ where: { executionId: materialized.executionId, collection: "approval_approved" } })).toBe(1);
     expect(await prisma.internalRecord.count({ where: { executionId: materialized.executionId, collection: { in: ["approval_rejected", "approval_expired"] } } })).toBe(0);

@@ -3,7 +3,6 @@
 import Link from "next/link";
 import { use, useState } from "react";
 import { ErrorMessage } from "../../../components/error-message";
-import { JsonViewer } from "../../../components/json-viewer";
 import { StatusBadge } from "../../../components/status-badge";
 import { RequireAuth } from "../../../features/auth/require-auth";
 import { canRetryExecution } from "../../../features/auth/rbac";
@@ -65,10 +64,9 @@ export default function DeadLetterExecutionDetailPage({ params }: { params: Prom
             <section className="panel stack">
               <h2>Last error</h2>
               <p>
-                <strong>{detail.lastError.code}</strong> {detail.lastError.message}
+                <strong>{detail.lastError.code}</strong> {detail.lastError.messageSafe}
               </p>
               <p className="muted">Category: {detail.lastError.category}</p>
-              <JsonViewer value={detail.lastErrorMetadata} />
             </section>
 
             <section className="panel stack">

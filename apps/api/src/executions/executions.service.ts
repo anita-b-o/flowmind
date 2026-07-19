@@ -12,6 +12,7 @@ import {
 import { newTraceId } from "@automation/observability";
 import { Prisma } from "@prisma/client";
 import { ListExecutionsQueryDto } from "./dto/list-executions-query.dto";
+import { ExecutionTimelineQueryDto } from "./dto/execution-timeline-query.dto";
 import { CreateManualExecutionDto } from "./dto/create-manual-execution.dto";
 import { PrismaService } from "../prisma/prisma.service";
 import { QueueService } from "../queues/queue.service";
@@ -20,7 +21,7 @@ import { StructuredLoggerService } from "../observability/structured-logger.serv
 import { ApiMetricsService } from "../metrics/metrics.service";
 import { classifyError } from "../metrics/metrics-catalog";
 import { AuditLogsService } from "../audit-logs/audit-logs.service";
-import { sanitizePublic } from "../common/public-sanitizer";
+import { publicError, sanitizePublic } from "../common/public-sanitizer";
 import { publicDeadLetterReason } from "../dead-letter/dead-letter-reasons";
 import { validateWorkflowGraph } from "../workflows/workflow-graph-validator";
 
@@ -148,15 +149,25 @@ export class ExecutionsService {
 
   async list(organizationId: string, query: ListExecutionsQueryDto) {
     assertDateRange(query.from, query.to);
-    const page = query.page ?? 1;
-    const pageSize = Math.min(query.pageSize ?? 20, 100);
-    const status = query.status ? executionStatusFromPublic(query.status) : undefined;
-    if (query.status && !status) throw new BadRequestException("Invalid execution status");
+    const limit = Math.min(query.limit ?? query.pageSize ?? 20, 100);
+    const rawStatuses = query.statuses?.length ? query.statuses : query.status ? [query.status] : [];
+    const statuses = rawStatuses.map((value) => executionStatusFromPublic(value) ?? (Object.values(ExecutionStatus).includes(value as ExecutionStatus) ? value as ExecutionStatus : undefined));
+    if (statuses.some((value) => !value)) throw new BadRequestException("Invalid execution status");
+    const cursor = query.cursor ? decodeCursor(query.cursor) : null;
+    if (query.workflowId) {
+      const workflow = await this.prisma.workflow.findFirst({ where: { id: query.workflowId, organizationId }, select: { id: true } });
+      if (!workflow) return { items: [], nextCursor: null, hasMore: false };
+    }
     const where: Prisma.ExecutionWhereInput = {
       organizationId,
       executionMode: ExecutionMode.Real,
       ...(query.workflowId ? { workflowId: query.workflowId } : {}),
-      ...(status ? { status: status as ExecutionStatus } : {}),
+      ...(statuses.length ? { status: { in: statuses as ExecutionStatus[] } } : {}),
+      ...(query.relationship === "root" ? { parentExecutionId: null } : query.relationship === "child" ? { parentExecutionId: { not: null } } : {}),
+      ...(query.rootExecutionId ? { AND: [{ OR: [{ id: query.rootExecutionId }, { rootExecutionId: query.rootExecutionId }] }] } : {}),
+      ...(query.waiting === "true" ? { status: ExecutionStatus.Retrying } : query.waiting === "false" ? { NOT: { status: ExecutionStatus.Retrying } } : {}),
+      ...((query.failed === "true" || query.failedStepKey) ? { steps: { some: { status: StepExecutionStatus.Failed, ...(query.failedStepKey ? { stepKey: query.failedStepKey } : {}) } } } : query.failed === "false" ? { steps: { none: { status: StepExecutionStatus.Failed } } } : {}),
+      ...triggerWhere(query.triggerType),
       ...(query.from || query.to
         ? {
             createdAt: {
@@ -166,27 +177,29 @@ export class ExecutionsService {
           }
         : {})
     };
-    const [items, total] = await this.prisma.$transaction([
-      this.prisma.execution.findMany({
-        where,
-        orderBy: { createdAt: "desc" },
-        skip: (page - 1) * pageSize,
-        take: pageSize,
-        include: {
-          workflow: { select: { id: true, name: true } },
-          workflowVersion: { select: { id: true, versionNumber: true } },
-          startedBy: { select: { id: true, name: true, email: true } },
-          _count: { select: { steps: true } }
-        }
-      }),
-      this.prisma.execution.count({ where })
-    ]);
-    const stepCounts = await this.stepCounts(items.map((item) => item.id));
+    const cursorWhere: Prisma.ExecutionWhereInput | undefined = cursor ? { OR: [{ createdAt: { lt: cursor.createdAt } }, { createdAt: cursor.createdAt, id: { lt: cursor.id } }] } : undefined;
+    const items = await this.prisma.execution.findMany({
+      where: cursorWhere ? { AND: [where, cursorWhere] } : where,
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      take: limit + 1,
+      select: {
+        id: true, workflowId: true, workflowVersionId: true, correlationId: true, status: true, waitReason: true, executionMode: true,
+        startedAt: true, completedAt: true, createdAt: true, updatedAt: true, runAttempt: true, retryOfExecutionId: true,
+        parentExecutionId: true, rootExecutionId: true, depth: true, webhookEventId: true, scheduledTriggerId: true, eventDeliveryId: true,
+        manualExecutionKey: true, startedByUserId: true,
+        workflow: { select: { id: true, name: true } }, workflowVersion: { select: { id: true, versionNumber: true } },
+        startedBy: { select: { id: true, name: true, email: true } }, _count: { select: { steps: true } }
+      }
+    });
+    const hasMore = items.length > limit;
+    const pageItems = items.slice(0, limit);
+    const stepCounts = await this.stepCounts(pageItems.map((item) => item.id));
+    const failedSteps = await this.failedSteps(pageItems.map((item) => item.id));
     return {
-      items: items.map((item) => summary(item, stepCounts.get(item.id))),
-      page,
-      pageSize,
-      total
+      items: pageItems.map((item) => ({ ...summary(item, stepCounts.get(item.id)), triggerType: triggerType(item), relationship: item.parentExecutionId ? "child" : "root", parentExecutionId: item.parentExecutionId, rootExecutionId: item.rootExecutionId ?? item.id, depth: item.depth, failedStep: failedSteps.get(item.id) ?? null })),
+      nextCursor: hasMore ? encodeCursor(pageItems.at(-1)!) : null,
+      hasMore,
+      pageSize: limit
     };
   }
 
@@ -217,13 +230,24 @@ export class ExecutionsService {
             retryExecutionId: true
           },
           orderBy: { createdAt: "desc" }
-        }
+        },
+        eventDelivery: { include: { internalEvent: { select: { id: true, eventType: true, correlationId: true, rootEventId: true, causationId: true, depth: true } }, trigger: { select: { id: true } } } }
       }
     });
     if (!execution) throw new NotFoundException("Execution not found");
     const counts = (await this.stepCounts([execution.id])).get(execution.id);
+    const sourceEvents = await this.prisma.internalEvent.findMany({
+      where: { organizationId, envelopeJson: { path: ["data", "executionId"], equals: execution.id } },
+      select: { id: true }, take: 20
+    });
+    const notifications = sourceEvents.length ? await this.prisma.notificationRequest.findMany({
+      where: { organizationId, sourceEventId: { in: sourceEvents.map((item) => item.id) } },
+      select: { id: true, type: true, channel: true, status: true, createdAt: true, updatedAt: true, delivery: { select: { status: true, attempts: true, lastAttemptAt: true, sentAt: true, failedAt: true, errorCategory: true, errorMessageSafe: true } } },
+      orderBy: { createdAt: "asc" }, take: 100
+    }) : [];
     return {
       ...summary(execution as any, counts),
+      triggerType: triggerType(execution),
       workflow: execution.workflow,
       workflowVersion: execution.workflowVersion
         ? {
@@ -241,9 +265,8 @@ export class ExecutionsService {
             definitionSchemaVersion: (execution.workflowVersion.definitionJson as any)?.workflowDefinitionSchemaVersion ?? 1
           }
         : null,
-      input: sanitizePayload(execution.inputJson),
-      context: sanitizePayload(execution.contextJson),
-      error: sanitizePublic(execution.errorJson),
+      payloads: payloadMetadata(execution),
+      error: execution.errorJson ? publicError(execution.errorJson) : null,
       updatedAt: execution.updatedAt,
       cancelRequestedAt: execution.cancelRequestedAt,
       cancelledAt: execution.cancelledAt,
@@ -271,15 +294,13 @@ export class ExecutionsService {
         finishedAt: step.completedAt,
         durationMs: step.durationMs,
         errorCategory: (step.errorJson as any)?.classification ?? null,
-        error: sanitizePublic(step.errorJson),
-        input: step.stepType === "for_each" ? loopInputSummary(step.inputJson) : sanitizePayload(step.inputJson),
-        output: sanitizePayload(step.outputJson),
-        providerMetadata: sanitizePayload((step.debugJson as any)?.connection ?? null)
+        error: step.errorJson ? publicError(step.errorJson) : null,
+        artifact: safeStepArtifact(step),
+        payloads: payloadMetadata(step)
       })),
       retryOfExecutionId: execution.retryOfExecutionId,
       retryOfExecution: relation(execution.retryOfExecution),
       retryExecutions: execution.retryExecutions.map(relation),
-      output: sanitizePayload(execution.outputJson),
       parentExecutionId: execution.parentExecutionId,
       parentStepExecutionId: execution.parentStepExecutionId,
       rootExecutionId: execution.rootExecutionId ?? execution.id,
@@ -292,8 +313,54 @@ export class ExecutionsService {
       deadLetter: execution.deadLetters.find((item) => !item.resolvedAt)
         ? formatDeadLetter(execution.deadLetters.find((item) => !item.resolvedAt)!)
         : null,
-      deadLetters: execution.deadLetters.map(formatDeadLetter)
+      deadLetters: execution.deadLetters.map(formatDeadLetter),
+      eventCausality: execution.eventDelivery ? {
+        eventType: execution.eventDelivery.internalEvent.eventType,
+        correlationId: execution.eventDelivery.internalEvent.correlationId,
+        rootEventId: execution.eventDelivery.internalEvent.rootEventId,
+        causationId: execution.eventDelivery.internalEvent.causationId,
+        depth: execution.eventDelivery.internalEvent.depth,
+        deliveryStatus: execution.eventDelivery.status,
+        triggerId: execution.eventDelivery.trigger.id
+      } : null,
+      notifications: notifications.map((item) => ({ id: item.id, type: item.type, channel: item.channel, status: item.delivery?.status ?? item.status, attempts: item.delivery?.attempts ?? 0, createdAt: item.createdAt, updatedAt: item.updatedAt, lastAttemptAt: item.delivery?.lastAttemptAt ?? null, sentAt: item.delivery?.sentAt ?? null, failedAt: item.delivery?.failedAt ?? null, errorCategory: item.delivery?.errorCategory ?? null, errorMessageSafe: item.delivery?.errorMessageSafe ?? null }))
     };
+  }
+
+  async stepDetail(organizationId: string, executionId: string, stepExecutionId: string) {
+    const step = await this.prisma.stepExecution.findFirst({ where: { id: stepExecutionId, executionId, organizationId, execution: { executionMode: ExecutionMode.Real } }, include: { attempts: { orderBy: { attempt: "asc" } } } });
+    if (!step) throw new NotFoundException("Step execution not found");
+    return safeStepDetail(step);
+  }
+
+  async tree(organizationId: string, executionId: string) {
+    const current = await this.prisma.execution.findFirst({ where: { id: executionId, organizationId, executionMode: ExecutionMode.Real }, select: { id: true, rootExecutionId: true } });
+    if (!current) throw new NotFoundException("Execution not found");
+    const rootId = current.rootExecutionId ?? current.id;
+    const rows = await this.prisma.execution.findMany({
+      where: { organizationId, executionMode: ExecutionMode.Real, OR: [{ id: rootId }, { rootExecutionId: rootId }] },
+      orderBy: [{ depth: "asc" }, { createdAt: "asc" }],
+      select: { id: true, parentExecutionId: true, parentStepExecutionId: true, rootExecutionId: true, depth: true, workflowId: true, status: true, createdAt: true, startedAt: true, completedAt: true, workflow: { select: { name: true } }, parentStepExecution: { select: { stepKey: true, executionPath: true } } }
+    });
+    const nodes = new Map(rows.map((row) => [row.id, { ...row, workflowName: row.workflow.name, children: [] as any[] }]));
+    for (const node of nodes.values()) if (node.parentExecutionId && nodes.has(node.parentExecutionId)) nodes.get(node.parentExecutionId)!.children.push(node);
+    return nodes.get(rootId) ?? null;
+  }
+
+  async timeline(organizationId: string, executionId: string, query: ExecutionTimelineQueryDto) {
+    const execution = await this.prisma.execution.findFirst({
+      where: { id: executionId, organizationId, executionMode: ExecutionMode.Real },
+      include: { steps: { include: { attempts: { orderBy: { attempt: "asc" } } } }, approvalRequests: true, childExecutions: { include: { workflow: { select: { name: true } } } }, deadLetters: true, eventDelivery: { include: { internalEvent: true } } }
+    });
+    if (!execution) throw new NotFoundException("Execution not found");
+    const sourceEvents = await this.prisma.internalEvent.findMany({ where: { organizationId, envelopeJson: { path: ["data", "executionId"], equals: executionId } }, select: { id: true }, take: 20 });
+    const notifications = sourceEvents.length ? await this.prisma.notificationRequest.findMany({ where: { organizationId, sourceEventId: { in: sourceEvents.map((event) => event.id) } }, select: { id: true, type: true, channel: true, status: true, createdAt: true, updatedAt: true, delivery: { select: { status: true, attempts: true, lastAttemptAt: true, sentAt: true, failedAt: true } } }, orderBy: { createdAt: "asc" }, take: 100 }) : [];
+    const events = buildTimeline(execution, notifications).sort(compareTimeline);
+    const cursor = query.cursor ? decodeTimelineCursor(query.cursor) : null;
+    const visible = cursor ? events.filter((event) => compareTimeline(event, cursor) > 0) : events;
+    const limit = Math.min(query.limit ?? 50, 100);
+    const items = visible.slice(0, limit);
+    return { items, nextCursor: visible.length > limit ? encodeTimelineCursor(items.at(-1)!) : null, hasMore: visible.length > limit };
   }
 
   async cancel(organizationId: string, userId: string, executionId: string, reason?: string) {
@@ -524,6 +591,18 @@ export class ExecutionsService {
     return map;
   }
 
+  private async failedSteps(executionIds: string[]) {
+    if (!executionIds.length) return new Map<string, { stepKey: string; errorHandled: boolean; errorCategory: string | null }>();
+    const rows = await this.prisma.stepExecution.findMany({
+      where: { executionId: { in: executionIds }, status: StepExecutionStatus.Failed },
+      orderBy: { completedAt: "desc" },
+      select: { executionId: true, stepKey: true, errorHandled: true, errorJson: true }
+    });
+    const result = new Map<string, { stepKey: string; errorHandled: boolean; errorCategory: string | null }>();
+    for (const row of rows) if (!result.has(row.executionId)) result.set(row.executionId, { stepKey: row.stepKey, errorHandled: row.errorHandled, errorCategory: String((row.errorJson as any)?.classification ?? "unknown") });
+    return result;
+  }
+
   private async createManualClaim(input: {
     organizationId: string;
     userId: string;
@@ -702,6 +781,99 @@ function durationMs(start?: Date | null, end?: Date | null) {
   if (!start || !end) return null;
   return Math.max(0, end.getTime() - start.getTime());
 }
+
+function triggerType(item: any) {
+  if (item.parentExecutionId) return "subworkflow";
+  if (item.retryOfExecutionId) return "retry";
+  if (item.eventDeliveryId) return "event";
+  if (item.scheduledTriggerId) return "scheduled";
+  if (item.webhookEventId) return "webhook";
+  return "manual";
+}
+
+function triggerWhere(value?: string): Prisma.ExecutionWhereInput {
+  if (!value) return {};
+  if (value === "subworkflow") return { parentExecutionId: { not: null } };
+  if (value === "retry") return { retryOfExecutionId: { not: null } };
+  if (value === "event") return { eventDeliveryId: { not: null } };
+  if (value === "scheduled") return { scheduledTriggerId: { not: null } };
+  if (value === "webhook") return { webhookEventId: { not: null } };
+  return { parentExecutionId: null, retryOfExecutionId: null, eventDeliveryId: null, scheduledTriggerId: null, webhookEventId: null };
+}
+
+function encodeCursor(item: { createdAt: Date; id: string }) {
+  return Buffer.from(JSON.stringify({ v: 1, createdAt: item.createdAt.toISOString(), id: item.id })).toString("base64url");
+}
+
+function decodeCursor(value: string): { createdAt: Date; id: string } {
+  try {
+    const parsed = JSON.parse(Buffer.from(value, "base64url").toString("utf8"));
+    const createdAt = new Date(parsed.createdAt);
+    if (parsed.v !== 1 || typeof parsed.id !== "string" || !Number.isFinite(createdAt.getTime())) throw new Error();
+    return { createdAt, id: parsed.id };
+  } catch {
+    throw new BadRequestException("Invalid execution cursor");
+  }
+}
+
+function payloadMetadata(value: any) {
+  const metadata = (entry: unknown) => entry === null || entry === undefined ? null : { present: true, kind: Array.isArray(entry) ? "array" : typeof entry === "object" ? "object" : typeof entry, approximateBytes: Buffer.byteLength(JSON.stringify(entry) ?? "") };
+  return { input: metadata(value.inputJson), context: metadata(value.contextJson), output: metadata(value.outputJson), error: metadata(value.errorJson), debug: metadata(value.debugJson) };
+}
+
+function safeStepArtifact(step: any) {
+  const debug = step.debugJson && typeof step.debugJson === "object" && !Array.isArray(step.debugJson) ? step.debugJson as Record<string, any> : {};
+  const output = step.outputJson && typeof step.outputJson === "object" && !Array.isArray(step.outputJson) ? step.outputJson as Record<string, any> : {};
+  if (step.stepType === "for_each") return { kind: "loop", total: numberOrNull(debug.loop?.total ?? output.total), completed: numberOrNull(debug.loop?.completed ?? output.completed ?? output.succeeded), failed: numberOrNull(debug.loop?.failed ?? output.failed) };
+  if (step.stepType === "try_catch") return { kind: "try_catch", status: safeToken(debug.try?.status ?? output.status), bodyStatus: safeToken(debug.try?.bodyStatus ?? output.bodyStatus), catchStatus: safeToken(debug.try?.catchStatus ?? output.catchStatus), finallyStatus: safeToken(debug.try?.finallyStatus ?? output.finallyStatus), errorHandled: step.errorHandled === true || output.errorHandled === true };
+  if (step.stepType === "execute_workflow") return { kind: "subworkflow", childExecutionId: typeof debug.subworkflow?.executionId === "string" ? debug.subworkflow.executionId : null, status: safeToken(debug.subworkflow?.status) };
+  if (debug.connection && typeof debug.connection === "object") return { kind: "connection", type: safeToken(debug.connection.type), status: safeToken(debug.connection.status) };
+  if (debug.variable && typeof debug.variable === "object") return { kind: "variable", operation: safeToken(debug.variable.operation), scope: safeToken(debug.variable.scope) };
+  return null;
+}
+
+function safeStepDetail(step: any) {
+  return {
+    id: step.id, executionId: step.executionId, stepKey: step.stepKey, stepType: step.stepType, status: step.status,
+    publicStatus: publicStepStatus(step.status), attempt: step.attempt, attemptCount: step.attemptCount, maxAttempts: step.maxAttempts,
+    executionPath: step.executionPath, iterationIndex: step.iterationIndex, errorHandled: step.errorHandled,
+    startedAt: step.startedAt, completedAt: step.completedAt, durationMs: step.durationMs, nextRetryAt: step.nextRetryAt,
+    retryState: step.status === StepExecutionStatus.Retrying ? (step.nextRetryAt ? "backoff" : step.effectStatus === "approval_waiting" ? "approval" : "waiting") : null,
+    effectStatus: step.effectStatus, error: step.errorJson ? publicError(step.errorJson) : null, artifact: safeStepArtifact(step), payloads: payloadMetadata(step),
+    attempts: (step.attempts ?? []).map((attempt: any) => ({ id: attempt.id, attempt: attempt.attempt, status: attempt.status, startedAt: attempt.startedAt, completedAt: attempt.completedAt, durationMs: attempt.durationMs, nextRetryAt: attempt.nextRetryAt, waitReason: attempt.waitReason, effectStatus: attempt.effectStatus, errorCategory: attempt.errorCategory, errorCodeSafe: attempt.errorCodeSafe, errorMessageSafe: attempt.errorMessageSafe })),
+    historyComplete: (step.attempts?.length ?? 0) >= step.attemptCount
+  };
+}
+
+type TimelineEvent = { id: string; type: string; timestamp: string; status?: string; stepExecutionId?: string; stepKey?: string; executionPath?: string; iterationIndex?: number | null; attempt?: number; durationMs?: number | null; waitReason?: string | null; relatedExecutionId?: string; approvalId?: string; message: string };
+
+function buildTimeline(execution: any, notifications: any[] = []): TimelineEvent[] {
+  const events: TimelineEvent[] = [{ id: `execution:${execution.id}:created`, type: "execution_created", timestamp: execution.createdAt.toISOString(), status: execution.status, message: "Execution created" }];
+  if (execution.startedAt) events.push({ id: `execution:${execution.id}:started`, type: "execution_started", timestamp: execution.startedAt.toISOString(), status: "RUNNING", message: "Execution started" });
+  if (execution.eventDelivery) events.push({ id: `event:${execution.eventDelivery.id}`, type: "event_trigger", timestamp: execution.eventDelivery.createdAt.toISOString(), status: execution.eventDelivery.status, message: `Triggered by ${execution.eventDelivery.internalEvent.eventType}` });
+  for (const step of execution.steps) {
+    if (!step.attempts.length) {
+      const timestamp = step.startedAt ?? step.createdAt;
+      events.push({ id: `step:${step.id}:legacy`, type: "step", timestamp: timestamp.toISOString(), status: step.status, stepExecutionId: step.id, stepKey: step.stepKey, executionPath: step.executionPath, iterationIndex: step.iterationIndex, attempt: step.attemptCount, durationMs: step.durationMs, waitReason: step.status === StepExecutionStatus.Retrying ? step.effectStatus : null, message: step.attemptCount > 1 ? `${step.stepKey}: ${step.attemptCount} attempts recorded; historical detail unavailable` : `${step.stepKey} ${String(step.status).toLowerCase()}` });
+    } else for (const attempt of step.attempts) events.push({ id: `attempt:${attempt.id}`, type: attempt.waitReason ? "wait" : "step_attempt", timestamp: (attempt.startedAt ?? attempt.createdAt).toISOString(), status: attempt.status, stepExecutionId: step.id, stepKey: step.stepKey, executionPath: step.executionPath, iterationIndex: step.iterationIndex, attempt: attempt.attempt, durationMs: attempt.durationMs, waitReason: attempt.waitReason, message: attempt.waitReason ? `${step.stepKey} waiting: ${attempt.waitReason}` : `${step.stepKey} attempt ${attempt.attempt} ${String(attempt.status).toLowerCase()}` });
+  }
+  for (const approval of execution.approvalRequests) {
+    events.push({ id: `approval:${approval.id}:requested`, type: "approval_requested", timestamp: approval.requestedAt.toISOString(), status: "PENDING", approvalId: approval.id, stepKey: approval.stepKey, executionPath: approval.executionPath, iterationIndex: approval.iterationIndex, message: "Approval requested" });
+    if (approval.decidedAt) events.push({ id: `approval:${approval.id}:decided`, type: "approval_decided", timestamp: approval.decidedAt.toISOString(), status: approval.status, approvalId: approval.id, stepKey: approval.stepKey, executionPath: approval.executionPath, iterationIndex: approval.iterationIndex, message: `Approval ${String(approval.status).toLowerCase()}` });
+  }
+  for (const child of execution.childExecutions) events.push({ id: `child:${child.id}`, type: "subworkflow", timestamp: child.createdAt.toISOString(), status: child.status, relatedExecutionId: child.id, message: `Subworkflow ${child.workflow.name} created` });
+  for (const dead of execution.deadLetters) events.push({ id: `dead-letter:${dead.id}`, type: "dead_letter", timestamp: dead.createdAt.toISOString(), status: dead.resolvedAt ? "RESOLVED" : "ACTIVE", stepKey: dead.failedStepKey, message: dead.resolvedAt ? "Dead letter resolved" : "Execution moved to dead letter" });
+  for (const notification of notifications) events.push({ id: `notification:${notification.id}`, type: "notification", timestamp: notification.createdAt.toISOString(), status: notification.delivery?.status ?? notification.status, message: `${notification.type} notification ${String(notification.delivery?.status ?? notification.status).toLowerCase()}` });
+  if (execution.completedAt) events.push({ id: `execution:${execution.id}:completed`, type: "execution_completed", timestamp: execution.completedAt.toISOString(), status: execution.status, message: `Execution ${String(execution.status).toLowerCase()}` });
+  return events;
+}
+
+const TIMELINE_TYPE_PRIORITY: Record<string, number> = { event_trigger: 0, execution_created: 10, execution_started: 20, step_attempt: 30, wait: 40, approval_requested: 50, approval_decided: 60, subworkflow: 70, notification: 80, dead_letter: 90, execution_completed: 100 };
+function compareTimeline(a: TimelineEvent, b: TimelineEvent) { return a.timestamp.localeCompare(b.timestamp) || (TIMELINE_TYPE_PRIORITY[a.type] ?? 50) - (TIMELINE_TYPE_PRIORITY[b.type] ?? 50) || a.id.localeCompare(b.id); }
+function encodeTimelineCursor(event: TimelineEvent) { return Buffer.from(JSON.stringify({ v: 1, timestamp: event.timestamp, type: event.type, id: event.id })).toString("base64url"); }
+function decodeTimelineCursor(value: string): TimelineEvent { try { const parsed = JSON.parse(Buffer.from(value, "base64url").toString("utf8")); if (parsed.v !== 1 || typeof parsed.timestamp !== "string" || typeof parsed.type !== "string" || typeof parsed.id !== "string") throw new Error(); return { timestamp: parsed.timestamp, type: parsed.type, id: parsed.id, message: "" }; } catch { throw new BadRequestException("Invalid timeline cursor"); } }
+function numberOrNull(value: unknown) { return typeof value === "number" && Number.isFinite(value) ? value : null; }
+function safeToken(value: unknown) { return typeof value === "string" && /^[a-z0-9_-]{1,64}$/i.test(value) ? value : null; }
 
 function sanitizePayload(value: unknown) {
   return sanitizePublic(value);

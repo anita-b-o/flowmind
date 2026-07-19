@@ -216,3 +216,4 @@ export * from "./try-catch";
 export * from "./subworkflow";
 export * from "./approval";
 export * from "./internal-events";
+export * from "./run-history";

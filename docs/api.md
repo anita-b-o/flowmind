@@ -211,6 +211,12 @@ When `draftDefinition` is provided, the backend validates the graph and stores a
 
 Test runs are listed through `GET /workflows/:workflowId/test-runs` and never appear in the production `GET /executions` list. Detail responses include sanitized timeline, graph state, inspector data, safe connection metadata, and optional comparison with the latest real execution for the same workflow version.
 
+## Production run history
+
+`GET /executions` uses stable `(createdAt,id)` cursor pagination. It accepts `limit`, `cursor`, `workflowId`, `status`/`statuses`, `triggerType`, `from`, `to`, `relationship`, `waiting`, `failed`, `failedStepKey`, and `rootExecutionId`. Filters execute in PostgreSQL and production history never loads execution payloads.
+
+`GET /executions/:executionId/timeline`, `/tree`, and `/steps/:stepExecutionId` expose durable operational metadata. Production responses use allowlisted artifacts and safe errors (`category`, `code`, `messageSafe`); they do not expose trigger input, runtime context, outputs, raw errors, stacks, notification recipients, or provider payloads. All reads require an active Viewer membership and are organization-scoped. Resource lookups outside the active organization return 404.
+
 ## Audit Logs
 
 `GET /audit-logs` requires owner or admin role and scopes to `x-organization-id`. Filters: `action`, `resourceType`, `resourceId`, `userId`, `correlationId`, `from`, `to`, `page`, and `pageSize`.

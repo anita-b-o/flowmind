@@ -3,11 +3,10 @@
 import { use, useState } from "react";
 import Link from "next/link";
 import { ErrorMessage } from "../../../components/error-message";
-import { JsonViewer } from "../../../components/json-viewer";
 import { StatusBadge } from "../../../components/status-badge";
 import { RequireAuth } from "../../../features/auth/require-auth";
 import { useAuth } from "../../../features/auth/use-auth";
-import { useCancelExecution, useExecution } from "../../../features/executions/hooks";
+import { useCancelExecution, useExecution, useExecutionTimeline, useExecutionTree } from "../../../features/executions/hooks";
 import { canCancelExecution, canRetryExecution } from "../../../features/auth/rbac";
 import { RetryExecutionDialog } from "../../../features/dead-letter-executions/components/retry-execution-dialog";
 import { ConfirmDialog } from "../../../components/confirm-dialog";
@@ -16,6 +15,8 @@ import { ExecutionApprovalDetails } from "../../../features/executions/component
 export default function ExecutionDetailPage({ params }: { params: Promise<{ executionId: string }> }) {
   const { executionId } = use(params);
   const execution = useExecution(executionId);
+  const timeline = useExecutionTimeline(executionId);
+  const tree = useExecutionTree(executionId);
   const detail = execution.data;
   const [retryOpen, setRetryOpen] = useState(false);
   const [cancelOpen, setCancelOpen] = useState(false);
@@ -38,6 +39,7 @@ export default function ExecutionDetailPage({ params }: { params: Promise<{ exec
               <p>Workflow: {detail.workflow.name}</p>
               <p>Version: {detail.workflowVersion?.versionNumber ?? "-"}</p>
               <p>Mode: {detail.mode ?? "REAL"}</p>
+              <p>Trigger: {detail.triggerType ?? "manual"}</p>
               <p>Subworkflow depth: {detail.depth}</p>
               {detail.parentExecution && <p>Parent: <Link href={`/executions/${detail.parentExecution.id}`}>{detail.parentExecution.id}</Link>{detail.parentStepExecution ? ` · ${detail.parentStepExecution.stepKey}` : ""}</p>}
               {detail.rootExecutionId !== detail.id && <p>Root: <Link href={`/executions/${detail.rootExecutionId}`}>{detail.rootExecutionId}</Link></p>}
@@ -101,7 +103,17 @@ export default function ExecutionDetailPage({ params }: { params: Promise<{ exec
             {!!detail.childExecutions.length && <section className="panel stack"><h2>Child workflows</h2>{detail.childExecutions.map((child) => <p key={child.id}><StatusBadge status={child.status} /> <Link href={`/executions/${child.id}`}>{child.id}</Link> · depth {child.depth}</p>)}</section>}
             <ExecutionApprovalDetails waitReason={detail.waitReason} approvals={detail.approvals} />
 
-            {detail.output !== null && detail.output !== undefined && <section className="panel stack"><h2>Workflow output</h2><JsonViewer value={detail.output} /></section>}
+            <section className="panel stack">
+              <h2>Timeline</h2>
+              {timeline.isLoading && <p className="muted">Loading timeline...</p>}
+              {timeline.data?.items.map((event) => <div className="timeline-row" key={event.id}><span className={`timeline-dot ${(event.status ?? "pending").toLowerCase()}`} /><div><strong>{event.message}</strong><p className="muted">{formatDate(event.timestamp)}{event.executionPath ? ` · ${event.executionPath}` : ""}{event.iterationIndex !== null && event.iterationIndex !== undefined ? ` · iteration ${event.iterationIndex}` : ""}{event.durationMs !== null && event.durationMs !== undefined ? ` · ${event.durationMs}ms` : ""}</p>{event.relatedExecutionId && <Link href={`/executions/${event.relatedExecutionId}`}>Open child execution</Link>}</div></div>)}
+            </section>
+
+            {tree.data && <section className="panel stack"><h2>Execution tree</h2><ExecutionTreeNode node={tree.data} currentId={executionId} /></section>}
+
+            {detail.eventCausality && <section className="panel stack"><h2>Event causality</h2><p>{detail.eventCausality.eventType} · depth {detail.eventCausality.depth}</p><p className="muted">Correlation {detail.eventCausality.correlationId} · root {detail.eventCausality.rootEventId} · causation {detail.eventCausality.causationId ?? "-"}</p></section>}
+
+            {!!detail.notifications?.length && <section className="panel stack"><h2>Related notifications</h2>{detail.notifications.map((notification) => <p key={notification.id}><StatusBadge status={notification.status} /> {notification.channel} · attempts {notification.attempts}{notification.errorCategory ? ` · ${notification.errorCategory}` : ""}</p>)}</section>}
 
             {!!detail.deadLetters.length && (
               <section className="panel stack">
@@ -115,20 +127,10 @@ export default function ExecutionDetailPage({ params }: { params: Promise<{ exec
               </section>
             )}
 
-            <section className="panel stack">
-              <h2>Trigger input</h2>
-              <JsonViewer value={detail.input} />
-            </section>
-
-            <section className="panel stack">
-              <h2>Execution context</h2>
-              <JsonViewer value={detail.context} />
-            </section>
-
             {detail.error && (
               <section className="panel stack">
                 <h2>Error</h2>
-                <JsonViewer value={detail.error} />
+                <SafeError value={detail.error} />
               </section>
             )}
 
@@ -155,20 +157,12 @@ export default function ExecutionDetailPage({ params }: { params: Promise<{ exec
                   {step.errorCategory && <p>Error category: {step.errorCategory}</p>}
                   <p>Duration: {step.durationMs ?? 0} ms</p>
                   {step.nextRetryAt && <p>Waiting until: {formatDate(step.nextRetryAt)}</p>}
-                  {Boolean(step.providerMetadata) && (
-                    <>
-                      <h3>Provider metadata</h3>
-                      <JsonViewer value={step.providerMetadata} />
-                    </>
-                  )}
-                  <h3>Input</h3>
-                  <JsonViewer value={step.input ?? null} />
-                  <h3>Output</h3>
-                  <JsonViewer value={step.output} />
+                  <p>Path: <code>{step.executionPath}</code>{step.iterationIndex !== null ? ` · iteration ${step.iterationIndex}` : ""}</p>
+                  <p><Link href={`/executions/${detail.id}/steps/${step.id}`}>Open safe step detail</Link></p>
                   {Boolean(step.error) && (
                     <>
                       <h3>Error</h3>
-                      <JsonViewer value={step.error} />
+                      <SafeError value={step.error} />
                     </>
                   )}
                 </div>
@@ -195,6 +189,15 @@ export default function ExecutionDetailPage({ params }: { params: Promise<{ exec
       </main>
     </RequireAuth>
   );
+}
+
+function SafeError({ value }: { value: unknown }) {
+  const error = value && typeof value === "object" ? value as Record<string, unknown> : {};
+  return <p><strong>{String(error.code ?? "UNKNOWN_ERROR")}</strong> · {String(error.category ?? "unknown")} · {String(error.messageSafe ?? "The operation failed.")}</p>;
+}
+
+function ExecutionTreeNode({ node, currentId }: { node: any; currentId: string }) {
+  return <div style={{ marginLeft: node.depth ? 20 : 0 }}><p><StatusBadge status={node.status} /> <Link href={`/executions/${node.id}`}>{node.workflowName} · {node.id === currentId ? "current" : node.id.slice(0, 8)}</Link> · depth {node.depth}</p>{node.children?.map((child: any) => <ExecutionTreeNode key={child.id} node={child} currentId={currentId} />)}</div>;
 }
 
 function formatDuration(value?: number | null, start?: string | null, end?: string | null) {

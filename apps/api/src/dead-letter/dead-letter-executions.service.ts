@@ -1,7 +1,7 @@
 import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
-import { publicError, sanitizePublic } from "../common/public-sanitizer";
+import { publicError } from "../common/public-sanitizer";
 import { ListDeadLetterExecutionsQueryDto } from "./dto/list-dead-letter-executions-query.dto";
 import { publicDeadLetterReason, type PublicDeadLetterReason } from "./dead-letter-reasons";
 
@@ -114,7 +114,6 @@ function detail(item: any) {
     },
     correlationId: item.execution?.correlationId ?? null,
     lastError: publicError(item.lastErrorJson),
-    lastErrorMetadata: sanitizePublic(item.lastErrorJson),
     retryExecution: item.retryExecution
   };
 }

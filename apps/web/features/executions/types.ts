@@ -29,13 +29,19 @@ export interface ExecutionSummary {
   attempts?: number;
   cancelled?: boolean;
   waitReason?: string | null;
+  triggerType?: "manual" | "webhook" | "scheduled" | "event" | "subworkflow" | "retry";
+  relationship?: "root" | "child";
+  parentExecutionId?: string | null;
+  rootExecutionId?: string;
+  depth?: number;
+  failedStep?: { stepKey: string; errorHandled: boolean; errorCategory: string | null } | null;
 }
 
 export interface ExecutionListResponse {
   items: ExecutionSummary[];
-  page: number;
   pageSize: number;
-  total: number;
+  nextCursor: string | null;
+  hasMore: boolean;
 }
 
 export interface StepExecutionDetail {
@@ -54,10 +60,9 @@ export interface StepExecutionDetail {
   nextRetryAt: string | null;
   effectStatus: string | null;
   errorCategory: string | null;
-  output: unknown;
-  input?: unknown;
   error: unknown;
-  providerMetadata?: unknown;
+  artifact?: unknown;
+  payloads?: unknown;
   startedAt: string | null;
   completedAt: string | null;
   finishedAt?: string | null;
@@ -68,8 +73,7 @@ export interface ExecutionDetail extends ExecutionSummary {
   workflow: { id: string; name: string; status: string };
   workflowVersion: { id: string; versionNumber: number; status: string; createdAt: string; definitionSchemaVersion?: number } | null;
   workflowSnapshot: { workflowVersionId: string; versionNumber: number; definitionSchemaVersion: number } | null;
-  input: unknown;
-  context: unknown;
+  payloads: unknown;
   error: unknown;
   updatedAt: string;
   durationMs: number | null;
@@ -85,7 +89,6 @@ export interface ExecutionDetail extends ExecutionSummary {
   deadLetter: ExecutionDeadLetter | null;
   deadLetters: ExecutionDeadLetter[];
   steps: StepExecutionDetail[];
-  output: unknown;
   parentExecutionId: string | null;
   parentStepExecutionId: string | null;
   rootExecutionId: string;
@@ -94,7 +97,12 @@ export interface ExecutionDetail extends ExecutionSummary {
   parentStepExecution: { id: string; stepKey: string; executionPath: string } | null;
   childExecutions: Array<{ id: string; status: ExecutionStatus; workflowId: string; workflowVersionId: string; depth: number; createdAt: string; startedAt: string | null; completedAt: string | null }>;
   approvals: Array<{ id: string; status: string; title: string; requestedAt: string; expiresAt: string | null; decidedAt: string | null; decidedByUserId: string | null; stepKey: string; executionPath: string; iterationIndex: number | null }>;
+  eventCausality: { eventType: string; correlationId: string; rootEventId: string; causationId: string | null; depth: number; deliveryStatus: string; triggerId: string } | null;
+  notifications: Array<{ id: string; type: string; channel: string; status: string; attempts: number; createdAt: string; updatedAt: string; lastAttemptAt: string | null; sentAt: string | null; failedAt: string | null; errorCategory: string | null; errorMessageSafe: string | null }>;
 }
+
+export interface ExecutionTimelineEvent { id: string; type: string; timestamp: string; status?: string; stepExecutionId?: string; stepKey?: string; executionPath?: string; iterationIndex?: number | null; attempt?: number; durationMs?: number | null; waitReason?: string | null; relatedExecutionId?: string; approvalId?: string; message: string }
+export interface ExecutionTimelineResponse { items: ExecutionTimelineEvent[]; nextCursor: string | null; hasMore: boolean }
 
 export interface ExecutionActor {
   id: string;

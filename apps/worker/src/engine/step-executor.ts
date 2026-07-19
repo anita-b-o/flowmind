@@ -12,6 +12,7 @@ import { WorkerMetricsService, workerErrorCategory } from "../metrics/worker-met
 import { ExpressionResolver } from "./expression-resolver";
 import { TestRuntimePolicy } from "./test-runtime-policy";
 import { DebugArtifactRecorder } from "./debug-artifact-recorder";
+import { recordStepAttempt, type StepAttemptSnapshot } from "./step-attempt-recorder";
 
 export type StepExecutionRecord = {
   id: string;
@@ -106,6 +107,7 @@ export class StepExecutor {
         inputJson: {}
       }
     });
+    await this.recordAttempt({ organizationId: input.organizationId, executionId: input.executionId, stepExecutionId: input.stepExecution.id, attempt: nextAttempt, status: StepExecutionStatus.Running, startedAt });
     this.logger?.info("worker.step.started", {
       stepExecutionId: input.stepExecution.id,
       stepKey: input.step.key,
@@ -176,6 +178,7 @@ export class StepExecutor {
       const waitUntil = control?.waitUntil ? new Date(control.waitUntil) : null;
       if (control?.durableWait) {
         await this.prisma.stepExecution.update({ where: { id: input.stepExecution.id }, data: { status: StepExecutionStatus.Retrying, outputJson: toJson(sanitizePersisted(result.output)), errorJson: Prisma.JsonNull, completedAt, durationMs: completedAt.getTime() - startedAt.getTime(), nextRetryAt: null, effectStatus: "approval_waiting" } });
+        await this.recordAttempt({ organizationId: input.organizationId, executionId: input.executionId, stepExecutionId: input.stepExecution.id, attempt: nextAttempt, status: StepExecutionStatus.Retrying, startedAt, completedAt, durationMs: completedAt.getTime() - startedAt.getTime(), waitReason: "approval", effectStatus: "approval_waiting" });
         return { outcome: "durable_wait" as const, nextRetryAt: null, waitReason: "approval" as const };
       }
       if (waitUntil && Number.isFinite(waitUntil.getTime()) && waitUntil > completedAt) {
@@ -198,6 +201,7 @@ export class StepExecutor {
           nextRetryAt: waitUntil
         });
         this.metrics?.recordWait(input.step.type, control?.waitReason ?? "delay", Math.max(0, (waitUntil.getTime() - completedAt.getTime()) / 1000));
+        await this.recordAttempt({ organizationId: input.organizationId, executionId: input.executionId, stepExecutionId: input.stepExecution.id, attempt: nextAttempt, status: StepExecutionStatus.Retrying, startedAt, completedAt, durationMs: completedAt.getTime() - startedAt.getTime(), nextRetryAt: waitUntil, waitReason: control?.waitReason ?? "delay", effectStatus: control?.waitReason ?? "waiting" });
         return { outcome: "retrying" as const, nextRetryAt: waitUntil };
       }
       await this.prisma.stepExecution.update({
@@ -218,6 +222,7 @@ export class StepExecutor {
         durationMs: completedAt.getTime() - startedAt.getTime()
       });
       this.metrics?.recordStep(input.step.type, "completed", (completedAt.getTime() - startedAt.getTime()) / 1000);
+      await this.recordAttempt({ organizationId: input.organizationId, executionId: input.executionId, stepExecutionId: input.stepExecution.id, attempt: nextAttempt, status: result.status, startedAt, completedAt, durationMs: completedAt.getTime() - startedAt.getTime(), effectStatus: "succeeded" });
       if (input.step.type === StepType.Transform) {
         this.metrics?.recordTransform(String(input.step.config.mode ?? ""), "success", (completedAt.getTime() - startedAt.getTime()) / 1000);
       }
@@ -245,6 +250,7 @@ export class StepExecutor {
           effectStatus: classification === "ambiguous" ? "ambiguous" : "failed"
         }
       });
+      await this.recordAttempt({ organizationId: input.organizationId, executionId: input.executionId, stepExecutionId: input.stepExecution.id, attempt: nextAttempt, status: canRetry ? StepExecutionStatus.Retrying : StepExecutionStatus.Failed, startedAt, completedAt, durationMs: completedAt.getTime() - startedAt.getTime(), nextRetryAt, waitReason: canRetry ? "retry_backoff" : null, effectStatus: classification === "ambiguous" ? "ambiguous" : "failed", errorCategory: classification, errorCodeSafe: safeErrorCode(classification), errorMessageSafe: safeErrorMessage(classification) });
       this.logger?.warn(classification === "ambiguous" ? "worker.effect.ambiguous" : "worker.step.failed", {
         stepExecutionId: input.stepExecution.id,
         stepKey: input.step.key,
@@ -295,6 +301,7 @@ export class StepExecutor {
         effectStatus: "skipped"
       }
     });
+    await this.recordAttempt({ organizationId: input.organizationId, executionId: input.executionId, stepExecutionId: input.stepExecution.id, attempt: Math.max(1, input.stepExecution.attemptCount), status: StepExecutionStatus.Skipped, startedAt: now, completedAt: now, durationMs: 0, effectStatus: "skipped" });
     this.metrics?.recordStep(input.step.type, "skipped", 0);
     return {
       result: { status: StepExecutionStatus.Skipped, output }
@@ -316,6 +323,7 @@ export class StepExecutor {
         effectStatus: "succeeded"
       }
     });
+    await this.prisma.stepExecutionAttempt.updateMany({ where: { stepExecutionId: input.stepExecution.id, attempt: Math.max(1, input.stepExecution.attemptCount) }, data: { status: StepExecutionStatus.Completed, completedAt: now, nextRetryAt: null, waitReason: null, effectStatus: "succeeded" } });
     this.logger?.info("worker.flow.wait_resumed", {
       stepExecutionId: input.stepExecution.id,
       stepKey: input.step.key,
@@ -323,6 +331,10 @@ export class StepExecutor {
     });
     this.metrics?.recordStep(input.step.type, "completed", 0);
     return { result: { status: StepExecutionStatus.Completed, output } };
+  }
+
+  private recordAttempt(input: StepAttemptSnapshot) {
+    return recordStepAttempt(this.prisma, input);
   }
 
   private async safeConnectionMetadata(organizationId: string, config: Record<string, unknown>) {
@@ -610,6 +622,20 @@ function limitValue(value: unknown, depth = 0): unknown {
 
 function workerId() {
   return process.env.WORKER_ID ?? `${process.pid}`;
+}
+
+function safeErrorCode(category: string) {
+  const codes: Record<string, string> = { retryable: "STEP_RETRYABLE_FAILURE", non_retryable: "STEP_FAILED", ambiguous: "AMBIGUOUS_EFFECT" };
+  return codes[category] ?? "UNKNOWN_ERROR";
+}
+
+function safeErrorMessage(category: string) {
+  const messages: Record<string, string> = {
+    retryable: "The step failed temporarily and may be retried.",
+    non_retryable: "The step failed and will not be retried.",
+    ambiguous: "The step effect may have completed, but FlowMind could not confirm it."
+  };
+  return messages[category] ?? "The step failed for an unknown reason.";
 }
 
 function toJson(value: unknown): Prisma.InputJsonValue {

@@ -11,6 +11,7 @@ import type { RuntimeGraph } from "./graph/graph-validator";
 import { StepExecutor, type StepExecutionRecord } from "./step-executor";
 import { StructuredStepFailure } from "./structured-step-failure";
 import { ExecuteWorkflowExecutionService } from "./execute-workflow-execution.service";
+import { recordStepAttempt } from "./step-attempt-recorder";
 
 type RegionResult = { outcome: "completed" } | { outcome: "waiting"; nextRetryAt: Date | null; waitReason?: string };
 type Region = { name: "body" | "catch" | "finally"; entry: string; exit: string; keys: Set<string> };
@@ -40,6 +41,7 @@ export class TryCatchExecutionService {
     const state = readState(input.tryStepExecution.inputJson) ?? { phase: "body", startedAt: new Date().toISOString(), bodyStatus: "not_run", catchStatus: "not_run", finallyStatus: "not_run", audit: {} };
     if (!readState(input.tryStepExecution.inputJson)) {
       await this.prisma.stepExecution.update({ where: { id: input.tryStepExecution.id }, data: { status: StepExecutionStatus.Running, startedAt: new Date(state.startedAt), attempt: 1, attemptCount: 1, effectStatus: "running", inputJson: json({ tryState: state }) } });
+      await recordStepAttempt(this.prisma, { organizationId: input.organizationId, executionId: input.executionId, stepExecutionId: input.tryStepExecution.id, attempt: 1, status: StepExecutionStatus.Running, startedAt: new Date(state.startedAt), effectStatus: "running" });
       await this.audit(input, "try.started", { outcome: "started", handled: false });
     }
     let primary: StructuredStepFailure | undefined = state.primary ? new StructuredStepFailure(state.primary.error, state.primary.id) : undefined;
@@ -90,6 +92,7 @@ export class TryCatchExecutionService {
       const output = summary(state);
       const completedAt = new Date();
       await this.prisma.stepExecution.update({ where: { id: input.tryStepExecution.id }, data: { status: StepExecutionStatus.Completed, outputJson: json(output), errorJson: Prisma.JsonNull, debugJson: json({ try: output }), completedAt, durationMs: completedAt.getTime() - Date.parse(state.startedAt), effectStatus: "succeeded" } });
+      await recordStepAttempt(this.prisma, { organizationId: input.organizationId, executionId: input.executionId, stepExecutionId: input.tryStepExecution.id, attempt: 1, status: StepExecutionStatus.Completed, startedAt: new Date(state.startedAt), completedAt, durationMs: completedAt.getTime() - Date.parse(state.startedAt), effectStatus: "succeeded" });
       await this.audit(input, "try.completed", { outcome: output.status, category: output.errorCategory, handled: output.errorHandled });
       this.metrics?.recordTryExecution(output.status, output.errorCategory ?? "none", (completedAt.getTime() - Date.parse(state.startedAt)) / 1000);
       return { outcome: "completed", output };
@@ -98,6 +101,7 @@ export class TryCatchExecutionService {
       const output = { ...summary(state), status: "failed" as const };
       const completedAt = new Date();
       await this.prisma.stepExecution.update({ where: { id: input.tryStepExecution.id }, data: { status: StepExecutionStatus.Failed, outputJson: json(output), errorJson: json({ message: failure.safeError.message, classification: failure.safeError.category, code: failure.safeError.code, secondary: state.secondary }), debugJson: json({ try: output, secondaryError: state.secondary }), completedAt, durationMs: completedAt.getTime() - Date.parse(state.startedAt), effectStatus: "failed" } });
+      await recordStepAttempt(this.prisma, { organizationId: input.organizationId, executionId: input.executionId, stepExecutionId: input.tryStepExecution.id, attempt: 1, status: StepExecutionStatus.Failed, startedAt: new Date(state.startedAt), completedAt, durationMs: completedAt.getTime() - Date.parse(state.startedAt), effectStatus: "failed", errorCategory: failure.safeError.category, errorCodeSafe: failure.safeError.code, errorMessageSafe: failure.safeError.message });
       await this.audit(input, "try.failed", { outcome: "failed", category: failure.safeError.category, handled: false });
       this.metrics?.recordTryExecution("failed", failure.safeError.category, (completedAt.getTime() - Date.parse(state.startedAt)) / 1000);
       throw failure;

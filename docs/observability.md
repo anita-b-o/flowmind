@@ -127,6 +127,8 @@ API HTTP metrics exclude `/health`, `/health/live`, and `/health/ready` to keep 
 
 Logs carry sanitized context for debugging and may include request/correlation IDs. Metrics are low-cardinality counters, gauges and histograms without business IDs. AuditLog remains the business audit trail and is not changed by metrics.
 
+Run History reads the durable Execution, StepExecution, StepExecutionAttempt, Approval, InternalEvent, Notification and DeadLetter records. It is a query projection, not a second logging pipeline. Metrics for this surface may use only bounded endpoint, outcome, status class, trigger type, wait type and error category labels; execution, workflow, organization and step identifiers are prohibited labels.
+
 Metrics servers close during graceful shutdown. Metrics availability is not part of API or worker readiness.
 
 AuditLog is used for critical user-visible actions such as manual retry, DLQ resolution, trigger changes, workflow activation, logout-all, and refresh-session reuse detection. Technical events such as heartbeats, step completion, metrics increments, automatic retry, and reconciler passes stay in logs/metrics rather than AuditLog.

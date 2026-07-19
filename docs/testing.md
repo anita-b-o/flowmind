@@ -18,6 +18,8 @@ The root `test`, `test:integration`, and `test:e2e` commands run workspace packa
 sequentially. Database-backed suites share the local PostgreSQL schema and Redis DB,
 and their tenant-safe cleanup helpers must never run concurrently across packages.
 
+Run History smoke coverage must use PostgreSQL, Redis, BullMQ and a real worker for: Webhook/FOR_EACH/TRY_CATCH/Data Store; Scheduled/Approval/resume; Event Trigger/EXECUTE_WORKFLOW; and failed execution/Event Trigger/Notification. Assertions must compare the public Viewer response with persisted metadata and include cross-tenant and secret-canary checks. Poll terminal state with bounded timeouts rather than fixed sleeps.
+
 ## API
 
 - Unit test auth, RBAC and services.
@@ -89,3 +91,4 @@ Real-mode debugger path:
 ```text
 Builder -> Debugger -> Real -> explicit confirmation -> side-effect node list -> admin/owner validation -> TEST execution
 ```
+API integration and e2e commands acquire `/tmp/flowmind-api-db-tests.lock` with `flock` before starting Jest. This is required because the legacy integration suites share one PostgreSQL database and several of them perform global fixture cleanup. `--runInBand` only serializes suites inside one Jest process; the process lock also prevents two independent API integration/e2e commands from deleting each other's parents while a Worker or dispatcher is still active. Unit tests do not acquire this lock.

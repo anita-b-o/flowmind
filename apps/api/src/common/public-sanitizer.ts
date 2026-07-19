@@ -13,6 +13,8 @@ const SENSITIVE_KEYS = new Set([
   "connectionsecret",
   "password",
   "smtppassword",
+  "smtpcredentials",
+  "connectionstring",
   "token",
   "tokenhash",
   "passwordhash",
@@ -22,7 +24,14 @@ const SENSITIVE_KEYS = new Set([
   "ciphertext",
   "authtag",
   "iv",
-  "encryptionkey"
+  "encryptionkey",
+  "stack",
+  "stacktrace",
+  "cause",
+  "requestbody",
+  "responsebody",
+  "providerresponse",
+  "providerrequest"
 ]);
 
 export function sanitizePublic(value: unknown): unknown {
@@ -36,7 +45,7 @@ export function publicError(value: unknown) {
   return {
     category,
     code: publicErrorCode(record.code, category),
-    message: publicErrorMessage(record.message, category)
+    messageSafe: publicErrorMessage(record.message, category)
   };
 }
 
@@ -115,7 +124,10 @@ function publicErrorMessage(value: unknown, category: string) {
 }
 
 function containsSensitiveWord(value: string) {
-  return /(^|[^a-z0-9])(authorization|cookie|token|secret|password|api[-_ ]?key)([^a-z0-9]|$)/i.test(value);
+  return /(^|[^a-z0-9])(authorization|cookie|token|secret|password|api[-_ ]?key|bearer|basic)([^a-z0-9]|$)/i.test(value)
+    || /eyJ[a-zA-Z0-9_-]{10,}\.[a-zA-Z0-9_-]{10,}\.[a-zA-Z0-9_-]{10,}/.test(value)
+    || /-----BEGIN [A-Z ]+PRIVATE KEY-----/.test(value)
+    || /^[a-z][a-z0-9+.-]*:\/\/[^/@\s]+:[^/@\s]+@/i.test(value);
 }
 
 function publicPayloadBytes() {

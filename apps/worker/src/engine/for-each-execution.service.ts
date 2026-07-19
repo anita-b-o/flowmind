@@ -18,6 +18,7 @@ import { StepExecutor, type StepExecutionRecord } from "./step-executor";
 import { NonRetryableStepError } from "./step-errors";
 import { TryCatchExecutionService } from "./try-catch-execution.service";
 import { ExecuteWorkflowExecutionService } from "./execute-workflow-execution.service";
+import { recordStepAttempt } from "./step-attempt-recorder";
 
 export type ForEachStepRow = {
   id?: string | null;
@@ -206,6 +207,7 @@ export class ForEachExecutionService {
       const output = summary(state, config);
       const completedAt = new Date();
       await this.prisma.stepExecution.update({ where: { id: input.loopStepExecution.id }, data: { status: StepExecutionStatus.Completed, outputJson: json(output), completedAt, durationMs: completedAt.getTime() - Date.parse(state.startedAt), effectStatus: "succeeded" } });
+      await recordStepAttempt(this.prisma, { organizationId: input.organizationId, executionId: input.executionId, stepExecutionId: input.loopStepExecution.id, attempt: 1, status: StepExecutionStatus.Completed, startedAt: new Date(state.startedAt), completedAt, durationMs: completedAt.getTime() - Date.parse(state.startedAt), effectStatus: "succeeded" });
       await this.audit(input, "loop.completed", output);
       this.metrics?.recordLoopExecution("completed", "sequential", Math.max(0, (completedAt.getTime() - Date.parse(state.startedAt)) / 1000));
       this.logger?.info("worker.loop.completed", { stepExecutionId: input.loopStepExecution.id, total: output.total, succeeded: output.succeeded, failed: output.failed, mode: output.mode });
@@ -215,6 +217,7 @@ export class ForEachExecutionService {
       const output = summary(state, config);
       const completedAt = new Date();
       await this.prisma.stepExecution.update({ where: { id: input.loopStepExecution.id }, data: { status: StepExecutionStatus.Failed, outputJson: json(output), errorJson: json({ message: error instanceof Error ? error.message : String(error), classification: "non_retryable" }), completedAt, durationMs: completedAt.getTime() - Date.parse(state.startedAt), effectStatus: "failed" } }).catch(() => undefined);
+      await recordStepAttempt(this.prisma, { organizationId: input.organizationId, executionId: input.executionId, stepExecutionId: input.loopStepExecution.id, attempt: 1, status: StepExecutionStatus.Failed, startedAt: new Date(state.startedAt), completedAt, durationMs: completedAt.getTime() - Date.parse(state.startedAt), effectStatus: "failed", errorCategory: "non_retryable", errorCodeSafe: "STEP_FAILED", errorMessageSafe: "The loop failed and will not be retried." }).catch(() => undefined);
       await this.audit(input, "loop.failed", output);
       this.metrics?.recordLoopExecution("failed", "sequential", Math.max(0, (completedAt.getTime() - Date.parse(state.startedAt)) / 1000));
       throw error;
@@ -230,6 +233,7 @@ export class ForEachExecutionService {
     const now = new Date();
     const state: LoopState = { items: source, nextIndex: 0, succeeded: 0, failed: 0, skipped: 0, results: [], errors: [], resultsTruncated: false, errorsTruncated: false, startedAt: now.toISOString() };
     await this.prisma.stepExecution.update({ where: { id: input.loopStepExecution.id }, data: { status: StepExecutionStatus.Running, startedAt: now, inputJson: json({ forEachState: state }), outputJson: json(summary(state, config)), attempt: 1, attemptCount: 1, effectStatus: "running" } });
+    await recordStepAttempt(this.prisma, { organizationId: input.organizationId, executionId: input.executionId, stepExecutionId: input.loopStepExecution.id, attempt: 1, status: StepExecutionStatus.Running, startedAt: now, effectStatus: "running" });
     await this.audit(input, "loop.started", summary(state, config));
     this.logger?.info("worker.loop.started", { stepExecutionId: input.loopStepExecution.id, total: source.length, mode: config.mode });
     return state;
