@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo, useState } from "react";
 import type { StepType } from "../../types";
 
 const GROUPS: Array<{ label: string; items: Array<{ type: StepType; name: string; description: string; icon: string }> }> = [
@@ -55,12 +56,17 @@ const GROUPS: Array<{ label: string; items: Array<{ type: StepType; name: string
 ];
 
 export function WorkflowPalette({ disabled, onAdd }: { disabled: boolean; onAdd: (type: StepType) => void }) {
+  const [query, setQuery] = useState("");
+  const groups = useMemo(() => GROUPS.map((group) => ({ ...group, items: group.items.filter((item) => `${item.name} ${item.description} ${item.type}`.toLowerCase().includes(query.toLowerCase())) })).filter((group) => group.items.length), [query]);
   return (
     <aside className="workflow-palette" aria-label="Workflow node palette">
-      <h3>Palette</h3>
-      {GROUPS.map((group) => (
-        <section key={group.label} className="workflow-palette-group">
-          <strong>{group.label}</strong>
+      <div><h3>Add a node</h3><p className="muted">Search or browse by role.</p></div>
+      <label>Search nodes<input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="HTTP, variable, approval…" /></label>
+      {!groups.length && <p className="muted">No nodes match “{query}”.</p>}
+      {groups.map((group) => (
+        <details key={group.label} className="workflow-palette-group" open={group.label !== "Data" || Boolean(query)}>
+          <summary><strong>{group.label}</strong><span className="muted">{group.items.length}</span></summary>
+          <div className="workflow-palette-items">
           {group.items.map((item) => (
             <button key={item.type} type="button" disabled={disabled} className="workflow-palette-item" onClick={() => onAdd(item.type)}>
               <span className="workflow-palette-icon" aria-hidden="true">
@@ -72,7 +78,8 @@ export function WorkflowPalette({ disabled, onAdd }: { disabled: boolean; onAdd:
               </span>
             </button>
           ))}
-        </section>
+          </div>
+        </details>
       ))}
     </aside>
   );

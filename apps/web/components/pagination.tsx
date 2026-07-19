@@ -11,7 +11,7 @@ export function Pagination({
 }) {
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
   return (
-    <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+    <nav className="pagination" aria-label="Pagination">
       <button type="button" disabled={page <= 1} onClick={() => onPageChange(page - 1)}>
         Previous
       </button>
@@ -21,6 +21,6 @@ export function Pagination({
       <button type="button" disabled={page >= pageCount} onClick={() => onPageChange(page + 1)}>
         Next
       </button>
-    </div>
+    </nav>
   );
 }

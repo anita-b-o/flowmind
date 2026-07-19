@@ -4,10 +4,11 @@ import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import { AuthProvider } from "../features/auth/auth-provider";
 import { QueryProvider } from "../lib/query-provider";
+import { AppFrame } from "../components/app-shell";
 
 export const metadata: Metadata = {
-  title: "Automation Platform",
-  description: "AI workflow automation SaaS"
+  title: { default: "FlowMind", template: "%s · FlowMind" },
+  description: "Build, operate and understand reliable workflows."
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
@@ -15,7 +16,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
     <html lang="en">
       <body>
         <QueryProvider>
-          <AuthProvider>{children}</AuthProvider>
+          <AuthProvider><AppFrame>{children}</AppFrame></AuthProvider>
         </QueryProvider>
       </body>
     </html>

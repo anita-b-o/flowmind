@@ -17,7 +17,7 @@ export function WorkflowNode({ id, data, selected }: NodeProps<WorkflowFlowNode>
   const debugClass = data.debugStatus ? `debug-${data.debugStatus}` : "";
 
   return (
-    <div className={`workflow-flow-node ${selected ? "selected" : ""} ${hasErrors ? "invalid" : hasWarnings ? "warning" : ""} ${debugClass}`}>
+    <div data-category={nodeCategory(data.type)} className={`workflow-flow-node ${selected ? "selected" : ""} ${hasErrors ? "invalid" : hasWarnings ? "warning" : ""} ${debugClass}`}>
       {!isTrigger && <Handle id="in" type="target" position={Position.Left} isConnectable={!data.readOnly} />}
       <div className="workflow-flow-node-header">
         <span className="workflow-flow-node-kind">{nodeKind(data.type)}</span>
@@ -78,4 +78,12 @@ function nodeKind(type: string) {
   if (type === "delay" || type === "wait_until" || type === "approval") return "Wait";
   if (type === "transform" || type === "database_record" || type.startsWith("data_store_")) return "Data";
   return "Action";
+}
+
+function nodeCategory(type: string) {
+  if (type === "webhook_trigger") return "trigger";
+  if (type === "if" || type === "switch" || type === "conditional" || type === "for_each" || type === "try_catch") return "logic";
+  if (type === "delay" || type === "wait_until" || type === "approval") return "wait";
+  if (type === "transform" || type === "database_record" || type.startsWith("data_store_") || type.includes("variable")) return "data";
+  return "action";
 }

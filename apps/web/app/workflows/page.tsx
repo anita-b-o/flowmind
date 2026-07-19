@@ -6,6 +6,7 @@ import { useForm } from "react-hook-form";
 import { ErrorMessage } from "../../components/error-message";
 import { RequireAuth } from "../../features/auth/require-auth";
 import { useCreateWorkflow, useWorkflows } from "../../features/workflows/hooks";
+import { EmptyState } from "../../components/brand";
 
 export default function WorkflowsPage() {
   const router = useRouter();
@@ -22,7 +23,7 @@ export default function WorkflowsPage() {
   return (
     <RequireAuth>
       <main className="content stack">
-        <h1>Workflows</h1>
+        <header className="page-header"><div><span className="eyebrow">Build</span><h1>Workflows</h1><p className="muted">Design, test and publish reliable automation.</p></div></header>
         {error && <ErrorMessage error={error} onRetry={() => refetch()} />}
         {createWorkflow.error && <ErrorMessage error={createWorkflow.error} onRetry={() => createWorkflow.reset()} />}
         <form className="panel stack" onSubmit={handleSubmit(onCreate)}>
@@ -45,9 +46,9 @@ export default function WorkflowsPage() {
         </form>
         <section className="panel stack">
           {isLoading && <p className="muted">Loading...</p>}
-          {!isLoading && !data?.length && <p className="muted">No workflows yet.</p>}
+          {!isLoading && !data?.length && <EmptyState branded title="Your first flow starts here"><p>Create a workflow, add a trigger and connect your first action.</p></EmptyState>}
           {data?.map((workflow) => (
-            <div key={workflow.id}>
+            <div className="resource-row" key={workflow.id}>
               <Link href={`/workflows/${workflow.id}`}>
                 <strong>{workflow.name}</strong>
               </Link>

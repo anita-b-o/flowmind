@@ -1,40 +1,12 @@
-const toneByStatus: Record<string, string> = {
-  PENDING: "#64748b",
-  QUEUED: "#2563eb",
-  RUNNING: "#7c3aed",
-  RETRYING: "#0f766e",
-  COMPLETED: "#047857",
-  FAILED: "#b91c1c",
-  CANCELLED: "#475569",
-  queued: "#2563eb",
-  running: "#7c3aed",
-  waiting: "#0f766e",
-  completed: "#047857",
-  failed: "#b91c1c",
-  cancelled: "#475569",
-  pending: "#64748b",
-  skipped: "#a16207",
-  SKIPPED: "#a16207",
-  "DLQ ACTIVE": "#b91c1c",
-  "DLQ RESOLVED": "#047857",
-  "QUEUED RETRY": "#2563eb",
-  "AMBIGUOUS EFFECT": "#a16207"
-};
+const success = new Set(["COMPLETED", "completed", "DLQ RESOLVED", "ACTIVE", "SENT", "APPROVED"]);
+const danger = new Set(["FAILED", "failed", "DLQ ACTIVE", "REJECTED", "DEAD_LETTER"]);
+const warning = new Set(["RETRYING", "waiting", "WAITING", "skipped", "SKIPPED", "AMBIGUOUS EFFECT", "EXPIRED"]);
+const info = new Set(["QUEUED", "queued", "RUNNING", "running", "QUEUED RETRY", "REPLAY"]);
 
 export function StatusBadge({ status }: { status: string }) {
   return (
-    <span
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        borderRadius: 6,
-        background: toneByStatus[status] ?? "#64748b",
-        color: "#fff",
-        fontSize: 12,
-        fontWeight: 700,
-        padding: "3px 8px"
-      }}
-    >
+    <span className={`status-badge status-badge--${success.has(status) ? "success" : danger.has(status) ? "danger" : warning.has(status) ? "warning" : info.has(status) ? "info" : "neutral"}`}>
+      <span className="status-dot" aria-hidden="true" />
       {status}
     </span>
   );

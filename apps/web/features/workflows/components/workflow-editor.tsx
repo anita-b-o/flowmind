@@ -352,14 +352,14 @@ export function WorkflowEditor({ workflow, onRefresh }: { workflow: WorkflowDeta
               <input disabled={!isEditable} {...register("description")} />
             </label>
           </div>
-          <div className="workflow-actions" role="tablist" aria-label="Workflow editor mode">
-            <button type="button" className={mode === "visual" ? "mode-tab active" : "mode-tab"} onClick={() => requestMode("visual")}>
+          <div className="workflow-actions" role="group" aria-label="Workflow editor mode">
+            <button type="button" aria-pressed={mode === "visual"} className={mode === "visual" ? "mode-tab active" : "mode-tab"} onClick={() => requestMode("visual")}>
               Visual
             </button>
-            <button type="button" className={mode === "form" ? "mode-tab active" : "mode-tab"} onClick={() => requestMode("form")}>
+            <button type="button" aria-pressed={mode === "form"} className={mode === "form" ? "mode-tab active" : "mode-tab"} onClick={() => requestMode("form")}>
               Form
             </button>
-            <button type="button" className={mode === "debugger" ? "mode-tab active" : "mode-tab"} onClick={() => requestMode("debugger")}>
+            <button type="button" aria-pressed={mode === "debugger"} className={mode === "debugger" ? "mode-tab active" : "mode-tab"} onClick={() => requestMode("debugger")}>
               Debugger
             </button>
           </div>

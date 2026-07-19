@@ -18,6 +18,7 @@ export function ConfirmDialog({
   onCancel: () => void;
 }) {
   const cancelRef = useRef<HTMLButtonElement | null>(null);
+  const dialogRef = useRef<HTMLElement | null>(null);
   const previousFocusRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
@@ -26,6 +27,13 @@ export function ConfirmDialog({
     cancelRef.current?.focus();
     const listener = (event: KeyboardEvent) => {
       if (event.key === "Escape") onCancel();
+      if (event.key === "Tab") {
+        const controls = Array.from(dialogRef.current?.querySelectorAll<HTMLElement>("button, [href], input, select, textarea, [tabindex]:not([tabindex='-1'])") ?? []).filter((element) => !element.hasAttribute("disabled"));
+        const first = controls[0];
+        const last = controls.at(-1);
+        if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+        else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+      }
     };
     window.addEventListener("keydown", listener);
     return () => {
@@ -40,11 +48,11 @@ export function ConfirmDialog({
 
   return (
     <div className="modal-backdrop" role="presentation">
-      <section className="modal panel stack" role="dialog" aria-modal="true" aria-label={title}>
-        <h2>{title}</h2>
-        <p className="muted">{description}</p>
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 12 }}>
-          <button ref={cancelRef} type="button" onClick={onCancel}>
+      <section ref={dialogRef} className="modal panel stack" role="dialog" aria-modal="true" aria-labelledby="confirm-dialog-title" aria-describedby="confirm-dialog-description">
+        <h2 id="confirm-dialog-title">{title}</h2>
+        <p id="confirm-dialog-description" className="muted">{description}</p>
+        <div className="dialog-actions">
+          <button className="button--secondary" ref={cancelRef} type="button" onClick={onCancel}>
             Cancel
           </button>
           <button type="button" onClick={onConfirm}>

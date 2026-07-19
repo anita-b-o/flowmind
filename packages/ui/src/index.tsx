@@ -4,14 +4,13 @@ import clsx from "clsx";
 export function Button({
   children,
   className,
+  variant = "primary",
+  size = "md",
   ...props
-}: PropsWithChildren<ButtonHTMLAttributes<HTMLButtonElement>>) {
+}: PropsWithChildren<ButtonHTMLAttributes<HTMLButtonElement>> & { variant?: "primary" | "secondary" | "ghost" | "danger"; size?: "sm" | "md" }) {
   return (
     <button
-      className={clsx(
-        "inline-flex h-10 items-center justify-center rounded-md bg-slate-950 px-4 text-sm font-medium text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50",
-        className
-      )}
+      className={clsx("button", `button--${variant}`, `button--${size}`, className)}
       {...props}
     >
       {children}

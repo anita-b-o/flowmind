@@ -6,6 +6,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { useState } from "react";
 import { apiClient, ApiError } from "../../lib/api-client";
 import { useAuth } from "../../features/auth/use-auth";
+import Link from "next/link";
 
 const schema = z.object({
   name: z.string().min(2),
@@ -33,16 +34,17 @@ export default function RegisterPage() {
   }
 
   return (
-    <main className="content">
-      <form className="panel stack" onSubmit={handleSubmit(onSubmit)}>
-        <h1>Register</h1>
-        <input placeholder="Name" {...register("name")} />
-        <input placeholder="Email" {...register("email")} />
-        <input placeholder="Password" type="password" {...register("password")} />
-        <input placeholder="Organization" {...register("organizationName")} />
-        {error ? <p className="error">{error}</p> : null}
+    <main className="auth-page">
+      <section className="auth-art" aria-label="FlowMind visual identity"><img src="/brand/koi-hero.webp" alt="" /><div className="auth-art-copy"><span className="eyebrow">Start in flow</span><h1>Build systems that stay understandable.</h1><p>From the first node to production recovery, FlowMind keeps the whole story connected.</p></div></section>
+      <section className="auth-panel"><div className="auth-card"><header><span className="eyebrow">Create your workspace</span><h1>Get started</h1><p className="muted">Set up your organization and begin with a draft workflow.</p></header>
+      <form onSubmit={handleSubmit(onSubmit)}>
+        <label>Your name<input autoComplete="name" placeholder="Ada Lovelace" {...register("name")} /></label>
+        <label>Work email<input autoComplete="email" inputMode="email" placeholder="you@company.com" {...register("email")} /></label>
+        <label>Password<input autoComplete="new-password" placeholder="At least 8 characters" type="password" {...register("password")} /></label>
+        <label>Organization<input autoComplete="organization" placeholder="Company or team name" {...register("organizationName")} /></label>
+        {error ? <p className="error" role="alert">{error}</p> : null}
         <button type="submit">Create account</button>
-      </form>
+      </form><p className="auth-foot">Already have an account? <Link href="/login">Sign in</Link></p></div></section>
     </main>
   );
 }

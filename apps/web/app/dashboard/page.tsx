@@ -1,57 +1,29 @@
 "use client";
 
 import Link from "next/link";
-import { canManageDataStores, canViewAuditLog, canViewDeadLetters } from "../../features/auth/rbac";
 import { useAuth } from "../../features/auth/use-auth";
-
-const nav = [
-  ["Workflows", "/workflows"],
-  ["Templates", "/templates"],
-  ["Executions", "/executions"],
-  ["Approvals", "/approvals"],
-  ["Notifications", "/notifications"],
-  ["Connections", "/connections"],
-  ["Members", "/members"],
-  ["Settings", "/settings"]
-];
+import { BrandHero } from "../../components/brand";
 
 export default function DashboardPage() {
-  const { organizations, activeOrganizationId } = useAuth();
-  const role = organizations.find((organization) => organization.id === activeOrganizationId)?.role;
-  const visibleNav = [
-    ...nav,
-    ...(canManageDataStores(role) ? [["Data Stores", "/data-stores"]] : []),
-    ...(canViewDeadLetters(role) ? [["Dead letters", "/dead-letter-executions"]] : []),
-    ...(canViewAuditLog(role) ? [["Audit log", "/audit-log"]] : [])
-  ];
+  const { user } = useAuth();
 
   return (
-    <main className="shell">
-      <aside className="sidebar stack">
-        <strong>Flowmind</strong>
-        {visibleNav.map(([label, href]) => (
-          <Link key={href} href={href}>
-            {label}
-          </Link>
-        ))}
-      </aside>
-      <section className="content stack">
-        <h1>Dashboard</h1>
+    <main className="content stack">
+        <BrandHero eyebrow="Workspace overview" title={`Welcome${user?.name ? `, ${user.name.split(" ")[0]}` : ""}.`}><p>See what is moving, what needs attention and where to build next.</p><div className="brand-actions"><Link href="/workflows">Open workflows</Link><Link className="secondary" href="/templates">Explore templates</Link></div></BrandHero>
         <div className="grid">
-          <div className="panel">
+          <div className="panel stat-card">
             <strong>Workflow executions</strong>
-            <p className="muted">No executions yet.</p>
+            <p className="stat-value">—</p><p className="muted">Live activity will appear here.</p>
           </div>
-          <div className="panel">
+          <div className="panel stat-card">
             <strong>Queue health</strong>
-            <p className="muted">Connect the API to see live metrics.</p>
+            <p className="stat-value">Ready</p><p className="muted">Connect the API to see live metrics.</p>
           </div>
-          <div className="panel">
+          <div className="panel stat-card">
             <strong>LLM cost</strong>
-            <p className="muted">Cost tracking starts when AI steps run.</p>
+            <p className="stat-value">—</p><p className="muted">Tracking starts when AI steps run.</p>
           </div>
         </div>
-      </section>
     </main>
   );
 }
