@@ -11,13 +11,15 @@ import { CreateWorkflowDto } from "./dto/create-workflow.dto";
 import { CreateWorkflowVersionDto } from "./dto/create-workflow-version.dto";
 import { ListWorkflowVersionsQueryDto } from "./dto/list-workflow-versions-query.dto";
 import { WorkflowsService } from "./workflows.service";
+import { CloneWorkflowDto } from "../workflow-templates/dto/workflow-template.dto";
+import { WorkflowTemplatesService } from "../workflow-templates/workflow-templates.service";
 
 @ApiTags("workflows")
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, OrganizationGuard, RolesGuard)
 @Controller("workflows")
 export class WorkflowsController {
-  constructor(private readonly workflowsService: WorkflowsService) {}
+  constructor(private readonly workflowsService: WorkflowsService, private readonly workflowTemplates: WorkflowTemplatesService) {}
 
   @Get()
   list(@OrganizationContext() org: OrganizationContext) {
@@ -54,6 +56,18 @@ export class WorkflowsController {
     @Body() dto: CreateWorkflowVersionDto
   ) {
     return this.workflowsService.createVersion(org.organizationId, user.userId, workflowId, dto);
+  }
+
+  @Post(":workflowId/clone-preview")
+  @Roles(OrganizationRole.Viewer)
+  clonePreview(@OrganizationContext() org: OrganizationContext, @Param("workflowId") workflowId: string, @Body() dto: CloneWorkflowDto) {
+    return this.workflowTemplates.clonePreview(org.organizationId, workflowId, dto);
+  }
+
+  @Post(":workflowId/clone")
+  @Roles(OrganizationRole.Editor)
+  clone(@OrganizationContext() org: OrganizationContext, @CurrentUser() user: CurrentUser, @Param("workflowId") workflowId: string, @Body() dto: CloneWorkflowDto) {
+    return this.workflowTemplates.clone(org.organizationId, user.userId, workflowId, dto);
   }
 
   @Get(":workflowId/versions")

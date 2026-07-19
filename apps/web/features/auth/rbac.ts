@@ -14,6 +14,8 @@ export function canRunWorkflow(role: OrganizationRole) {
   return roleRank(role) >= rank.editor;
 }
 export function canRestoreWorkflowVersion(role: OrganizationRole) { return roleRank(role) >= rank.editor; }
+export function canCreateTemplate(role: OrganizationRole) { return roleRank(role) >= rank.editor; }
+export function canAdminTemplate(role: OrganizationRole) { return roleRank(role) >= rank.admin; }
 
 export function canCancelExecution(role: OrganizationRole) {
   return roleRank(role) >= rank.editor;

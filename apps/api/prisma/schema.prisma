@@ -38,6 +38,12 @@ enum WorkflowVersionStatus {
   ARCHIVED
 }
 
+enum WorkflowTemplateStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
 enum ExecutionStatus {
   PENDING
   QUEUED
@@ -164,6 +170,7 @@ model User {
   requestedExecutionCancels Execution[]           @relation("ExecutionCancelRequestedBy")
   workflowTestRuns          WorkflowTestRun[]      @relation("WorkflowTestRunCreatedBy")
   decidedApprovals          ApprovalRequest[]
+  workflowTemplates         WorkflowTemplate[]        @relation("WorkflowTemplateCreatedBy")
 
   @@map("users")
 }
@@ -228,6 +235,7 @@ model Organization {
   notificationRules     NotificationRule[]
   notificationRequests  NotificationRequest[]
   notificationDeliveries NotificationDelivery[]
+  workflowTemplates      WorkflowTemplate[]
 
   @@map("organizations")
 }
@@ -270,6 +278,7 @@ model Workflow {
   deadLetterExecutions DeadLetterExecution[]
   variables            WorkflowVariable[]
   approvalRequests     ApprovalRequest[]
+  templateVersions     WorkflowTemplateVersion[] @relation("TemplateSourceWorkflow")
 
   @@index([organizationId, status])
   @@map("workflows")
@@ -300,11 +309,52 @@ model WorkflowVersion {
   approvalRequests     ApprovalRequest[]
   restoredFrom         WorkflowVersion?       @relation("WorkflowVersionRestore", fields: [restoredFromVersionId], references: [id], onDelete: Restrict)
   restoredVersions     WorkflowVersion[]      @relation("WorkflowVersionRestore")
+  templateVersions     WorkflowTemplateVersion[] @relation("TemplateSourceWorkflowVersion")
 
   @@unique([workflowId, versionNumber])
   @@index([organizationId, workflowId])
   @@index([restoredFromVersionId])
   @@map("workflow_versions")
+}
+
+model WorkflowTemplate {
+  id              String                 @id @default(uuid())
+  organizationId  String                 @map("organization_id")
+  name            String
+  description     String?
+  status          WorkflowTemplateStatus @default(DRAFT)
+  createdByUserId String                 @map("created_by_user_id")
+  createdAt       DateTime               @default(now()) @map("created_at")
+  updatedAt       DateTime               @updatedAt @map("updated_at")
+
+  organization Organization              @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdBy    User                      @relation("WorkflowTemplateCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  versions     WorkflowTemplateVersion[]
+
+  @@index([organizationId, status, updatedAt])
+  @@map("workflow_templates")
+}
+
+model WorkflowTemplateVersion {
+  id                      String    @id @default(uuid())
+  templateId              String    @map("template_id")
+  versionNumber           Int       @map("version_number")
+  definitionJson          Json      @map("definition_json")
+  dependencyManifestJson  Json      @map("dependency_manifest_json")
+  sourceWorkflowId        String?   @map("source_workflow_id")
+  sourceWorkflowVersionId String?   @map("source_workflow_version_id")
+  createdAt               DateTime  @default(now()) @map("created_at")
+  publishedAt             DateTime? @map("published_at")
+
+  template             WorkflowTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  sourceWorkflow       Workflow?         @relation("TemplateSourceWorkflow", fields: [sourceWorkflowId], references: [id], onDelete: Restrict)
+  sourceWorkflowVersion WorkflowVersion? @relation("TemplateSourceWorkflowVersion", fields: [sourceWorkflowVersionId], references: [id], onDelete: Restrict)
+
+  @@unique([templateId, versionNumber])
+  @@index([templateId, publishedAt])
+  @@index([sourceWorkflowId])
+  @@index([sourceWorkflowVersionId])
+  @@map("workflow_template_versions")
 }
 
 model WorkflowStep {

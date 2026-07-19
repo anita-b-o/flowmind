@@ -87,6 +87,11 @@ export class ApiMetricsService implements OnModuleInit, OnModuleDestroy {
   readonly workflowVersionDiffRequests = new Counter({ name: "flowmind_workflow_version_diff_requests_total", help: "Workflow version diff requests.", labelNames: ["outcome", "max_severity"], registers: [this.registry] });
   readonly workflowVersionRestores = new Counter({ name: "flowmind_workflow_version_restores_total", help: "Workflow version restore requests.", labelNames: ["outcome"], registers: [this.registry] });
   readonly workflowVersionRestorePreviews = new Counter({ name: "flowmind_workflow_version_restore_previews_total", help: "Workflow version restore preview requests.", labelNames: ["outcome", "publishable"], registers: [this.registry] });
+  readonly workflowTemplatesCreated = new Counter({ name: "flowmind_workflow_templates_created_total", help: "Workflow template creation outcomes.", labelNames: ["outcome"], registers: [this.registry] });
+  readonly workflowTemplateInstantiations = new Counter({ name: "flowmind_workflow_template_instantiations_total", help: "Workflow template instantiation outcomes.", labelNames: ["outcome"], registers: [this.registry] });
+  readonly workflowClones = new Counter({ name: "flowmind_workflow_clones_total", help: "Workflow clone outcomes.", labelNames: ["outcome"], registers: [this.registry] });
+  readonly workflowMappingFailures = new Counter({ name: "flowmind_workflow_template_mapping_failures_total", help: "Template mapping failures by safe category.", labelNames: ["category"], registers: [this.registry] });
+  readonly workflowTemplateValidationFailures = new Counter({ name: "flowmind_workflow_template_validation_failures_total", help: "Template validation failures by safe category.", labelNames: ["category"], registers: [this.registry] });
   readonly manualExecutions = new Counter({
     name: "flowmind_manual_executions_total",
     help: "Manual execution requests.",
@@ -227,6 +232,11 @@ export class ApiMetricsService implements OnModuleInit, OnModuleDestroy {
   recordWorkflowVersionDiff(outcome: string, severity: string) { this.workflowVersionDiffRequests.inc({ outcome: safeMetricValue(outcome), max_severity: ["SAFE", "WARNING", "BREAKING"].includes(severity) ? severity : "SAFE" }); }
   recordWorkflowVersionRestore(outcome: string) { this.workflowVersionRestores.inc({ outcome: safeMetricValue(outcome) }); }
   recordWorkflowVersionRestorePreview(outcome: string, publishable: boolean) { this.workflowVersionRestorePreviews.inc({ outcome: safeMetricValue(outcome), publishable: String(publishable) }); }
+  recordWorkflowTemplateCreated(outcome: string) { this.workflowTemplatesCreated.inc({ outcome: safeMetricValue(outcome) }); }
+  recordWorkflowInstantiation(outcome: string) { this.workflowTemplateInstantiations.inc({ outcome: safeMetricValue(outcome) }); }
+  recordWorkflowClone(outcome: string) { this.workflowClones.inc({ outcome: safeMetricValue(outcome) }); }
+  recordWorkflowMappingFailure(category: string) { this.workflowMappingFailures.inc({ category: safeMetricValue(category) }); }
+  recordWorkflowTemplateValidationFailure(category: string) { this.workflowTemplateValidationFailures.inc({ category: safeMetricValue(category) }); }
 
   recordManualExecution(outcome: "success" | "conflict" | "enqueue_failed" | "rejected") {
     this.manualExecutions.inc({ outcome });

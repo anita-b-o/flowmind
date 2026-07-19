@@ -6,6 +6,7 @@ import { useAuth } from "../../features/auth/use-auth";
 
 const nav = [
   ["Workflows", "/workflows"],
+  ["Templates", "/templates"],
   ["Executions", "/executions"],
   ["Approvals", "/approvals"],
   ["Notifications", "/notifications"],

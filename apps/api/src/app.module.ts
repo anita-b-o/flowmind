@@ -22,6 +22,7 @@ import { DataStoresModule } from "./data-stores/data-stores.module";
 import { ApprovalsModule } from "./approvals/approvals.module";
 import { InternalEventsModule } from "./internal-events/internal-events.module";
 import { NotificationsModule } from "./notifications/notifications.module";
+import { WorkflowTemplatesModule } from "./workflow-templates/workflow-templates.module";
 
 const redisUrl = new URL(process.env.REDIS_URL ?? "redis://localhost:6379");
 
@@ -47,6 +48,7 @@ const redisUrl = new URL(process.env.REDIS_URL ?? "redis://localhost:6379");
     DataStoresModule,
     ExpressionsModule,
     WorkflowsModule,
+    WorkflowTemplatesModule,
     WorkflowTestRunsModule,
     TriggersModule,
     ExecutionsModule,

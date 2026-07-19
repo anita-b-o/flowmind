@@ -1,0 +1,8 @@
+export type TemplateStatus = "DRAFT" | "PUBLISHED" | "ARCHIVED";
+export type TemplateDependency = { dependencyKey: string; kind: "CONNECTION" | "DATA_STORE" | "WORKFLOW"; classification: "PORTABLE" | "REQUIRES_MAPPING" | "MISSING" | "UNSUPPORTED"; stepKey: string; path: string; sourceReference?: { id?: string; name?: string; workflowVersionId?: string }; expectedType?: string; message: string };
+export type DependencyManifest = { schemaVersion: 1; dependencies: TemplateDependency[]; triggerHints: Array<Record<string, unknown>>; warnings: string[] };
+export type WorkflowTemplate = { id: string; name: string; description?: string | null; status: TemplateStatus; createdAt: string; updatedAt: string; versionCount: number; latestVersion?: TemplateVersion };
+export type TemplateVersion = { id: string; templateId: string; versionNumber: number; definitionJson?: Record<string, unknown>; dependencyManifestJson: DependencyManifest; sourceWorkflowId?: string; sourceWorkflowVersionId?: string; createdAt: string; publishedAt?: string | null };
+export type TemplateList = { items: WorkflowTemplate[]; pageSize: number; hasMore: boolean; nextCursor: string | null };
+export type DependencyMapping = { dependencyKey: string; targetResourceId: string; targetWorkflowVersionId?: string };
+export type TemplatePreview = { resourcesRequired: TemplateDependency[]; mappingsResolved: DependencyMapping[]; mappingsMissing: TemplateDependency[]; warnings: string[]; triggerHints: Array<Record<string, unknown>>; blockers: Array<{ code: string; message: string; dependencyKey?: string }>; canInstantiate: boolean; copied: string[]; notCopied: string[] };

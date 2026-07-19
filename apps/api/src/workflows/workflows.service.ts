@@ -321,6 +321,17 @@ export class WorkflowsService {
     });
   }
 
+  /** Shared validation boundary used by safe template instantiation and cloning. */
+  async validateDefinitionForMaterialization(organizationId: string, definition: unknown) {
+    await this.validateStoredDefinitionForPublish(organizationId, "__new_workflow__", definition);
+  }
+
+  /** Structural/safety validation for a portable snapshot; external resources are classified separately. */
+  validateDefinitionForTemplate(definition: unknown) {
+    const parsed = this.validateStoredDefinition(definition, true);
+    this.assertNoInlineCredentials([...parsed.steps, parsed.trigger]);
+  }
+
   private validateStoredDefinition(value: unknown, includeExpressions: boolean) {
     const definition = isRecord(value) ? value : {};
     const trigger = isRecord(definition.trigger) ? definition.trigger as any : null;
