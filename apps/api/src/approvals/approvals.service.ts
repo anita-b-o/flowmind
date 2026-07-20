@@ -15,7 +15,7 @@ export class ApprovalsService {
   async list(organizationId: string, query: ListApprovalsQueryDto) {
     const where: Prisma.ApprovalRequestWhereInput = { organizationId, ...(query.status ? { status: query.status as ApprovalStatus } : {}), ...(query.workflowId ? { workflowId: query.workflowId } : {}), ...(query.executionId ? { executionId: query.executionId } : {}), ...((query.from || query.to) ? { requestedAt: { ...(query.from ? { gte: new Date(query.from) } : {}), ...(query.to ? { lte: new Date(query.to) } : {}) } } : {}) };
     const [items, total] = await this.prisma.$transaction([
-      this.prisma.approvalRequest.findMany({ where, orderBy: { requestedAt: "desc" }, skip: (query.page - 1) * query.pageSize, take: query.pageSize, include: { workflow: { select: { id: true, name: true } } } }),
+      this.prisma.approvalRequest.findMany({ where, orderBy: [{ requestedAt: "desc" }, { id: "desc" }], skip: (query.page - 1) * query.pageSize, take: query.pageSize, include: { workflow: { select: { id: true, name: true } } } }),
       this.prisma.approvalRequest.count({ where })
     ]);
     return { items: items.map(publicApproval), page: query.page, pageSize: query.pageSize, total };

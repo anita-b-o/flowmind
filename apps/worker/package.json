@@ -4,12 +4,13 @@
   "private": true,
   "scripts": {
     "dev": "nest start --watch",
+    "start:prod": "node dist/main.js",
     "build": "nest build",
     "lint": "tsc -p tsconfig.json --noEmit",
     "test": "jest --passWithNoTests --runInBand",
     "test:unit": "jest --passWithNoTests --runInBand --testRegex 'src/(?!.*\\.integration\\.spec\\.ts$).*\\.spec\\.ts$'",
     "test:integration": "flock -x /tmp/flowmind-worker-db-tests.lock jest --passWithNoTests --runInBand --testRegex '.*\\.integration\\.spec\\.ts$'",
-    "test:e2e": "jest --passWithNoTests --runInBand --testRegex '.*\\.e2e-spec\\.ts$'",
+    "test:e2e": "jest --runInBand --testRegex '.*\\.e2e-spec\\.ts$'",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
@@ -26,18 +27,19 @@
     "bullmq": "^5.34.2",
     "ioredis": "^5.4.2",
     "nestjs-pino": "^4.6.1",
-    "nodemailer": "^6.9.16",
+    "nodemailer": "^9.0.3",
     "pino": "^10.3.1",
     "prom-client": "^15.1.3",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1"
+    ,"undici": "^7.16.0"
   },
   "devDependencies": {
     "@nestjs/cli": "^10.4.8",
     "@nestjs/testing": "^10.4.15",
     "@types/jest": "^29.5.14",
     "@types/node": "^22.10.2",
-    "@types/nodemailer": "^6.4.17",
+    "@types/nodemailer": "^8.0.1",
     "@typescript-eslint/eslint-plugin": "^8.18.2",
     "@typescript-eslint/parser": "^8.18.2",
     "eslint": "^9.17.0",

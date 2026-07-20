@@ -4,7 +4,7 @@ import { AuditLogsService } from "../audit-logs/audit-logs.service";
 import { ApiMetricsService } from "../metrics/metrics.service";
 import { PrismaService } from "../prisma/prisma.service";
 import { WorkflowsService } from "../workflows/workflows.service";
-import { CloneWorkflowDto, CreateTemplateFromWorkflowVersionDto, CreateTemplateVersionDto, InstantiateTemplateDto, ListWorkflowTemplatesQueryDto, PreviewTemplateDto } from "./dto/workflow-template.dto";
+import { CloneWorkflowDto, CreateTemplateFromWorkflowVersionDto, CreateTemplateVersionDto, InstantiateTemplateDto, ListTemplateVersionsQueryDto, ListWorkflowTemplatesQueryDto, PreviewTemplateDto } from "./dto/workflow-template.dto";
 import { applyMappings, extractDependencies, normalizePortableDefinition, safeTriggerHints, type DependencyManifest, type Mapping, type TemplateDependency } from "./workflow-template-pipeline";
 
 @Injectable()
@@ -30,9 +30,12 @@ export class WorkflowTemplatesService {
     return publicTemplate(row);
   }
 
-  async versions(organizationId: string, templateId: string) {
+  async versions(organizationId: string, templateId: string, query: ListTemplateVersionsQueryDto) {
     await this.assertTemplate(organizationId, templateId);
-    return this.prisma.workflowTemplateVersion.findMany({ where: { templateId, template: { organizationId } }, orderBy: { versionNumber: "desc" }, select: versionSelect });
+    const limit = Math.min(query.limit ?? 20, 100); const cursor = decodeVersionCursor(query.cursor);
+    const rows = await this.prisma.workflowTemplateVersion.findMany({ where: { templateId, template: { organizationId }, ...(cursor ? { OR: [{ versionNumber: { lt: cursor.versionNumber } }, { versionNumber: cursor.versionNumber, id: { lt: cursor.id } }] } : {}) }, orderBy: [{ versionNumber: "desc" }, { id: "desc" }], take: limit + 1, select: versionSelect });
+    const hasMore = rows.length > limit; const items = rows.slice(0, limit);
+    return { items: items.map(publicTemplateVersion), pageSize: limit, hasMore, nextCursor: hasMore ? encodeVersionCursor(items.at(-1)!) : null };
   }
 
   async versionDetail(organizationId: string, templateId: string, versionId: string) {
@@ -219,3 +222,5 @@ function assertSnapshotConsistent(definitionValue: unknown, rows: Array<{ key: s
 function mergeAutoMappings(dependencies: TemplateDependency[], explicit: Mapping[]) { const byKey = new Map(dependencies.flatMap((dependency) => dependency.sourceReference?.id ? [[dependency.dependencyKey, { dependencyKey: dependency.dependencyKey, targetResourceId: dependency.sourceReference.id, ...(dependency.sourceReference.workflowVersionId ? { targetWorkflowVersionId: dependency.sourceReference.workflowVersionId } : {}) } as Mapping]] : [])); for (const mapping of explicit) byKey.set(mapping.dependencyKey, mapping); return [...byKey.values()]; }
 function encodeCursor(row: { id: string; updatedAt: Date }) { return Buffer.from(JSON.stringify({ id: row.id, updatedAt: row.updatedAt.toISOString() })).toString("base64url"); }
 function decodeCursor(value?: string) { if (!value) return null; try { const parsed = JSON.parse(Buffer.from(value, "base64url").toString("utf8")); const updatedAt = new Date(parsed.updatedAt); if (!parsed.id || Number.isNaN(updatedAt.getTime())) throw new Error(); return { id: String(parsed.id), updatedAt }; } catch { throw new BadRequestException("Invalid template cursor"); } }
+function encodeVersionCursor(row: { id: string; versionNumber: number }) { return Buffer.from(JSON.stringify({ id: row.id, versionNumber: row.versionNumber })).toString("base64url"); }
+function decodeVersionCursor(value?: string) { if (!value) return null; try { const parsed = JSON.parse(Buffer.from(value, "base64url").toString("utf8")); if (!parsed.id || !Number.isInteger(parsed.versionNumber)) throw new Error(); return { id: String(parsed.id), versionNumber: Number(parsed.versionNumber) }; } catch { throw new BadRequestException("Invalid template version cursor"); } }

@@ -21,7 +21,7 @@ describe("event trigger API", () => {
     await request(app.getHttpServer()).post(`/workflows/${workflow.id}/triggers/event`).set(headers(editor.token, organization.id)).send({ name: "Foreign", eventType: "DATA_STORE_RECORD_CREATED", filters: { dataStoreId: foreignStore.id } }).expect(404);
     const created = await request(app.getHttpServer()).post(`/workflows/${workflow.id}/triggers/event`).set(headers(editor.token, organization.id)).send({ name: "Completed", eventType: "EXECUTION_COMPLETED", filters: { workflowId: workflow.id, origin: "manual" } }).expect(201);
     expect(created.body).toMatchObject({ type: "event", eventType: "EXECUTION_COMPLETED", enabled: true, filters: { workflowId: workflow.id, origin: "manual" } });
-    const listed = await request(app.getHttpServer()).get(`/workflows/${workflow.id}/triggers/event`).set(headers(viewer.token, organization.id)).expect(200); expect(listed.body).toHaveLength(1);
+    const listed = await request(app.getHttpServer()).get(`/workflows/${workflow.id}/triggers/event`).set(headers(viewer.token, organization.id)).expect(200); expect(listed.body.items).toHaveLength(1); expect(listed.body).toMatchObject({ pageSize: 20, hasMore: false, nextCursor: null });
     await request(app.getHttpServer()).patch(`/workflows/${workflow.id}/triggers/${created.body.id}/disable`).set(headers(editor.token, organization.id)).send({}).expect(200);
     await request(app.getHttpServer()).delete(`/workflows/${workflow.id}/triggers/${created.body.id}`).set(headers(editor.token, organization.id)).expect(200);
     expect(await prisma.auditLog.count({ where: { resourceId: created.body.id, action: { startsWith: "event.trigger" } } })).toBe(3);

@@ -1,0 +1,13 @@
+{
+  "name": "@automation/ai-service",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "bootstrap": ".venv/bin/python -m pip install -e '.[dev]'",
+    "build": ".venv/bin/python -m compileall -q app",
+    "lint": ".venv/bin/python -m ruff check app tests",
+    "typecheck": ".venv/bin/python -m compileall -q app tests",
+    "test": ".venv/bin/python -m pytest -q",
+    "test:unit": ".venv/bin/python -m pytest -q"
+  }
+}

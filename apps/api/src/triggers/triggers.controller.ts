@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, NotFoundException, Param, Patch, Post, UseGuards } from "@nestjs/common";
+import { Body, Controller, Delete, Get, NotFoundException, Param, Patch, Post, Query, UseGuards } from "@nestjs/common";
 import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
 import { OrganizationRole } from "@automation/shared-types";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
@@ -12,7 +12,7 @@ import { CreateScheduledTriggerDto, PreviewScheduledTriggerDto, UpdateScheduledT
 import { ScheduledTriggersService } from "./scheduled-triggers.service";
 import { TriggersService } from "./triggers.service";
 import { EventTriggersService } from "./event-triggers.service";
-import { CreateEventTriggerDto, UpdateEventTriggerDto } from "./dto/event-trigger.dto";
+import { CreateEventTriggerDto, ListEventTriggersDto, UpdateEventTriggerDto } from "./dto/event-trigger.dto";
 
 @ApiTags("triggers")
 @ApiBearerAuth()
@@ -54,8 +54,8 @@ export class TriggersController {
   }
 
   @Get("event")
-  listEvents(@OrganizationContext() org: OrganizationContext, @Param("workflowId") workflowId: string) {
-    return this.eventTriggersService.list(org.organizationId, workflowId);
+  listEvents(@OrganizationContext() org: OrganizationContext, @Param("workflowId") workflowId: string, @Query() query: ListEventTriggersDto) {
+    return this.eventTriggersService.list(org.organizationId, workflowId, query);
   }
 
   @Get(":triggerId/event")

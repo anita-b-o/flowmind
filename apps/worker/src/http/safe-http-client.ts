@@ -1,5 +1,7 @@
 import { Inject, Injectable, Optional } from "@nestjs/common";
 import { lookup } from "node:dns/promises";
+import net from "node:net";
+import { Agent, fetch as undiciFetch } from "undici";
 import { isBlockedIp } from "./ip-range";
 
 const ALLOWED_METHODS = new Set(["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"]);
@@ -41,14 +43,14 @@ export interface SafeHttpResponse {
 @Injectable()
 export class SafeHttpClient {
   private readonly resolveHost: (hostname: string) => Promise<string[]>;
-  private readonly fetcher: typeof fetch;
+  private readonly fetcher?: typeof fetch;
 
   constructor(
     @Optional() @Inject(SAFE_HTTP_RESOLVER) resolveHost?: (hostname: string) => Promise<string[]>,
     @Optional() @Inject(SAFE_HTTP_FETCHER) fetcher?: typeof fetch
   ) {
     this.resolveHost = resolveHost ?? defaultResolve;
-    this.fetcher = fetcher ?? fetch;
+    this.fetcher = fetcher;
   }
 
   async request(input: SafeHttpRequest): Promise<SafeHttpResponse> {
@@ -64,12 +66,13 @@ export class SafeHttpClient {
     if (redirectCount > 3) {
       throw new Error("Too many redirects");
     }
-    await this.assertSafeUrl(url);
     const method = (input.method ?? "GET").toUpperCase();
     if (!ALLOWED_METHODS.has(method)) {
       throw new Error(`HTTP method ${method} is not allowed`);
     }
-    const response = await this.fetcher(url.toString(), {
+    const maxResponseBytes = input.maxResponseBytes ?? 1_048_576;
+    const addresses = await this.assertSafeUrl(url);
+    const init: RequestInit = {
       method,
       headers: {
         "content-type": "application/json",
@@ -78,7 +81,10 @@ export class SafeHttpClient {
       body: input.body === undefined || method === "GET" || method === "HEAD" ? undefined : JSON.stringify(input.body),
       redirect: "manual",
       signal: AbortSignal.timeout(input.timeoutMs ?? 15_000)
-    });
+    };
+    const response = this.fetcher
+      ? await this.fetcher(url.toString(), init)
+      : await pinnedFetch(url, init, addresses[0]!, maxResponseBytes);
     if (isRedirect(response.status)) {
       const location = response.headers.get("location");
       if (!location) {
@@ -88,7 +94,6 @@ export class SafeHttpClient {
       const nextHeaders = nextUrl.host === url.host ? headers : {};
       return this.requestWithRedirects(input, redirectCount + 1, nextUrl, nextHeaders);
     }
-    const maxResponseBytes = input.maxResponseBytes ?? 1_048_576;
     const contentLength = Number(response.headers.get("content-length") ?? 0);
     if (contentLength > maxResponseBytes) {
       throw new Error("HTTP response is too large");
@@ -120,6 +125,39 @@ export class SafeHttpClient {
     if (!addresses.length || addresses.some((address) => isBlockedIp(address))) {
       throw new Error("Private, reserved or metadata IP is not allowed");
     }
+    return addresses;
+  }
+}
+
+async function pinnedFetch(url: URL, init: RequestInit, address: string, maxBytes: number): Promise<Response> {
+  const family = net.isIP(address);
+  if (!family) throw new Error("Resolved address is invalid");
+  const dispatcher = new Agent({
+    connect: {
+      lookup: (_hostname: string, _options: unknown, callback: (error: Error | null, address: string, family: number) => void) =>
+        callback(null, address, family)
+    } as any
+  });
+  try {
+    const response = await undiciFetch(url, { ...(init as any), dispatcher });
+    const declared = Number(response.headers.get("content-length") ?? 0);
+    if (declared > maxBytes) throw new Error("HTTP response is too large");
+    const chunks: Uint8Array[] = [];
+    let size = 0;
+    if (response.body) {
+      for await (const chunk of response.body as any as AsyncIterable<Uint8Array>) {
+        size += chunk.byteLength;
+        if (size > maxBytes) throw new Error("HTTP response is too large");
+        chunks.push(chunk);
+      }
+    }
+    return new Response(Buffer.concat(chunks.map((chunk) => Buffer.from(chunk))), {
+      status: response.status,
+      statusText: response.statusText,
+      headers: Object.fromEntries(response.headers.entries())
+    });
+  } finally {
+    await dispatcher.close();
   }
 }
 

@@ -10,7 +10,14 @@ from app.core.trace import TraceMiddleware
 from app.providers.errors import ProviderError
 
 configure_logging()
-app = FastAPI(title="Automation AI Service", version="0.1.0")
+docs_enabled = settings.environment != "production" or settings.api_docs_enabled
+app = FastAPI(
+    title="Automation AI Service",
+    version="0.1.0",
+    docs_url="/docs" if docs_enabled else None,
+    redoc_url=None,
+    openapi_url="/openapi.json" if docs_enabled else None,
+)
 app.add_middleware(ServiceAuthMiddleware)
 app.add_middleware(TraceMiddleware)
 

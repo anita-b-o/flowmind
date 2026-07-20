@@ -34,6 +34,9 @@ export class WorkerMetricsService implements OnModuleInit, OnModuleDestroy {
   readonly notificationRetries = new Counter({ name: "flowmind_notification_retries_total", help: "Notification retries scheduled.", labelNames: ["channel", "error_category"], registers: [this.registry] });
   readonly notificationDeliveryLatency = new Histogram({ name: "flowmind_notification_delivery_latency_seconds", help: "Notification request to terminal delivery latency.", labelNames: ["channel", "outcome"], buckets: [0.1, 0.5, 1, 2.5, 5, 10, 30, 60, 300, 1800], registers: [this.registry] });
   readonly notificationBacklog = new Gauge({ name: "flowmind_notification_backlog", help: "Durable notification backlog by state.", labelNames: ["state"], registers: [this.registry] });
+  readonly executionBacklog = new Gauge({ name: "flowmind_execution_backlog", help: "Durable execution backlog by bounded state.", labelNames: ["state"], registers: [this.registry] });
+  readonly approvalBacklog = new Gauge({ name: "flowmind_approval_backlog", help: "Pending durable approval requests.", registers: [this.registry] });
+  readonly deadLetterBacklog = new Gauge({ name: "flowmind_dead_letter_backlog", help: "Unresolved durable execution dead letters.", registers: [this.registry] });
 
   readonly jobsReceived = new Counter({
     name: "flowmind_workflow_jobs_received_total",

@@ -91,12 +91,20 @@ describe("DataStoreRuntimeService", () => {
 });
 
 async function cleanDatabase() {
+  await prisma.workflowTemplateVersion.deleteMany();
+  await prisma.workflowTemplate.deleteMany();
+  await prisma.notificationDelivery.deleteMany();
+  await prisma.notificationRequest.deleteMany();
+  await prisma.notificationRule.deleteMany();
   await prisma.dataStoreRecord.deleteMany();
   await prisma.dataStore.deleteMany();
   await prisma.auditLog.deleteMany();
   await prisma.internalRecord.deleteMany();
   await prisma.deadLetterExecution.deleteMany();
   await prisma.workflowTestRun.deleteMany();
+  await prisma.approvalRequest.deleteMany();
+  await prisma.executionStepReuse.deleteMany();
+  await prisma.stepExecutionAttempt.deleteMany();
   await prisma.stepExecution.deleteMany();
   await prisma.execution.deleteMany();
   await prisma.webhookEvent.deleteMany();
@@ -106,6 +114,10 @@ async function cleanDatabase() {
   await prisma.workflow.updateMany({ data: { activeVersionId: null } });
   await prisma.workflowVersion.deleteMany();
   await prisma.workflow.deleteMany();
+  await prisma.secret.deleteMany();
+  await prisma.connection.deleteMany();
+  await prisma.idempotencyKey.deleteMany();
+  await prisma.refreshTokenSession.deleteMany();
   await prisma.organizationMember.deleteMany();
   await prisma.user.deleteMany();
   await prisma.organization.deleteMany();

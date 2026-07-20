@@ -15,6 +15,9 @@ const baseEnvSchema = z.object({
   CORS_ORIGIN: z.string().default("http://localhost:3000"),
   PUBLIC_APP_URL: z.string().url().default("http://localhost:3000"),
   AUTH_ORIGIN_REQUIRED: z.coerce.boolean().optional(),
+  AUTH_RATE_LIMIT_WINDOW_SECONDS: z.coerce.number().int().min(10).max(3600).default(300),
+  AUTH_RATE_LIMIT_MAX_PER_IP: z.coerce.number().int().min(1).max(1000).default(30),
+  AUTH_RATE_LIMIT_MAX_PER_ACCOUNT: z.coerce.number().int().min(1).max(1000).default(10),
   SECRET_ENCRYPTION_KEY: z.string().min(16),
   CONNECTION_ENCRYPTION_KEY: z.string().optional(),
   CONNECTION_ENCRYPTION_VERSION: z.coerce.number().int().positive().default(1),
@@ -48,7 +51,8 @@ const baseEnvSchema = z.object({
   LOG_REDACT_ENABLED: z.coerce.boolean().default(true),
   MAX_LOG_PAYLOAD_BYTES: z.coerce.number().int().positive().default(16_384),
   REQUEST_ID_HEADER: z.string().default("x-request-id"),
-  CORRELATION_ID_HEADER: z.string().default("x-correlation-id")
+  CORRELATION_ID_HEADER: z.string().default("x-correlation-id"),
+  API_DOCS_ENABLED: z.coerce.boolean().optional()
 });
 
 const webEnvSchema = z.object({
@@ -68,7 +72,40 @@ export function parseBaseEnv(env: NodeJS.ProcessEnv): BaseEnv {
   const parsed = baseEnvSchema.parse(env);
   validateMetricsConfig(parsed);
   validateConnectionEncryptionConfig(parsed);
+  validateProductionSecurity(parsed);
   return parsed;
+}
+
+function validateProductionSecurity(env: BaseEnv) {
+  if (env.NODE_ENV !== "production") return;
+  const insecure = new Set(["change-me-access-secret", "change-me-refresh-secret", "change-me-session-ip-pepper", "change-me-webhook-token-pepper", "dev-ai-service-key"]);
+  for (const [name, value] of [
+    ["JWT_ACCESS_SECRET", env.JWT_ACCESS_SECRET],
+    ["JWT_REFRESH_SECRET", env.JWT_REFRESH_SECRET],
+    ["SESSION_IP_HASH_PEPPER", env.SESSION_IP_HASH_PEPPER],
+    ["WEBHOOK_TOKEN_PEPPER", env.WEBHOOK_TOKEN_PEPPER],
+    ["AI_SERVICE_API_KEY", env.AI_SERVICE_API_KEY]
+  ] as const) {
+    if (value.length < 32 || insecure.has(value)) throw new Error(`${name} must contain at least 32 non-default characters in production`);
+  }
+  if (env.REFRESH_COOKIE_SAME_SITE === "none") {
+    throw new Error("REFRESH_COOKIE_SAME_SITE=none is not supported in production until CSRF token protection is enabled");
+  }
+}
+
+export function redisConnectionOptions(value: string) {
+  const url = new URL(value);
+  if (!["redis:", "rediss:"].includes(url.protocol)) throw new Error("REDIS_URL must use redis:// or rediss://");
+  const database = url.pathname && url.pathname !== "/" ? Number(url.pathname.slice(1)) : 0;
+  if (!Number.isInteger(database) || database < 0) throw new Error("REDIS_URL database must be a non-negative integer");
+  return {
+    host: url.hostname,
+    port: Number(url.port || (url.protocol === "rediss:" ? 6380 : 6379)),
+    username: url.username ? decodeURIComponent(url.username) : undefined,
+    password: url.password ? decodeURIComponent(url.password) : undefined,
+    db: database,
+    tls: url.protocol === "rediss:" ? {} : undefined
+  };
 }
 
 export function parseWebEnv(env: NodeJS.ProcessEnv): WebEnv {

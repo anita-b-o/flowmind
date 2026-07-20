@@ -1,0 +1,81 @@
+groups:
+  - name: flowmind-rc
+    rules:
+      - alert: FlowmindServiceDown
+        expr: up{service=~"api|worker|ai-service"} == 0
+        for: 2m
+        labels: { severity: critical }
+        annotations:
+          summary: "FlowMind {{ $labels.service }} is unavailable"
+      - alert: FlowmindExecutionQueueLag
+        expr: histogram_quantile(0.95, sum by (le) (rate(flowmind_execution_queue_latency_seconds_bucket[10m]))) > 60
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "Execution queue p95 latency exceeds 60 seconds"
+      - alert: FlowmindExecutionFailures
+        expr: sum(rate(flowmind_workflow_executions_failed_total[10m])) > 0.1
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "Execution failures are elevated"
+      - alert: FlowmindInternalEventBacklog
+        expr: flowmind_internal_event_backlog{state="pending"} > 1000
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "Internal event backlog exceeds 1000"
+      - alert: FlowmindNotificationBacklog
+        expr: flowmind_notification_backlog{state="pending"} > 1000
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "Notification backlog exceeds 1000"
+      - alert: FlowmindLeaseLosses
+        expr: sum(rate(flowmind_execution_lease_lost_total[10m])) > 0
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "Workers are losing execution leases"
+      - alert: FlowmindExecutionBacklog
+        expr: sum(flowmind_execution_backlog{state=~"pending|queued|retrying"}) > 1000
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "Durable execution backlog exceeds 1000"
+      - alert: FlowmindApprovalBacklog
+        expr: flowmind_approval_backlog > 500
+        for: 15m
+        labels: { severity: warning }
+        annotations:
+          summary: "Pending approval backlog exceeds 500"
+      - alert: FlowmindDeadLetterBacklog
+        expr: flowmind_dead_letter_backlog > 0
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "Unresolved execution dead letters are present"
+      - alert: FlowmindReconcilerFailures
+        expr: sum(rate(flowmind_reconciler_runs_total{outcome="failed"}[10m])) > 0
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "Execution reconciler is failing"
+      - alert: FlowmindDispatcherFailures
+        expr: sum(rate(flowmind_internal_event_dispatch_failures_total[10m])) > 0
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "Internal event dispatcher is failing"
+      - alert: FlowmindRetrySpike
+        expr: sum(rate(flowmind_step_retries_total[10m])) > 1
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "Workflow step retries are elevated"
+      - alert: FlowmindEventChainSuppression
+        expr: sum(rate(flowmind_internal_event_chain_limit_exceeded_total[10m])) > 0
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "Internal event chains are being suppressed"

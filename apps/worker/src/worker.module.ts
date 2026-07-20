@@ -55,16 +55,14 @@ import { NotificationProcessor } from "./notifications/notification.processor";
 import { NotificationReconcilerService } from "./notifications/notification-reconciler.service";
 import { NotificationTemplates } from "./notifications/notification-templates";
 import { EmailProvider, SmtpEmailProvider } from "./notifications/email-provider";
+import { redisConnectionOptions } from "@automation/config";
 
-const redisUrl = new URL(process.env.REDIS_URL ?? "redis://localhost:6379");
+const redisConnection = redisConnectionOptions(process.env.REDIS_URL ?? "redis://localhost:6379");
 
 @Module({
   imports: [
     BullModule.forRoot({
-      connection: {
-        host: redisUrl.hostname,
-        port: Number(redisUrl.port || 6379)
-      }
+      connection: redisConnection
     }),
     BullModule.registerQueue({ name: WORKFLOW_EXECUTIONS_QUEUE }, { name: WORKFLOW_EXECUTIONS_DLQ }, { name: NOTIFICATION_DELIVERIES_QUEUE })
   ],

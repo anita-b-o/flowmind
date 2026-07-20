@@ -157,7 +157,7 @@ export function usePreviewScheduledTrigger(workflowId: string) {
   });
 }
 
-export function useEventTriggers(workflowId: string) { return useQuery({ queryKey: ["event-triggers", workflowId], queryFn: () => apiClient.get<EventTriggerSummary[]>(`/workflows/${workflowId}/triggers/event`), enabled: Boolean(workflowId) }); }
+export function useEventTriggers(workflowId: string) { return useQuery({ queryKey: ["event-triggers", workflowId], queryFn: async () => (await apiClient.get<{ items: EventTriggerSummary[] }>(`/workflows/${workflowId}/triggers/event`)).items, enabled: Boolean(workflowId) }); }
 function useEventMutation(workflowId: string, fn: (input: any) => Promise<unknown>) { const client = useQueryClient(); return useMutation({ mutationFn: fn, onSuccess: () => { void client.invalidateQueries({ queryKey: ["event-triggers", workflowId] }); } }); }
 export function useCreateEventTrigger(workflowId: string) { return useEventMutation(workflowId, (input: EventTriggerInput) => apiClient.post<EventTriggerSummary>(`/workflows/${workflowId}/triggers/event`, input)); }
 export function useUpdateEventTrigger(workflowId: string) { return useEventMutation(workflowId, ({ triggerId, input }: { triggerId: string; input: Partial<EventTriggerInput> }) => apiClient.patch<EventTriggerSummary>(`/workflows/${workflowId}/triggers/${triggerId}/event`, input)); }

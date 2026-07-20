@@ -3,7 +3,7 @@ import { Prisma } from "@prisma/client";
 import { isInternalEventType, normalizeEventTriggerFilters, type EventTriggerFilters, type InternalEventType } from "@automation/shared-types";
 import { PrismaService } from "../prisma/prisma.service";
 import { AuditLogsService } from "../audit-logs/audit-logs.service";
-import { CreateEventTriggerDto, UpdateEventTriggerDto } from "./dto/event-trigger.dto";
+import { CreateEventTriggerDto, ListEventTriggersDto, UpdateEventTriggerDto } from "./dto/event-trigger.dto";
 
 @Injectable()
 export class EventTriggersService {
@@ -21,10 +21,12 @@ export class EventTriggersService {
     return summary(trigger);
   }
 
-  async list(organizationId: string, workflowId: string) {
+  async list(organizationId: string, workflowId: string, query: ListEventTriggersDto) {
     await this.assertWorkflow(organizationId, workflowId);
-    const rows = await this.prisma.trigger.findMany({ where: { organizationId, workflowId, type: "event", deletedAt: null }, orderBy: { createdAt: "desc" } });
-    return rows.map(summary);
+    const limit = Math.min(query.limit ?? 20, 100); const cursor = decodeCursor(query.cursor);
+    const rows = await this.prisma.trigger.findMany({ where: { organizationId, workflowId, type: "event", deletedAt: null, ...(cursor ? { OR: [{ createdAt: { lt: cursor.createdAt } }, { createdAt: cursor.createdAt, id: { lt: cursor.id } }] } : {}) }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: limit + 1 });
+    const hasMore = rows.length > limit; const items = rows.slice(0, limit);
+    return { items: items.map(summary), pageSize: limit, hasMore, nextCursor: hasMore ? encodeCursor(items.at(-1)!) : null };
   }
 
   async get(organizationId: string, workflowId: string, triggerId: string) { return summary(await this.find(organizationId, workflowId, triggerId)); }
@@ -77,3 +79,5 @@ export class EventTriggersService {
 function config(value: unknown) { const row = value && typeof value === "object" && !Array.isArray(value) ? value as any : {}; return { name: typeof row.name === "string" ? row.name : "Internal event", filters: row.filters ?? {} }; }
 function summary(trigger: any) { const stored = config(trigger.configJson); return { id: trigger.id, type: "event" as const, workflowId: trigger.workflowId, eventType: trigger.eventType, enabled: trigger.enabled, name: stored.name, filters: stored.filters, createdAt: trigger.createdAt, updatedAt: trigger.updatedAt, lastReceivedAt: trigger.lastReceivedAt, lastExecutionId: trigger.lastExecutionId }; }
 function json(value: unknown): Prisma.InputJsonValue { return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue; }
+function encodeCursor(row: { id: string; createdAt: Date }) { return Buffer.from(JSON.stringify({ id: row.id, createdAt: row.createdAt.toISOString() })).toString("base64url"); }
+function decodeCursor(value?: string) { if (!value) return null; try { const parsed = JSON.parse(Buffer.from(value, "base64url").toString("utf8")); const createdAt = new Date(parsed.createdAt); if (!parsed.id || Number.isNaN(createdAt.valueOf())) throw new Error(); return { id: String(parsed.id), createdAt }; } catch { throw new BadRequestException("Invalid event trigger cursor"); } }

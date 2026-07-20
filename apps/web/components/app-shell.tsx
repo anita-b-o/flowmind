@@ -8,13 +8,14 @@ import { RequireAuth } from "../features/auth/require-auth";
 import { useAuth } from "../features/auth/use-auth";
 
 const PUBLIC_ROUTES = new Set(["/", "/login", "/register"]);
+const PROTECTED_PREFIXES = ["/dashboard", "/workflows", "/templates", "/executions", "/approvals", "/dead-letter-executions", "/notifications", "/data-stores", "/connections", "/members", "/audit-log", "/settings"];
 
 type NavItem = { label: string; href: string; short: string };
 type NavGroup = { label: string; items: NavItem[] };
 
 export function AppFrame({ children }: { children: ReactNode }) {
   const pathname = usePathname();
-  if (PUBLIC_ROUTES.has(pathname)) return <>{children}</>;
+  if (PUBLIC_ROUTES.has(pathname) || !PROTECTED_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`))) return <>{children}</>;
   return <RequireAuth><AppShell>{children}</AppShell></RequireAuth>;
 }
 

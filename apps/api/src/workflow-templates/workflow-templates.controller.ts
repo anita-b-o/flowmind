@@ -7,7 +7,7 @@ import { OrganizationContext, type OrganizationContext as OrganizationContextTyp
 import { OrganizationGuard } from "../organizations/organization.guard";
 import { Roles } from "../rbac/roles.decorator";
 import { RolesGuard } from "../rbac/roles.guard";
-import { CreateTemplateFromWorkflowVersionDto, CreateTemplateVersionDto, InstantiateTemplateDto, ListWorkflowTemplatesQueryDto, PreviewTemplateDto } from "./dto/workflow-template.dto";
+import { CreateTemplateFromWorkflowVersionDto, CreateTemplateVersionDto, InstantiateTemplateDto, ListTemplateVersionsQueryDto, ListWorkflowTemplatesQueryDto, PreviewTemplateDto } from "./dto/workflow-template.dto";
 import { WorkflowTemplatesService } from "./workflow-templates.service";
 
 @ApiTags("workflow-templates") @ApiBearerAuth()
@@ -19,7 +19,7 @@ export class WorkflowTemplatesController {
   @Post("from-workflow-version") @Roles(OrganizationRole.Editor)
   create(@OrganizationContext() org: OrganizationContextType, @CurrentUser() user: CurrentUserType, @Body() dto: CreateTemplateFromWorkflowVersionDto) { return this.service.createFromWorkflowVersion(org.organizationId, user.userId, dto); }
   @Get(":templateId") detail(@OrganizationContext() org: OrganizationContextType, @Param("templateId") id: string) { return this.service.detail(org.organizationId, id); }
-  @Get(":templateId/versions") versions(@OrganizationContext() org: OrganizationContextType, @Param("templateId") id: string) { return this.service.versions(org.organizationId, id); }
+  @Get(":templateId/versions") versions(@OrganizationContext() org: OrganizationContextType, @Param("templateId") id: string, @Query() query: ListTemplateVersionsQueryDto) { return this.service.versions(org.organizationId, id, query); }
   @Get(":templateId/versions/:versionId") version(@OrganizationContext() org: OrganizationContextType, @Param("templateId") id: string, @Param("versionId") versionId: string) { return this.service.versionDetail(org.organizationId, id, versionId); }
   @Post(":templateId/versions/from-workflow-version") @Roles(OrganizationRole.Editor)
   createVersion(@OrganizationContext() org: OrganizationContextType, @CurrentUser() user: CurrentUserType, @Param("templateId") id: string, @Body() dto: CreateTemplateVersionDto) { return this.service.createVersion(org.organizationId, user.userId, id, dto); }

@@ -1,20 +1,28 @@
 import { lookup } from "node:dns/promises";
 import net from "node:net";
 import { Injectable } from "@nestjs/common";
+import { Agent, fetch as undiciFetch } from "undici";
 
 @Injectable()
 export class SafeConnectionTestClient {
   async request(input: { url: string; method?: string; headers?: Record<string, string>; timeoutMs?: number }) {
     const url = new URL(input.url);
-    await assertSafeUrl(url);
+    const addresses = await assertSafeUrl(url);
     const started = Date.now();
-    const response = await fetch(url.toString(), {
-      method: input.method ?? "GET",
-      headers: input.headers,
-      redirect: "manual",
-      signal: AbortSignal.timeout(input.timeoutMs ?? 5000)
-    });
-    return { status: response.status, ok: response.ok, durationMs: Date.now() - started };
+    const dispatcher = pinnedDispatcher(addresses[0]!);
+    try {
+      const response = await undiciFetch(url, {
+        method: input.method ?? "GET",
+        headers: input.headers,
+        redirect: "manual",
+        signal: AbortSignal.timeout(input.timeoutMs ?? 5000),
+        dispatcher
+      });
+      await response.body?.cancel();
+      return { status: response.status, ok: response.ok, durationMs: Date.now() - started };
+    } finally {
+      await dispatcher.close();
+    }
   }
 }
 
@@ -33,6 +41,13 @@ async function assertSafeUrl(url: URL) {
   if (!addresses.length || addresses.some((address) => isBlockedIp(address.address))) {
     throw new Error("Private, reserved or metadata IP is not allowed");
   }
+  return addresses.map((entry) => entry.address);
+}
+
+function pinnedDispatcher(address: string) {
+  const family = net.isIP(address);
+  if (!family) throw new Error("Resolved address is invalid");
+  return new Agent({ connect: { lookup: (_hostname: string, _options: unknown, callback: (error: Error | null, address: string, family: number) => void) => callback(null, address, family) } as any });
 }
 
 function isBlockedIp(input: string) {

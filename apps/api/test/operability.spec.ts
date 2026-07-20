@@ -185,6 +185,8 @@ function replayableContext(trigger: Record<string, unknown>): any {
 async function cleanDatabase() {
   await prisma.deadLetterExecution.deleteMany();
   await prisma.internalRecord.deleteMany();
+  await prisma.executionStepReuse.deleteMany();
+  await prisma.stepExecutionAttempt.deleteMany();
   await prisma.stepExecution.deleteMany();
   await prisma.execution.deleteMany();
   await prisma.webhookEvent.deleteMany();

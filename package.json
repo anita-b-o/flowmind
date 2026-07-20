@@ -10,6 +10,7 @@
     "test:unit": "corepack pnpm -r --if-present test:unit",
     "test:integration": "corepack pnpm --workspace-concurrency=1 -r --if-present test:integration",
     "test:e2e": "corepack pnpm --workspace-concurrency=1 -r --if-present test:e2e",
+    "test:chaos": "bash scripts/run-chaos-rc1.sh",
     "typecheck": "corepack pnpm --filter @automation/shared-types build && corepack pnpm --filter @automation/config build && corepack pnpm --filter @automation/observability build && corepack pnpm --filter @automation/ui build && corepack pnpm -r --if-present typecheck",
     "format": "prettier --write \"**/*.{ts,tsx,js,json,md,yml,yaml,py}\"",
     "db:generate": "corepack pnpm --filter @automation/api prisma:generate",
@@ -19,5 +20,15 @@
     "prettier": "^3.4.2",
     "turbo": "^2.3.3",
     "typescript": "^5.7.2"
+  },
+  "pnpm": {
+    "overrides": {
+      "multer": ">=2.2.0",
+      "lodash": ">=4.18.0",
+      "qs": ">=6.14.3",
+      "js-yaml": ">=4.2.0",
+      "file-type": "21.3.2",
+      "postcss": ">=8.5.10"
+    }
   }
 }

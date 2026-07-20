@@ -39,7 +39,7 @@ export class AuditLogsService {
         : {})
     };
     const [items, total] = await this.prisma.$transaction([
-      this.prisma.auditLog.findMany({ where, orderBy: { createdAt: "desc" }, skip: (page - 1) * pageSize, take: pageSize }),
+      this.prisma.auditLog.findMany({ where, orderBy: [{ createdAt: "desc" }, { id: "desc" }], skip: (page - 1) * pageSize, take: pageSize }),
       this.prisma.auditLog.count({ where })
     ]);
     const actorIds = [...new Set(items.map((item) => item.actorUserId).filter(Boolean))] as string[];

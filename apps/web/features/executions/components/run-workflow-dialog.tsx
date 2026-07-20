@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ApiError } from "../../../lib/api-client";
 import { useCreateManualExecution } from "../hooks";
+import { AccessibleDialog } from "../../../components/accessible-dialog";
 
 export function RunWorkflowDialog({
   open,
@@ -21,8 +22,6 @@ export function RunWorkflowDialog({
   const idempotencyKey = useMemo(() => crypto.randomUUID(), [open]);
   const run = useCreateManualExecution(workflowId);
   const router = useRouter();
-
-  if (!open) return null;
 
   async function submit() {
     setParseError(null);
@@ -52,9 +51,7 @@ export function RunWorkflowDialog({
   }
 
   return (
-    <div className="modal-backdrop" role="presentation">
-      <section className="modal panel stack" role="dialog" aria-modal="true" aria-label="Run workflow">
-        <h2>Run workflow</h2>
+    <AccessibleDialog open={open} title="Run workflow" onClose={onClose}>
         <p className="muted">{workflowName} will run in real mode and may perform external effects.</p>
         <label className="stack">
           Input JSON
@@ -75,8 +72,7 @@ export function RunWorkflowDialog({
             {run.isPending ? "Sending..." : "Run"}
           </button>
         </div>
-      </section>
-    </div>
+    </AccessibleDialog>
   );
 }
 

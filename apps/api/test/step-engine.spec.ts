@@ -567,6 +567,8 @@ function stepExecutionData(seed: any, workflowStepId: string, id: string, stepKe
 
 async function cleanDatabase() {
   await prisma.internalRecord.deleteMany();
+  await prisma.executionStepReuse.deleteMany();
+  await prisma.stepExecutionAttempt.deleteMany();
   await prisma.stepExecution.deleteMany();
   await prisma.execution.deleteMany();
   await prisma.webhookEvent.deleteMany();

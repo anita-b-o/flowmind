@@ -543,7 +543,7 @@ summary:focus-visible,
   display: grid;
   grid-template-columns: minmax(320px, 1fr) auto;
   gap: 16px;
-  align-items: end;
+  align-items: flex-end;
 }
 
 .debugger-toolbar textarea {
@@ -555,7 +555,7 @@ summary:focus-visible,
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
-  align-items: end;
+  align-items: flex-end;
 }
 
 .debugger-grid {
@@ -816,7 +816,7 @@ summary:focus-visible,
   .workflow-canvas-panel { display: none; }
   .workflow-visual-shell::before { display: block; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--brand-primary-soft); color: var(--brand-primary-strong); padding: 16px; content: "Visual canvas editing is optimized for a larger screen. Use Form mode here for safe mobile editing."; font-weight: 650; }
   .workflow-palette { max-height: 320px; }
-  .modal-backdrop { align-items: end; padding: 0; }
+  .modal-backdrop { align-items: flex-end; padding: 0; }
   .modal { width: 100%; max-height: 92vh; border-radius: var(--radius-brand) var(--radius-brand) 0 0; }
 }
 

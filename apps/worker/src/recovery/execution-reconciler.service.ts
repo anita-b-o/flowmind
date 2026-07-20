@@ -48,6 +48,7 @@ export class ExecutionReconcilerService implements OnModuleInit, OnModuleDestroy
       await this.recoverApprovals();
       await this.requeueDueRetries();
       await this.requeueQueuedExecutions();
+      await this.refreshBacklogMetrics();
       this.metrics?.reconcilerRuns.inc({ outcome: "completed" });
       this.metrics?.reconcilerDuration.observe(Number(process.hrtime.bigint() - started) / 1_000_000_000);
     } catch (error) {
@@ -57,6 +58,19 @@ export class ExecutionReconcilerService implements OnModuleInit, OnModuleDestroy
     } finally {
       this.running = false;
     }
+  }
+
+  private async refreshBacklogMetrics() {
+    if (!this.metrics) return;
+    const [executions, approvals, deadLetters] = await Promise.all([
+      this.prisma.execution.groupBy({ by: ["status"], where: { status: { in: [ExecutionStatus.Pending, ExecutionStatus.Queued, ExecutionStatus.Retrying, ExecutionStatus.Running] } }, _count: true }),
+      this.prisma.approvalRequest.count({ where: { status: "PENDING" } }),
+      this.prisma.deadLetterExecution.count({ where: { resolvedAt: null } })
+    ]);
+    for (const state of ["pending", "queued", "retrying", "running"]) this.metrics.executionBacklog.set({ state }, 0);
+    for (const row of executions) this.metrics.executionBacklog.set({ state: row.status.toLowerCase() }, row._count);
+    this.metrics.approvalBacklog.set(approvals);
+    this.metrics.deadLetterBacklog.set(deadLetters);
   }
 
   private async recoverApprovals() {

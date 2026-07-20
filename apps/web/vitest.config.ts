@@ -10,6 +10,6 @@ export default defineConfig({
     globals: true,
     setupFiles: ["./vitest.setup.ts"],
     testTimeout: 15000,
-    exclude: ["**/node_modules/**", "**/dist/**", "**/build/**", "**/.next/**"]
+    exclude: ["**/node_modules/**", "**/dist/**", "**/build/**", "**/.next/**", "**/e2e/**"]
   }
 });

@@ -23,17 +23,15 @@ import { ApprovalsModule } from "./approvals/approvals.module";
 import { InternalEventsModule } from "./internal-events/internal-events.module";
 import { NotificationsModule } from "./notifications/notifications.module";
 import { WorkflowTemplatesModule } from "./workflow-templates/workflow-templates.module";
+import { redisConnectionOptions } from "@automation/config";
 
-const redisUrl = new URL(process.env.REDIS_URL ?? "redis://localhost:6379");
+const redisConnection = redisConnectionOptions(process.env.REDIS_URL ?? "redis://localhost:6379");
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
     BullModule.forRoot({
-      connection: {
-        host: redisUrl.hostname,
-        port: Number(redisUrl.port || 6379)
-      }
+      connection: redisConnection
     }),
     ObservabilityModule,
     MetricsModule,

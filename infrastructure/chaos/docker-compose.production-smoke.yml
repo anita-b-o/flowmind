@@ -1,0 +1,51 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: smoke-postgres-password
+      POSTGRES_DB: automation_platform
+    healthcheck: { test: ["CMD-SHELL", "pg_isready -U postgres -d automation_platform"], interval: 2s, timeout: 2s, retries: 30 }
+  redis:
+    image: redis:7-alpine
+    healthcheck: { test: ["CMD", "redis-cli", "ping"], interval: 2s, timeout: 2s, retries: 30 }
+  ai-service:
+    image: flowmind-ai-service:latest
+    environment: { ENVIRONMENT: production, AI_SERVICE_API_KEY: smoke-ai-key-123456789012345678901234567890, LLM_PROVIDER: fake }
+    healthcheck: { test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)"], interval: 2s, timeout: 3s, retries: 30 }
+  migrate:
+    image: flowmind-migrate:latest
+    environment: &runtime
+      NODE_ENV: production
+      DATABASE_URL: postgresql://postgres:smoke-postgres-password@postgres:5432/automation_platform
+      REDIS_URL: redis://redis:6379
+      JWT_ACCESS_SECRET: smoke-access-secret-123456789012345678901
+      JWT_REFRESH_SECRET: smoke-refresh-secret-123456789012345678901
+      SESSION_IP_HASH_PEPPER: smoke-session-pepper-123456789012345678901
+      SECRET_ENCRYPTION_KEY: base64:MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTIzNDU2Nzg5MDE=
+      CONNECTION_ENCRYPTION_KEY: base64:MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTIzNDU2Nzg5MDE=
+      AI_SERVICE_URL: http://ai-service:8000
+      AI_SERVICE_API_KEY: smoke-ai-key-123456789012345678901234567890
+      WEBHOOK_TOKEN_PEPPER: smoke-webhook-pepper-123456789012345678901
+      CORS_ORIGIN: http://web:3000
+      PUBLIC_APP_URL: http://web:3000
+      PUBLIC_API_URL: http://api:3001
+    depends_on: { postgres: { condition: service_healthy }, redis: { condition: service_healthy } }
+    restart: "no"
+  api:
+    image: flowmind-api:latest
+    environment: *runtime
+    depends_on: { migrate: { condition: service_completed_successfully }, ai-service: { condition: service_healthy } }
+    ports: ["3311:3001"]
+    healthcheck: { test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3001/health/ready').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"], interval: 3s, timeout: 3s, retries: 30 }
+  worker:
+    image: flowmind-worker:latest
+    environment: { <<: *runtime, WORKER_HEALTH_PORT: "3002" }
+    depends_on: { migrate: { condition: service_completed_successfully }, ai-service: { condition: service_healthy } }
+    healthcheck: { test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3002/health/ready').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"], interval: 3s, timeout: 3s, retries: 30 }
+  web:
+    image: flowmind-web:latest
+    environment: { NODE_ENV: production, NEXT_PUBLIC_API_URL: http://api:3001 }
+    depends_on: { api: { condition: service_healthy } }
+    ports: ["3310:3000"]
+    healthcheck: { test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/login').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"], interval: 3s, timeout: 3s, retries: 30 }

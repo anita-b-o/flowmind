@@ -9,25 +9,31 @@ import { CurrentUser, type CurrentUser as CurrentUserType } from "./current-user
 import { assertAllowedOrigin, clearRefreshCookieOptions, readCookie, refreshCookieName, refreshCookieOptions } from "./auth-config";
 import { sessionMetadata } from "./session-metadata";
 import { ApiMetricsService } from "../metrics/metrics.service";
+import { AuthRateLimitService } from "./auth-rate-limit.service";
 
 @ApiTags("auth")
 @Controller("auth")
 export class AuthController {
   constructor(
     private readonly authService: AuthService,
-    private readonly metrics: ApiMetricsService
+    private readonly metrics: ApiMetricsService,
+    private readonly rateLimit: AuthRateLimitService
   ) {}
 
   @Post("register")
   async register(@Body() dto: RegisterDto, @Req() request: Request, @Res({ passthrough: true }) response: Response) {
-    const result = await this.authService.register(dto, sessionMetadata(request));
+    const metadata = sessionMetadata(request);
+    await this.rateLimit.assertAllowed("register", metadata.ipHash, dto.email);
+    const result = await this.authService.register(dto, metadata);
     this.setRefreshCookie(response, result.refreshToken);
     return result.body;
   }
 
   @Post("login")
   async login(@Body() dto: LoginDto, @Req() request: Request, @Res({ passthrough: true }) response: Response) {
-    const result = await this.authService.login(dto, sessionMetadata(request));
+    const metadata = sessionMetadata(request);
+    await this.rateLimit.assertAllowed("login", metadata.ipHash, dto.email);
+    const result = await this.authService.login(dto, metadata);
     this.setRefreshCookie(response, result.refreshToken);
     return result.body;
   }
@@ -36,8 +42,10 @@ export class AuthController {
   @HttpCode(200)
   async refresh(@Req() request: Request, @Res({ passthrough: true }) response: Response) {
     this.assertOrigin(request);
+    const metadata = sessionMetadata(request);
+    await this.rateLimit.assertAllowed("refresh", metadata.ipHash);
     try {
-      const result = await this.authService.refresh(this.getRefreshCookie(request), sessionMetadata(request));
+      const result = await this.authService.refresh(this.getRefreshCookie(request), metadata);
       this.setRefreshCookie(response, result.refreshToken);
       return result.body;
     } catch (error) {

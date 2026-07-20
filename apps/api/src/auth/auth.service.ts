@@ -51,7 +51,7 @@ export class AuthService {
 
   async login(dto: LoginDto, metadata: SessionMetadata) {
     const user = await this.prisma.user.findUnique({ where: { email: dto.email.toLowerCase() } });
-    if (!user || !(await argon2.verify(user.passwordHash, dto.password))) {
+    if (!user || user.status !== "ACTIVE" || !(await argon2.verify(user.passwordHash, dto.password))) {
       this.metrics?.recordAuthLogin("invalid_credentials");
       throw new UnauthorizedException("Invalid credentials");
     }
@@ -81,6 +81,11 @@ export class AuthService {
     }
     const session = await this.prisma.refreshTokenSession.findUnique({ where: { id: payload.sessionId }, include: { user: true } });
     if (!session || session.userId !== payload.sub || session.tokenFamily !== payload.tokenFamily) {
+      this.metrics?.recordAuthRefresh("revoked");
+      throw new UnauthorizedException("Invalid refresh session");
+    }
+    if (session.user.status !== "ACTIVE") {
+      await this.revokeFamily(session.tokenFamily);
       this.metrics?.recordAuthRefresh("revoked");
       throw new UnauthorizedException("Invalid refresh session");
     }
@@ -206,7 +211,7 @@ export class AuthService {
         }
       }
     });
-    if (!user) {
+    if (!user || user.status !== "ACTIVE") {
       throw new UnauthorizedException("User not found");
     }
     return {
