@@ -1,0 +1,235 @@
+name: RC staging release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: RC version without the v prefix
+        required: true
+        default: 0.1.0-rc.1
+      deploy:
+        description: Deploy the built digests to staging
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: flowmind-rc-staging
+  cancel-in-progress: false
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: automation_platform
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres -d automation_platform"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      NODE_ENV: test
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/automation_platform
+      REDIS_URL: redis://127.0.0.1:6379
+      JWT_ACCESS_SECRET: rc-ci-access-secret-0000000000000000
+      JWT_REFRESH_SECRET: rc-ci-refresh-secret-000000000000000
+      SESSION_IP_HASH_PEPPER: rc-ci-session-pepper-000000000000000
+      SECRET_ENCRYPTION_KEY: rc-ci-secret-key-00000000000000000
+      CONNECTION_ENCRYPTION_KEY: base64:MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTIzNDU2Nzg5MDE=
+      AI_SERVICE_URL: http://127.0.0.1:8000
+      AI_SERVICE_API_KEY: dev-ai-service-key
+      CORS_ORIGIN: http://localhost:3000
+      PUBLIC_APP_URL: http://localhost:3000
+      PUBLIC_API_URL: http://127.0.0.1:3001
+      WEBHOOK_TOKEN_PEPPER: rc-ci-webhook-pepper-00000000000000
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - run: python -m venv apps/ai-service/.venv
+      - run: pnpm --filter @automation/ai-service bootstrap
+      - run: pnpm db:generate
+      - run: pnpm --filter @automation/api prisma:deploy
+      - run: pnpm lint
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm --filter @automation/api test:e2e
+      - run: pnpm --filter @automation/worker test:e2e
+      - run: pnpm test:chaos
+      - run: pnpm --filter @automation/web exec playwright install --with-deps chromium
+      - run: pnpm --filter @automation/web test:e2e
+      - run: pnpm build
+      - name: Validate release tooling
+        run: |
+          find scripts/release scripts/rehearsal -type f -name '*.sh' -print0 | xargs -0 -n1 bash -n
+          node --check scripts/release/validate-manifest.mjs
+          node --check scripts/release/manifest-to-env.mjs
+      - name: Security audit gate
+        run: |
+          pnpm audit --prod --json > /tmp/flowmind-audit.json || true
+          node scripts/release/security-audit-gate.mjs /tmp/flowmind-audit.json
+
+  images:
+    needs: quality
+    runs-on: ubuntu-latest
+    outputs:
+      artifact-name: ${{ steps.manifest.outputs.artifact-name }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Validate annotated RC tag
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          test "$(git rev-parse "refs/tags/v$VERSION^{commit}")" = "$GITHUB_SHA"
+          test "$(git cat-file -t "refs/tags/v$VERSION")" = tag
+      - name: Build and push once
+        env:
+          RELEASE_MANIFEST_PATH: ${{ runner.temp }}/release-manifest.json
+          PUSH_IMAGES: "true"
+        run: scripts/release/build-and-push.sh "${{ inputs.version }}"
+      - name: Smoke the published digests
+        env:
+          RELEASE_MANIFEST_PATH: ${{ runner.temp }}/release-manifest.json
+        run: |
+          node scripts/release/manifest-to-env.mjs "$RELEASE_MANIFEST_PATH" > "$RUNNER_TEMP/release.env"
+          source "$RUNNER_TEMP/release.env"
+          docker pull "$FLOWMIND_API_IMAGE"
+          docker pull "$FLOWMIND_WORKER_IMAGE"
+          docker pull "$FLOWMIND_WEB_IMAGE"
+          docker pull "$FLOWMIND_AI_IMAGE"
+          docker pull "$FLOWMIND_MIGRATE_IMAGE"
+          docker tag "$FLOWMIND_API_IMAGE" flowmind-api:latest
+          docker tag "$FLOWMIND_WORKER_IMAGE" flowmind-worker:latest
+          docker tag "$FLOWMIND_WEB_IMAGE" flowmind-web:latest
+          docker tag "$FLOWMIND_AI_IMAGE" flowmind-ai-service:latest
+          docker tag "$FLOWMIND_MIGRATE_IMAGE" flowmind-migrate:latest
+          bash scripts/run-production-compose-smoke.sh
+      - id: manifest
+        run: echo "artifact-name=flowmind-${{ inputs.version }}-manifest" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flowmind-${{ inputs.version }}-manifest
+          path: ${{ runner.temp }}/release-manifest.json
+          if-no-files-found: error
+          retention-days: 90
+
+  deploy:
+    if: ${{ inputs.deploy }}
+    needs: images
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @automation/web exec playwright install --with-deps chromium
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.images.outputs.artifact-name }}
+          path: ${{ runner.temp }}/release
+      - name: Configure SSH
+        env:
+          SSH_KEY: ${{ secrets.STAGING_SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.STAGING_SSH_KNOWN_HOSTS }}
+        run: |
+          install -d -m 0700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 0600 ~/.ssh/id_ed25519
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+      - name: Upload manifest and deploy
+        env:
+          HOST: ${{ secrets.STAGING_SSH_HOST }}
+          USER: ${{ secrets.STAGING_SSH_USER }}
+          REPO_PATH: ${{ vars.STAGING_REPO_PATH }}
+          STAGING_ENV_PATH: ${{ vars.STAGING_ENV_PATH }}
+          BACKUP_ENV_PATH: ${{ vars.STAGING_BACKUP_ENV_PATH }}
+          BACKUP_OUTPUT_DIR: ${{ vars.STAGING_BACKUP_OUTPUT_DIR }}
+          BACKUP_UPLOAD_HOOK: ${{ vars.STAGING_BACKUP_UPLOAD_HOOK }}
+          POSTGRES_BACKUP_IMAGE: ${{ vars.POSTGRES_BACKUP_IMAGE }}
+          SMOKE_ENV_PATH: ${{ vars.STAGING_SMOKE_ENV_PATH }}
+          ALERT_DELIVERY_VERIFICATION_HOOK: ${{ vars.STAGING_ALERT_DELIVERY_VERIFICATION_HOOK }}
+        run: |
+          for path in "$REPO_PATH" "$STAGING_ENV_PATH" "$BACKUP_ENV_PATH" "$BACKUP_OUTPUT_DIR" "$BACKUP_UPLOAD_HOOK" "$SMOKE_ENV_PATH" "$ALERT_DELIVERY_VERIFICATION_HOOK"; do
+            [[ "$path" =~ ^/[A-Za-z0-9._/-]+$ ]] || { echo "Unsafe or missing remote path" >&2; exit 1; }
+          done
+          [[ "$POSTGRES_BACKUP_IMAGE" =~ ^postgres:16-alpine@sha256:[0-9a-f]{64}$ ]] || {
+            echo "POSTGRES_BACKUP_IMAGE must be pinned by digest" >&2
+            exit 1
+          }
+          remote_manifest="/tmp/flowmind-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.json"
+          scp "${RUNNER_TEMP}/release/release-manifest.json" "$USER@$HOST:$remote_manifest"
+          ssh "$USER@$HOST" \
+            "cd '$REPO_PATH' && git fetch --tags origin && git checkout --detach '$GITHUB_SHA' && BACKUP_ENV_FILE='$BACKUP_ENV_PATH' BACKUP_OUTPUT_DIR='$BACKUP_OUTPUT_DIR' BACKUP_UPLOAD_HOOK='$BACKUP_UPLOAD_HOOK' POSTGRES_BACKUP_IMAGE='$POSTGRES_BACKUP_IMAGE' scripts/release/deploy-staging.sh '$remote_manifest' '$STAGING_ENV_PATH'"
+      - name: Public staging smoke and RBAC
+        env:
+          STAGING_WEB_URL: ${{ vars.STAGING_WEB_URL }}
+          STAGING_API_URL: ${{ vars.STAGING_API_URL }}
+          STAGING_SMOKE_EMAIL: ${{ secrets.STAGING_SMOKE_EMAIL }}
+          STAGING_SMOKE_PASSWORD: ${{ secrets.STAGING_SMOKE_PASSWORD }}
+          RBAC_ORGANIZATION_ID: ${{ secrets.STAGING_RBAC_ORGANIZATION_ID }}
+          RBAC_ADMIN_EMAIL: ${{ secrets.STAGING_RBAC_ADMIN_EMAIL }}
+          RBAC_ADMIN_PASSWORD: ${{ secrets.STAGING_RBAC_ADMIN_PASSWORD }}
+          RBAC_EDITOR_EMAIL: ${{ secrets.STAGING_RBAC_EDITOR_EMAIL }}
+          RBAC_EDITOR_PASSWORD: ${{ secrets.STAGING_RBAC_EDITOR_PASSWORD }}
+          RBAC_VIEWER_EMAIL: ${{ secrets.STAGING_RBAC_VIEWER_EMAIL }}
+          RBAC_VIEWER_PASSWORD: ${{ secrets.STAGING_RBAC_VIEWER_PASSWORD }}
+        run: bash scripts/rehearsal/staging-smoke.sh
+      - name: Internal staging acceptance
+        env:
+          HOST: ${{ secrets.STAGING_SSH_HOST }}
+          USER: ${{ secrets.STAGING_SSH_USER }}
+          REPO_PATH: ${{ vars.STAGING_REPO_PATH }}
+          STAGING_ENV_PATH: ${{ vars.STAGING_ENV_PATH }}
+          SMOKE_ENV_PATH: ${{ vars.STAGING_SMOKE_ENV_PATH }}
+          ALERT_DELIVERY_VERIFICATION_HOOK: ${{ vars.STAGING_ALERT_DELIVERY_VERIFICATION_HOOK }}
+        run: |
+          version="${{ inputs.version }}"
+          ssh "$USER@$HOST" \
+            "cd '$REPO_PATH' && SKIP_PUBLIC_SMOKE=true ALERT_DELIVERY_VERIFICATION_HOOK='$ALERT_DELIVERY_VERIFICATION_HOOK' scripts/rehearsal/run-acceptance.sh '$STAGING_ENV_PATH' '/opt/flowmind/releases/$version/release.env' '$SMOKE_ENV_PATH'"
+      - name: Roll back a rejected candidate
+        if: ${{ failure() }}
+        env:
+          HOST: ${{ secrets.STAGING_SSH_HOST }}
+          USER: ${{ secrets.STAGING_SSH_USER }}
+          REPO_PATH: ${{ vars.STAGING_REPO_PATH }}
+          STAGING_ENV_PATH: ${{ vars.STAGING_ENV_PATH }}
+        run: |
+          ssh "$USER@$HOST" \
+            "cd '$REPO_PATH' && baseline=\$(readlink -f /opt/flowmind/releases/current) && test -f \"\$baseline/release.env\" && RUN_ROLLBACK_SMOKE=false scripts/release/rollback-staging.sh \"\$baseline/release.env\" '$STAGING_ENV_PATH'"

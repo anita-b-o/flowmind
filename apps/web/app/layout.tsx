@@ -1,6 +1,7 @@
 import "./globals.css";
 import "@xyflow/react/dist/style.css";
 import type { Metadata } from "next";
+import Script from "next/script";
 import type { ReactNode } from "react";
 import { AuthProvider } from "../features/auth/auth-provider";
 import { QueryProvider } from "../lib/query-provider";
@@ -8,15 +9,18 @@ import { AppFrame } from "../components/app-shell";
 
 export const metadata: Metadata = {
   title: { default: "FlowMind", template: "%s · FlowMind" },
-  description: "Build, operate and understand reliable workflows."
+  description: "Build, operate and understand reliable workflows.",
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en">
       <body>
+        <Script src="/runtime-config.js" strategy="beforeInteractive" />
         <QueryProvider>
-          <AuthProvider><AppFrame>{children}</AppFrame></AuthProvider>
+          <AuthProvider>
+            <AppFrame>{children}</AppFrame>
+          </AuthProvider>
         </QueryProvider>
       </body>
     </html>

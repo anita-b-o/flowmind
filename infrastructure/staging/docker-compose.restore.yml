@@ -1,0 +1,19 @@
+services:
+  migrate:
+    pull_policy: never
+
+  ai-service:
+    pull_policy: never
+
+  api:
+    pull_policy: never
+    ports:
+      - "127.0.0.1:${RESTORE_API_PORT:-3411}:3001"
+
+  worker:
+    pull_policy: never
+
+  web:
+    pull_policy: never
+    ports:
+      - "127.0.0.1:${RESTORE_WEB_PORT:-3410}:3000"

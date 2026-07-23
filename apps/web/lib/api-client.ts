@@ -1,23 +1,35 @@
-import { clearAuthSession, getAccessToken, getActiveOrganizationId, refreshAuthSession, setAccessToken } from "../features/auth/session-store";
+import {
+  clearAuthSession,
+  getAccessToken,
+  getActiveOrganizationId,
+  refreshAuthSession,
+  setAccessToken,
+} from "../features/auth/session-store";
 
-const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
-
-const NO_AUTO_REFRESH = new Set(["/auth/login", "/auth/register", "/auth/refresh", "/auth/logout"]);
+const NO_AUTO_REFRESH = new Set([
+  "/auth/login",
+  "/auth/register",
+  "/auth/refresh",
+  "/auth/logout",
+]);
 let refreshPromise: Promise<string | undefined> | undefined;
 
 export class ApiError extends Error {
   constructor(
     readonly status: number,
     message: string,
-    readonly details?: unknown
+    readonly details?: unknown,
   ) {
     super(message);
     this.name = "ApiError";
   }
 }
 
-function buildUrl(path: string, query?: Record<string, string | number | undefined>) {
-  const url = new URL(`${apiUrl}${path}`);
+function buildUrl(
+  path: string,
+  query?: Record<string, string | number | undefined>,
+) {
+  const url = new URL(`${publicApiUrl()}${path}`);
   Object.entries(query ?? {}).forEach(([key, value]) => {
     if (value !== undefined && value !== "") {
       url.searchParams.set(key, String(value));
@@ -26,16 +38,30 @@ function buildUrl(path: string, query?: Record<string, string | number | undefin
   return url.toString();
 }
 
+export function publicApiUrl() {
+  const runtimeUrl =
+    typeof window !== "undefined"
+      ? window.__FLOWMIND_RUNTIME_CONFIG__?.publicApiUrl
+      : undefined;
+  return normalizeBaseUrl(
+    runtimeUrl ?? process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001",
+  );
+}
+
+function normalizeBaseUrl(value: string) {
+  return value.replace(/\/+$/, "");
+}
+
 async function request<T = any>(
   path: string,
   init: RequestInit = {},
   query?: Record<string, string | number | undefined>,
-  retried = false
+  retried = false,
 ): Promise<T> {
   const response = await fetch(buildUrl(path, query), {
     ...init,
     credentials: "include",
-    headers: requestHeaders(init.headers)
+    headers: requestHeaders(init.headers),
   });
   const payload = await readPayload(response);
   if (response.ok) {
@@ -49,7 +75,11 @@ async function request<T = any>(
     }
   }
 
-  throw new ApiError(response.status, errorMessage(response.status, payload), payload);
+  throw new ApiError(
+    response.status,
+    errorMessage(response.status, payload),
+    payload,
+  );
 }
 
 function requestHeaders(headers: HeadersInit | undefined) {
@@ -59,7 +89,7 @@ function requestHeaders(headers: HeadersInit | undefined) {
     "content-type": "application/json",
     ...(accessToken ? { authorization: `Bearer ${accessToken}` } : {}),
     ...(organizationId ? { "x-organization-id": organizationId } : {}),
-    ...(headers ?? {})
+    ...(headers ?? {}),
   };
 }
 
@@ -106,27 +136,47 @@ function errorMessage(status: number, payload: unknown) {
     404: "The requested resource was not found.",
     409: "The request conflicts with the current state.",
     413: "The payload is too large.",
-    429: "Too many requests. Please try again shortly."
+    429: "Too many requests. Please try again shortly.",
   };
-  return byStatus[status] ?? (status >= 500 ? "The server could not complete the request." : `Request failed with ${status}`);
+  return (
+    byStatus[status] ??
+    (status >= 500
+      ? "The server could not complete the request."
+      : `Request failed with ${status}`)
+  );
 }
 
 export const apiClient = {
-  get: <T = any>(path: string, query?: Record<string, string | number | undefined>) => request<T>(path, {}, query),
-  post: <T = any>(path: string, body?: unknown) => request<T>(path, { method: "POST", body: body === undefined ? undefined : JSON.stringify(body) }),
-  patch: <T = any>(path: string, body?: unknown) => request<T>(path, { method: "PATCH", body: body === undefined ? undefined : JSON.stringify(body) }),
-  delete: <T = any>(path: string) => request<T>(path, { method: "DELETE" })
+  get: <T = any>(
+    path: string,
+    query?: Record<string, string | number | undefined>,
+  ) => request<T>(path, {}, query),
+  post: <T = any>(path: string, body?: unknown) =>
+    request<T>(path, {
+      method: "POST",
+      body: body === undefined ? undefined : JSON.stringify(body),
+    }),
+  patch: <T = any>(path: string, body?: unknown) =>
+    request<T>(path, {
+      method: "PATCH",
+      body: body === undefined ? undefined : JSON.stringify(body),
+    }),
+  delete: <T = any>(path: string) => request<T>(path, { method: "DELETE" }),
 };
 
 export async function authFetch<T = any>(path: string, init: RequestInit = {}) {
   const response = await fetch(buildUrl(path), {
     ...init,
     credentials: "include",
-    headers: { "content-type": "application/json", ...(init.headers ?? {}) }
+    headers: { "content-type": "application/json", ...(init.headers ?? {}) },
   });
   const payload = await readPayload(response);
   if (!response.ok) {
-    throw new ApiError(response.status, errorMessage(response.status, payload), payload);
+    throw new ApiError(
+      response.status,
+      errorMessage(response.status, payload),
+      payload,
+    );
   }
   return payload as T;
 }

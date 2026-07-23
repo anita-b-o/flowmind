@@ -1,93 +1,190 @@
+name: flowmind
+
+x-runtime-environment: &runtime-environment
+  NODE_ENV: production
+  DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
+  REDIS_URL: ${REDIS_URL:?REDIS_URL is required}
+  JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?JWT_ACCESS_SECRET is required}
+  JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?JWT_REFRESH_SECRET is required}
+  JWT_ACCESS_EXPIRES_IN: ${JWT_ACCESS_EXPIRES_IN:-15m}
+  JWT_REFRESH_EXPIRES_IN: ${JWT_REFRESH_EXPIRES_IN:-30d}
+  REFRESH_COOKIE_NAME: ${REFRESH_COOKIE_NAME:-refresh_token}
+  REFRESH_COOKIE_SAME_SITE: ${REFRESH_COOKIE_SAME_SITE:-lax}
+  REFRESH_COOKIE_DOMAIN: ${REFRESH_COOKIE_DOMAIN:-}
+  AUTH_ORIGIN_REQUIRED: "true"
+  SESSION_IP_HASH_PEPPER: ${SESSION_IP_HASH_PEPPER:?SESSION_IP_HASH_PEPPER is required}
+  SECRET_ENCRYPTION_KEY: ${SECRET_ENCRYPTION_KEY:?SECRET_ENCRYPTION_KEY is required}
+  CONNECTION_ENCRYPTION_KEY: ${CONNECTION_ENCRYPTION_KEY:?CONNECTION_ENCRYPTION_KEY is required}
+  CONNECTION_ENCRYPTION_VERSION: ${CONNECTION_ENCRYPTION_VERSION:-1}
+  AI_SERVICE_URL: http://ai-service:8000
+  AI_SERVICE_API_KEY: ${AI_SERVICE_API_KEY:?AI_SERVICE_API_KEY is required}
+  WEBHOOK_TOKEN_PEPPER: ${WEBHOOK_TOKEN_PEPPER:?WEBHOOK_TOKEN_PEPPER is required}
+  CORS_ORIGIN: ${CORS_ORIGIN:?CORS_ORIGIN is required}
+  PUBLIC_APP_URL: ${PUBLIC_APP_URL:?PUBLIC_APP_URL is required}
+  PUBLIC_API_URL: ${PUBLIC_API_URL:?PUBLIC_API_URL is required}
+  AUTH_RATE_LIMIT_WINDOW_SECONDS: ${AUTH_RATE_LIMIT_WINDOW_SECONDS:-300}
+  AUTH_RATE_LIMIT_MAX_PER_IP: ${AUTH_RATE_LIMIT_MAX_PER_IP:-30}
+  AUTH_RATE_LIMIT_MAX_PER_ACCOUNT: ${AUTH_RATE_LIMIT_MAX_PER_ACCOUNT:-10}
+  WEBHOOK_PAYLOAD_MAX_BYTES: ${WEBHOOK_PAYLOAD_MAX_BYTES:-1048576}
+  WEBHOOK_RATE_LIMIT_WINDOW_SECONDS: ${WEBHOOK_RATE_LIMIT_WINDOW_SECONDS:-60}
+  WEBHOOK_RATE_LIMIT_MAX: ${WEBHOOK_RATE_LIMIT_MAX:-60}
+  WEBHOOK_BURST_LIMIT_MAX: ${WEBHOOK_BURST_LIMIT_MAX:-10}
+  SCHEDULED_TRIGGER_MIN_INTERVAL_SECONDS: ${SCHEDULED_TRIGGER_MIN_INTERVAL_SECONDS:-60}
+  EXECUTION_LEASE_DURATION_MS: ${EXECUTION_LEASE_DURATION_MS:-60000}
+  EXECUTION_HEARTBEAT_INTERVAL_MS: ${EXECUTION_HEARTBEAT_INTERVAL_MS:-15000}
+  EXECUTION_RECONCILIATION_INTERVAL_MS: ${EXECUTION_RECONCILIATION_INTERVAL_MS:-10000}
+  INTERNAL_EVENT_POLL_INTERVAL_MS: ${INTERNAL_EVENT_POLL_INTERVAL_MS:-1000}
+  INTERNAL_EVENT_BATCH_SIZE: ${INTERNAL_EVENT_BATCH_SIZE:-50}
+  INTERNAL_EVENT_LEASE_MS: ${INTERNAL_EVENT_LEASE_MS:-30000}
+  INTERNAL_EVENT_MAX_DEPTH: ${INTERNAL_EVENT_MAX_DEPTH:-8}
+  INTERNAL_EVENT_MAX_CHAIN_EVENTS: ${INTERNAL_EVENT_MAX_CHAIN_EVENTS:-100}
+  NOTIFICATION_LEASE_MS: ${NOTIFICATION_LEASE_MS:-60000}
+  NOTIFICATION_RECONCILIATION_INTERVAL_MS: ${NOTIFICATION_RECONCILIATION_INTERVAL_MS:-10000}
+  NOTIFICATION_BATCH_SIZE: ${NOTIFICATION_BATCH_SIZE:-100}
+  NOTIFICATION_MAX_ATTEMPTS: ${NOTIFICATION_MAX_ATTEMPTS:-5}
+  NOTIFICATION_MAX_BACKOFF_MS: ${NOTIFICATION_MAX_BACKOFF_MS:-300000}
+  WORKER_SHUTDOWN_TIMEOUT_MS: ${WORKER_SHUTDOWN_TIMEOUT_MS:-30000}
+  PERSISTED_EXECUTION_PAYLOAD_MAX_BYTES: ${PERSISTED_EXECUTION_PAYLOAD_MAX_BYTES:-65536}
+  METRICS_ENABLED: "true"
+  METRICS_API_KEY: ${METRICS_API_KEY:?METRICS_API_KEY is required}
+  METRICS_HOST: 0.0.0.0
+  API_METRICS_PORT: "9464"
+  WORKER_METRICS_PORT: "9465"
+  LOG_LEVEL: ${LOG_LEVEL:-info}
+  LOG_FORMAT: json
+  LOG_REDACT_ENABLED: "true"
+  MAX_LOG_PAYLOAD_BYTES: ${MAX_LOG_PAYLOAD_BYTES:-16384}
+  API_DOCS_ENABLED: "false"
+
+x-logging: &bounded-logging
+  driver: local
+  options:
+    max-size: 20m
+    max-file: "5"
+
 services:
   migrate:
-    build:
-      context: .
-      dockerfile: infrastructure/docker/Dockerfile.migrate
-    environment: &runtime-env
-      NODE_ENV: production
-      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
-      REDIS_URL: ${REDIS_URL:?REDIS_URL is required}
-      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?JWT_ACCESS_SECRET is required}
-      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?JWT_REFRESH_SECRET is required}
-      SESSION_IP_HASH_PEPPER: ${SESSION_IP_HASH_PEPPER:?SESSION_IP_HASH_PEPPER is required}
-      SECRET_ENCRYPTION_KEY: ${SECRET_ENCRYPTION_KEY:?SECRET_ENCRYPTION_KEY is required}
-      CONNECTION_ENCRYPTION_KEY: ${CONNECTION_ENCRYPTION_KEY:?CONNECTION_ENCRYPTION_KEY is required}
-      AI_SERVICE_URL: http://ai-service:8000
-      AI_SERVICE_API_KEY: ${AI_SERVICE_API_KEY:?AI_SERVICE_API_KEY is required}
-      WEBHOOK_TOKEN_PEPPER: ${WEBHOOK_TOKEN_PEPPER:?WEBHOOK_TOKEN_PEPPER is required}
-      CORS_ORIGIN: ${CORS_ORIGIN:?CORS_ORIGIN is required}
-      PUBLIC_APP_URL: ${PUBLIC_APP_URL:?PUBLIC_APP_URL is required}
-      PUBLIC_API_URL: ${PUBLIC_API_URL:?PUBLIC_API_URL is required}
+    image: ${FLOWMIND_MIGRATE_IMAGE:?FLOWMIND_MIGRATE_IMAGE must be an immutable digest}
+    pull_policy: always
+    profiles: [ops]
+    environment: *runtime-environment
     restart: "no"
-
-  api:
-    build:
-      context: .
-      dockerfile: infrastructure/docker/Dockerfile.api
-    environment: *runtime-env
-    depends_on:
-      migrate:
-        condition: service_completed_successfully
-      ai-service:
-        condition: service_healthy
-    ports:
-      - "3001:3001"
-    healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3001/health/ready').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
-      interval: 10s
-      timeout: 3s
-      retries: 6
-
-  worker:
-    build:
-      context: .
-      dockerfile: infrastructure/docker/Dockerfile.worker
-    environment:
-      <<: *runtime-env
-      WORKER_HEALTH_PORT: "3002"
-    depends_on:
-      migrate:
-        condition: service_completed_successfully
-      ai-service:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3002/health/ready').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
-      interval: 10s
-      timeout: 3s
-      retries: 6
-
-  web:
-    build:
-      context: .
-      dockerfile: infrastructure/docker/Dockerfile.web
-      args:
-        NEXT_PUBLIC_API_URL: ${PUBLIC_API_URL:?PUBLIC_API_URL is required}
-    environment:
-      NODE_ENV: production
-      NEXT_PUBLIC_API_URL: ${PUBLIC_API_URL:?PUBLIC_API_URL is required}
-    depends_on:
-      api:
-        condition: service_healthy
-    ports:
-      - "3000:3000"
-    healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/login').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
-      interval: 10s
-      timeout: 3s
-      retries: 6
+    networks: [flowmind-private]
+    logging: *bounded-logging
 
   ai-service:
-    build:
-      context: .
-      dockerfile: infrastructure/docker/Dockerfile.ai
+    image: ${FLOWMIND_AI_IMAGE:?FLOWMIND_AI_IMAGE must be an immutable digest}
+    pull_policy: always
     environment:
       ENVIRONMENT: production
       AI_SERVICE_API_KEY: ${AI_SERVICE_API_KEY:?AI_SERVICE_API_KEY is required}
       LLM_PROVIDER: ${LLM_PROVIDER:-fake}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_MODEL: ${OPENAI_MODEL:-}
+      OPENAI_TIMEOUT_MS: ${OPENAI_TIMEOUT_MS:-30000}
+      OPENAI_MAX_RETRIES: ${OPENAI_MAX_RETRIES:-2}
+      OPENAI_TEMPERATURE: ${OPENAI_TEMPERATURE:-0.2}
+      OPENAI_MAX_OUTPUT_TOKENS: ${OPENAI_MAX_OUTPUT_TOKENS:-1000}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      METRICS_ENABLED: "true"
+      METRICS_API_KEY: ${METRICS_API_KEY:?METRICS_API_KEY is required}
+      API_DOCS_ENABLED: "false"
+    expose: ["8000"]
+    restart: unless-stopped
+    networks: [flowmind-private]
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)"]
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)",
+        ]
       interval: 10s
       timeout: 3s
       retries: 6
+      start_period: 10s
+    logging: *bounded-logging
+
+  api:
+    image: ${FLOWMIND_API_IMAGE:?FLOWMIND_API_IMAGE must be an immutable digest}
+    pull_policy: always
+    environment: *runtime-environment
+    expose: ["3001", "9464"]
+    restart: unless-stopped
+    stop_grace_period: 35s
+    networks: [flowmind-private]
+    depends_on:
+      ai-service:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3001/health/ready').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 10s
+    logging: *bounded-logging
+
+  worker:
+    image: ${FLOWMIND_WORKER_IMAGE:?FLOWMIND_WORKER_IMAGE must be an immutable digest}
+    pull_policy: always
+    environment:
+      <<: *runtime-environment
+      WORKER_HEALTH_PORT: "3002"
+      MAIL_HOST: ${MAIL_HOST:-}
+      MAIL_PORT: ${MAIL_PORT:-1025}
+    expose: ["3002", "9465"]
+    restart: unless-stopped
+    stop_grace_period: 35s
+    networks: [flowmind-private]
+    depends_on:
+      ai-service:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3002/health/ready').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 10s
+    logging: *bounded-logging
+
+  web:
+    image: ${FLOWMIND_WEB_IMAGE:?FLOWMIND_WEB_IMAGE must be an immutable digest}
+    pull_policy: always
+    environment:
+      NODE_ENV: production
+      FLOWMIND_PUBLIC_API_URL: ${PUBLIC_API_URL:?PUBLIC_API_URL is required}
+    expose: ["3000"]
+    restart: unless-stopped
+    networks: [flowmind-private]
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3000/login').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 10s
+    logging: *bounded-logging
+
+networks:
+  flowmind-private:

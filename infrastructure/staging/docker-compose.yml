@@ -1,0 +1,66 @@
+services:
+  caddy:
+    image: ${CADDY_IMAGE:?CADDY_IMAGE must be pinned by digest}
+    pull_policy: always
+    environment:
+      STAGING_WEB_HOST: ${STAGING_WEB_HOST:?STAGING_WEB_HOST is required}
+      STAGING_API_HOST: ${STAGING_API_HOST:?STAGING_API_HOST is required}
+      ACME_EMAIL: ${ACME_EMAIL:?ACME_EMAIL is required}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./infrastructure/staging/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    restart: unless-stopped
+    networks: [flowmind-private]
+    depends_on:
+      web:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+
+  prometheus:
+    image: ${PROMETHEUS_IMAGE:?PROMETHEUS_IMAGE must be pinned by digest}
+    pull_policy: always
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=15d
+      - --web.enable-lifecycle
+    volumes:
+      - ./infrastructure/staging/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./infrastructure/observability/flowmind-alerts.yml:/etc/prometheus/flowmind-alerts.yml:ro
+      - ${METRICS_API_KEY_FILE:?METRICS_API_KEY_FILE is required}:/run/secrets/metrics_api_key:ro
+      - prometheus-data:/prometheus
+    expose: ["9090"]
+    restart: unless-stopped
+    networks: [flowmind-private]
+    depends_on:
+      api:
+        condition: service_healthy
+      worker:
+        condition: service_healthy
+      ai-service:
+        condition: service_healthy
+
+  alertmanager:
+    image: ${ALERTMANAGER_IMAGE:?ALERTMANAGER_IMAGE must be pinned by digest}
+    pull_policy: always
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
+    volumes:
+      - ${ALERTMANAGER_CONFIG_PATH:?ALERTMANAGER_CONFIG_PATH is required}:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager-data:/alertmanager
+    expose: ["9093"]
+    restart: unless-stopped
+    networks: [flowmind-private]
+
+volumes:
+  caddy-data:
+  caddy-config:
+  prometheus-data:
+  alertmanager-data:

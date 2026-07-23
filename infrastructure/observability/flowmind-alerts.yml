@@ -31,6 +31,12 @@ groups:
         labels: { severity: warning }
         annotations:
           summary: "Notification backlog exceeds 1000"
+      - alert: FlowmindNotificationFailures
+        expr: sum(rate(flowmind_notification_deliveries_total{outcome=~"failed|dead_letter"}[10m])) > 0
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "Notification delivery failures are occurring"
       - alert: FlowmindLeaseLosses
         expr: sum(rate(flowmind_execution_lease_lost_total[10m])) > 0
         for: 5m

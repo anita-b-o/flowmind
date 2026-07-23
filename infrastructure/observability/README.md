@@ -18,6 +18,7 @@ Initial metric names:
 - `llm_tokens_total`
 - `llm_cost_total`
 - `webhook_requests_total`
+
 # Observability deployment
 
 `flowmind-alerts.yml` contains the bounded-label minimum alert set for RC environments: service availability, execution queue latency/failures, durable event and notification backlogs, and lease loss.
@@ -27,3 +28,9 @@ RC1 also exposes durable execution, approval and dead-letter backlog gauges plus
 Scrape API and Worker metrics only on their internal metrics ports with the configured bearer key. AI metrics remain protected by the same policy. Do not relabel organization, workflow, execution, URL, email or error-message values into Prometheus labels.
 
 Import the rules into the platform Prometheus-compatible service and route `critical` alerts to the release on-call before promoting RC1.
+
+The concrete staging scrape configuration is
+`infrastructure/staging/prometheus.yml`. It supplies bounded `service` target
+labels required by the availability rule and reads the bearer key from a
+mounted root-only file. No Grafana dashboards or centralized log backend are
+included in RC1.
