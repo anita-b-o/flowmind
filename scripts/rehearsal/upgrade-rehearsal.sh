@@ -30,7 +30,7 @@ POSTGRES_BACKUP_ENV_FILE="$BACKUP_ENV_FILE" \
   "$repo_dir/scripts/rehearsal/backup-postgres.sh" >"$artifact_dir/backup-path.txt"
 
 BACKUP_ENV_FILE="$BACKUP_ENV_FILE" "$repo_dir/scripts/release/deploy-staging.sh" "$rc_manifest" "$staging_env"
-rc_version="$(node -e 'const m=require(process.argv[1]); process.stdout.write(m.version)' "$rc_manifest")"
+rc_version="$(node -e 'const m=require(process.argv[1]); process.stdout.write(m.candidateVersion)' "$rc_manifest")"
 "$repo_dir/scripts/rehearsal/run-acceptance.sh" \
   "$staging_env" \
   "${FLOWMIND_RELEASE_ROOT:-/opt/flowmind/releases}/$rc_version/release.env" \

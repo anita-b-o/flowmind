@@ -2,17 +2,18 @@
 
 Release:
 
-- RC version:
-- Git tag:
+- Candidate version:
 - Git SHA:
-- Release manifest checksum:
+- Planned annotated tag:
+- Release manifest SHA-256:
 - Baseline manifest:
 - Rehearsal date UTC:
 - Operator/reviewer:
 
 ## Mandatory gates
 
-- [ ] Annotated Git tag points to the manifest SHA.
+- [ ] Candidate version and Git SHA match the pre-GO release manifest.
+- [ ] Planned annotated tag does not exist locally or on the remote.
 - [ ] API, Worker, Web, AI, and migration images match manifest digests.
 - [ ] All five digests are pullable and no production rebuild is planned.
 - [ ] Unit, integration, API E2E, Worker E2E, chaos, Playwright, lint,
@@ -61,3 +62,17 @@ Release:
 - [ ] NO-GO
 
 Decision notes and unresolved evidence:
+
+After every gate is checked and the decision is GO, validate the independent
+tag operation without creating anything:
+
+```sh
+scripts/release/create-rc-tag.sh \
+  .artifacts/release-manifest.json \
+  .artifacts/rc1-go-no-go.md \
+  --check
+```
+
+Only after explicit tag authorization, use the same command with `--create`.
+It creates the annotated tag on the manifest SHA, does not push it, and never
+builds images.

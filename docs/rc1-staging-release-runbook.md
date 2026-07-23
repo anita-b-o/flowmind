@@ -33,19 +33,91 @@ Before the first deploy, prepare:
 
 ## Release identity and build
 
-The RC is an annotated Git tag such as `v0.1.0-rc.1`. Its commit SHA and the
-five image digests are the release identity. Package versions remain `0.1.0`
-because this is a private monorepo; the RC version belongs to the release
-manifest and OCI labels.
+Before GO, the candidate identity is the requested `candidateVersion`, one
+clean full `gitSha`, and exactly five image digests. No Git tag exists yet.
+Package versions remain `0.1.0` because this is a private monorepo; the
+candidate version belongs to the release manifest and OCI labels.
 
-The GitHub workflow validates the annotated tag, runs the full quality gate,
-builds all images once for `linux/amd64`, pushes the RC/SHA tags, resolves
+The release manifest uses schema version 2 and records:
+
+- `candidateVersion`, for example `0.1.0-rc.1`;
+- the full `gitSha`;
+- `createdAt`;
+- API, Worker, Web, AI, and migration image repositories and digests.
+
+The manifest is immutable pre-GO evidence. GO status is recorded separately in
+an approved copy of `docs/rc1-go-no-go.md`, bound to the manifest SHA-256.
+This avoids changing the manifest after its exact bytes and digests have been
+validated.
+
+Dispatch `.github/workflows/rc-staging.yml` with the explicit
+`candidate_version` and full `git_sha`. The workflow checks out that SHA,
+requires a clean repository state, validates the version, verifies that
+`v<candidate_version>` does not exist, runs the quality gate, builds all images
+once for `linux/amd64`, pushes informational candidate/SHA tags, resolves
 digests, and stores the manifest for 90 days. Deployments and production
-promotion consume `repository@sha256:digest`; tags are informational.
+promotion consume `repository@sha256:digest`; tags are never deployment input.
+
+When `deploy=true`, successful automated acceptance is followed by the
+protected `rc-go` environment. Configure required reviewers for that
+environment and approve it only after every manual rehearsal and every item in
+the GO checklist is complete. The final job revalidates the same SHA,
+manifest, five digests, and tag absence, then reports:
+
+```text
+READY_TO_TAG=true
+candidateVersion=0.1.0-rc.1
+gitSha=<full SHA>
+manifestSha256=<SHA-256>
+manifestArtifact=flowmind-<candidate>-manifest
+api/worker/web/ai-service/migrate=<repository>@<digest>
+```
+
+It does not create a tag or rebuild an image.
 
 The Web image has no environment-specific URL at build time.
 `web-entrypoint.sh` writes the public API URL to `runtime-config.js` at startup,
 so the same Web digest is promotable without a rebuild.
+
+## RC lifecycle
+
+The required order is:
+
+1. merge or commit the RC tooling;
+2. select one clean Git SHA;
+3. build the requested candidate version from that SHA;
+4. publish the five images once;
+5. create the release manifest with the candidate version, SHA, and digests;
+6. deploy staging by digest;
+7. complete the automated and manual rehearsal;
+8. record GO against the exact manifest checksum;
+9. with explicit authorization, create the annotated Git tag on the same SHA;
+10. push that tag;
+11. create the GitHub prerelease;
+12. promote the same five image digests without rebuilding.
+
+Never use `tag → build → discover later whether it works`. The tag formalizes
+the candidate already tested; it does not cause a new candidate build.
+
+After GO, copy the checklist to ignored evidence storage, fill its identity
+fields, check every gate and risk acceptance, and select GO. Validate it first:
+
+```sh
+scripts/release/create-rc-tag.sh \
+  .artifacts/release-manifest.json \
+  .artifacts/rc1-go-no-go.md \
+  --check
+```
+
+This verifies the manifest, GO record, current SHA, local and remote tag
+absence, and all five digests. Only after separate explicit authorization run
+the same command with `--create`. It performs exactly the equivalent of:
+
+```sh
+git tag -a v0.1.0-rc.1 <validated-sha> -m "FlowMind v0.1.0-rc.1"
+```
+
+The script does not push the tag and cannot build images.
 
 ## Deployment
 

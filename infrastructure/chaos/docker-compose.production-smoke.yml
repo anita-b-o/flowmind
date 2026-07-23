@@ -45,7 +45,7 @@ services:
     healthcheck: { test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3002/health/ready').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"], interval: 3s, timeout: 3s, retries: 30 }
   web:
     image: flowmind-web:latest
-    environment: { NODE_ENV: production, NEXT_PUBLIC_API_URL: http://api:3001 }
+    environment: { NODE_ENV: production, FLOWMIND_PUBLIC_API_URL: http://api:3001 }
     depends_on: { api: { condition: service_healthy } }
     ports: ["3310:3000"]
     healthcheck: { test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/login').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"], interval: 3s, timeout: 3s, retries: 30 }

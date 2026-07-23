@@ -3,10 +3,13 @@ name: RC staging release
 on:
   workflow_dispatch:
     inputs:
-      version:
-        description: RC version without the v prefix
+      candidate_version:
+        description: RC candidate version without the v prefix
         required: true
         default: 0.1.0-rc.1
+      git_sha:
+        description: Full 40-character Git SHA to build and rehearse
+        required: true
       deploy:
         description: Deploy the built digests to staging
         required: true
@@ -22,7 +25,43 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  candidate:
+    runs-on: ubuntu-latest
+    outputs:
+      candidate-version: ${{ steps.identity.outputs.candidate-version }}
+      git-sha: ${{ steps.identity.outputs.git-sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.git_sha }}
+          fetch-depth: 0
+          fetch-tags: true
+      - id: identity
+        name: Validate pre-GO candidate identity
+        env:
+          CANDIDATE_VERSION: ${{ inputs.candidate_version }}
+          EXPECTED_GIT_SHA: ${{ inputs.git_sha }}
+        run: |
+          [[ "$CANDIDATE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+-rc\.[0-9]+$ ]] || {
+            echo "candidate_version must match X.Y.Z-rc.N" >&2
+            exit 1
+          }
+          [[ "$EXPECTED_GIT_SHA" =~ ^[0-9a-f]{40}$ ]] || {
+            echo "git_sha must be a full lowercase Git SHA" >&2
+            exit 1
+          }
+          actual_git_sha="$(git rev-parse HEAD)"
+          test "$actual_git_sha" = "$EXPECTED_GIT_SHA"
+          test -z "$(git status --porcelain)"
+          if git show-ref --verify --quiet "refs/tags/v$CANDIDATE_VERSION"; then
+            echo "Tag v$CANDIDATE_VERSION must not exist before rehearsal" >&2
+            exit 1
+          fi
+          echo "candidate-version=$CANDIDATE_VERSION" >> "$GITHUB_OUTPUT"
+          echo "git-sha=$actual_git_sha" >> "$GITHUB_OUTPUT"
+
   quality:
+    needs: candidate
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -62,6 +101,8 @@ jobs:
       WEBHOOK_TOKEN_PEPPER: rc-ci-webhook-pepper-00000000000000
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.candidate.outputs.git-sha }}
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -89,37 +130,39 @@ jobs:
           find scripts/release scripts/rehearsal -type f -name '*.sh' -print0 | xargs -0 -n1 bash -n
           node --check scripts/release/validate-manifest.mjs
           node --check scripts/release/manifest-to-env.mjs
+          node --check scripts/release/validate-go-record.mjs
+      - name: Test RC release tooling
+        run: pnpm rc:tooling:test
       - name: Security audit gate
         run: |
           pnpm audit --prod --json > /tmp/flowmind-audit.json || true
           node scripts/release/security-audit-gate.mjs /tmp/flowmind-audit.json
 
   images:
-    needs: quality
+    needs: [candidate, quality]
     runs-on: ubuntu-latest
     outputs:
       artifact-name: ${{ steps.manifest.outputs.artifact-name }}
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ needs.candidate.outputs.git-sha }}
           fetch-depth: 0
+          fetch-tags: true
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Validate annotated RC tag
-        env:
-          VERSION: ${{ inputs.version }}
-        run: |
-          test "$(git rev-parse "refs/tags/v$VERSION^{commit}")" = "$GITHUB_SHA"
-          test "$(git cat-file -t "refs/tags/v$VERSION")" = tag
       - name: Build and push once
         env:
           RELEASE_MANIFEST_PATH: ${{ runner.temp }}/release-manifest.json
           PUSH_IMAGES: "true"
-        run: scripts/release/build-and-push.sh "${{ inputs.version }}"
+        run: >-
+          scripts/release/build-and-push.sh
+          "${{ needs.candidate.outputs.candidate-version }}"
+          "${{ needs.candidate.outputs.git-sha }}"
       - name: Smoke the published digests
         env:
           RELEASE_MANIFEST_PATH: ${{ runner.temp }}/release-manifest.json
@@ -138,21 +181,25 @@ jobs:
           docker tag "$FLOWMIND_MIGRATE_IMAGE" flowmind-migrate:latest
           bash scripts/run-production-compose-smoke.sh
       - id: manifest
-        run: echo "artifact-name=flowmind-${{ inputs.version }}-manifest" >> "$GITHUB_OUTPUT"
+        env:
+          CANDIDATE_VERSION: ${{ needs.candidate.outputs.candidate-version }}
+        run: echo "artifact-name=flowmind-$CANDIDATE_VERSION-manifest" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@v4
         with:
-          name: flowmind-${{ inputs.version }}-manifest
+          name: flowmind-${{ needs.candidate.outputs.candidate-version }}-manifest
           path: ${{ runner.temp }}/release-manifest.json
           if-no-files-found: error
           retention-days: 90
 
   deploy:
     if: ${{ inputs.deploy }}
-    needs: images
+    needs: [candidate, images]
     runs-on: ubuntu-latest
     environment: staging
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.candidate.outputs.git-sha }}
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -196,7 +243,7 @@ jobs:
           remote_manifest="/tmp/flowmind-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.json"
           scp "${RUNNER_TEMP}/release/release-manifest.json" "$USER@$HOST:$remote_manifest"
           ssh "$USER@$HOST" \
-            "cd '$REPO_PATH' && git fetch --tags origin && git checkout --detach '$GITHUB_SHA' && BACKUP_ENV_FILE='$BACKUP_ENV_PATH' BACKUP_OUTPUT_DIR='$BACKUP_OUTPUT_DIR' BACKUP_UPLOAD_HOOK='$BACKUP_UPLOAD_HOOK' POSTGRES_BACKUP_IMAGE='$POSTGRES_BACKUP_IMAGE' scripts/release/deploy-staging.sh '$remote_manifest' '$STAGING_ENV_PATH'"
+            "cd '$REPO_PATH' && git fetch origin '${{ needs.candidate.outputs.git-sha }}' && git checkout --detach '${{ needs.candidate.outputs.git-sha }}' && BACKUP_ENV_FILE='$BACKUP_ENV_PATH' BACKUP_OUTPUT_DIR='$BACKUP_OUTPUT_DIR' BACKUP_UPLOAD_HOOK='$BACKUP_UPLOAD_HOOK' POSTGRES_BACKUP_IMAGE='$POSTGRES_BACKUP_IMAGE' scripts/release/deploy-staging.sh '$remote_manifest' '$STAGING_ENV_PATH'"
       - name: Public staging smoke and RBAC
         env:
           STAGING_WEB_URL: ${{ vars.STAGING_WEB_URL }}
@@ -220,7 +267,7 @@ jobs:
           SMOKE_ENV_PATH: ${{ vars.STAGING_SMOKE_ENV_PATH }}
           ALERT_DELIVERY_VERIFICATION_HOOK: ${{ vars.STAGING_ALERT_DELIVERY_VERIFICATION_HOOK }}
         run: |
-          version="${{ inputs.version }}"
+          version="${{ needs.candidate.outputs.candidate-version }}"
           ssh "$USER@$HOST" \
             "cd '$REPO_PATH' && SKIP_PUBLIC_SMOKE=true ALERT_DELIVERY_VERIFICATION_HOOK='$ALERT_DELIVERY_VERIFICATION_HOOK' scripts/rehearsal/run-acceptance.sh '$STAGING_ENV_PATH' '/opt/flowmind/releases/$version/release.env' '$SMOKE_ENV_PATH'"
       - name: Roll back a rejected candidate
@@ -233,3 +280,85 @@ jobs:
         run: |
           ssh "$USER@$HOST" \
             "cd '$REPO_PATH' && baseline=\$(readlink -f /opt/flowmind/releases/current) && test -f \"\$baseline/release.env\" && RUN_ROLLBACK_SMOKE=false scripts/release/rollback-staging.sh \"\$baseline/release.env\" '$STAGING_ENV_PATH'"
+
+  ready-to-tag:
+    if: ${{ inputs.deploy }}
+    needs: [candidate, images, deploy]
+    runs-on: ubuntu-latest
+    environment: rc-go
+    outputs:
+      READY_TO_TAG: ${{ steps.ready.outputs.READY_TO_TAG }}
+      candidate-version: ${{ steps.ready.outputs.candidate-version }}
+      git-sha: ${{ steps.ready.outputs.git-sha }}
+      manifest-sha256: ${{ steps.ready.outputs.manifest-sha256 }}
+      manifest-artifact: ${{ steps.ready.outputs.manifest-artifact }}
+      api-digest: ${{ steps.ready.outputs.api-digest }}
+      worker-digest: ${{ steps.ready.outputs.worker-digest }}
+      web-digest: ${{ steps.ready.outputs.web-digest }}
+      ai-digest: ${{ steps.ready.outputs.ai-digest }}
+      migrate-digest: ${{ steps.ready.outputs.migrate-digest }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.candidate.outputs.git-sha }}
+          fetch-depth: 0
+          fetch-tags: true
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.images.outputs.artifact-name }}
+          path: ${{ runner.temp }}/release
+      - id: ready
+        name: Confirm immutable GO identity
+        env:
+          CANDIDATE_VERSION: ${{ needs.candidate.outputs.candidate-version }}
+          EXPECTED_GIT_SHA: ${{ needs.candidate.outputs.git-sha }}
+          MANIFEST_PATH: ${{ runner.temp }}/release/release-manifest.json
+        run: |
+          node scripts/release/validate-manifest.mjs "$MANIFEST_PATH"
+          manifest_sha256="$(sha256sum "$MANIFEST_PATH" | cut -d' ' -f1)"
+          node - "$MANIFEST_PATH" "$CANDIDATE_VERSION" "$EXPECTED_GIT_SHA" "$GITHUB_OUTPUT" "$GITHUB_STEP_SUMMARY" "$manifest_sha256" "${{ needs.images.outputs.artifact-name }}" <<'NODE'
+          const fs = require("node:fs");
+          const manifest = require(process.argv[2]);
+          if (manifest.candidateVersion !== process.argv[3] || manifest.gitSha !== process.argv[4]) {
+            throw new Error("Manifest identity does not match the requested candidate");
+          }
+          const outputNames = {
+            api: "api-digest",
+            worker: "worker-digest",
+            web: "web-digest",
+            "ai-service": "ai-digest",
+            migrate: "migrate-digest",
+          };
+          fs.appendFileSync(
+            process.argv[6],
+            [
+              "## RC candidate ready for separate tag authorization",
+              "",
+              "READY_TO_TAG=true",
+              `candidateVersion=${manifest.candidateVersion}`,
+              `gitSha=${manifest.gitSha}`,
+              `manifestSha256=${process.argv[7]}`,
+              `manifestArtifact=${process.argv[8]}`,
+              "",
+            ].join("\n"),
+          );
+          for (const [service, outputName] of Object.entries(outputNames)) {
+            fs.appendFileSync(process.argv[5], `${outputName}=${manifest.images[service].digest}\n`);
+            fs.appendFileSync(process.argv[6], `${service}=${manifest.images[service].ref}\n`);
+          }
+          fs.appendFileSync(
+            process.argv[6],
+            "\nNo tag was created and no image was rebuilt.\n",
+          );
+          NODE
+          test "$(git rev-parse HEAD)" = "$EXPECTED_GIT_SHA"
+          test -z "$(git status --porcelain)"
+          if git show-ref --verify --quiet "refs/tags/v$CANDIDATE_VERSION"; then
+            echo "Tag v$CANDIDATE_VERSION appeared during rehearsal" >&2
+            exit 1
+          fi
+          echo "READY_TO_TAG=true" >> "$GITHUB_OUTPUT"
+          echo "candidate-version=$CANDIDATE_VERSION" >> "$GITHUB_OUTPUT"
+          echo "git-sha=$EXPECTED_GIT_SHA" >> "$GITHUB_OUTPUT"
+          echo "manifest-sha256=$manifest_sha256" >> "$GITHUB_OUTPUT"
+          echo "manifest-artifact=${{ needs.images.outputs.artifact-name }}" >> "$GITHUB_OUTPUT"

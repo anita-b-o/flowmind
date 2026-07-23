@@ -11,6 +11,10 @@ __pycache__/
 *.pyc
 postgres-data/
 redis-data/
+.artifacts/
+release-manifest.json
+infrastructure/staging/alertmanager.yml
+infrastructure/staging/staging.env
 
 # Python build metadata
 *.egg-info/

@@ -12,6 +12,13 @@ Deploy Web, API, Worker and AI Service as independent, non-root workloads. Postg
 
 Application rollback uses the previous image digests. Do not roll back schema migrations destructively; migrations must remain expand/contract compatible.
 
+The executable RC staging procedure, backup/restore commands, failure
+rehearsals, and evidence requirements are defined in
+`docs/rc1-staging-release-runbook.md`. Production promotion must consume the
+same image digests recorded in the staging release manifest; never rebuild
+environment-specific images. An RC tag is created only after GO and points to
+the exact SHA already represented by that manifest.
+
 ## Required configuration
 
 Use the names and constraints in `.env.example`; inject values through the deployment platform, never a committed `.env`. Production startup rejects short/default JWT, session, webhook and AI secrets, missing connection encryption, and `SameSite=None` refresh cookies. Keep API/AI docs disabled unless access is restricted operationally.

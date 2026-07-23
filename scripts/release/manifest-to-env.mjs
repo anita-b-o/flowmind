@@ -6,7 +6,7 @@ const mapping = {
   worker: "FLOWMIND_WORKER_IMAGE",
   web: "FLOWMIND_WEB_IMAGE",
   "ai-service": "FLOWMIND_AI_IMAGE",
-  migrate: "FLOWMIND_MIGRATE_IMAGE"
+  migrate: "FLOWMIND_MIGRATE_IMAGE",
 };
 for (const [service, variable] of Object.entries(mapping)) {
   const ref = manifest.images?.[service]?.ref;
@@ -15,5 +15,5 @@ for (const [service, variable] of Object.entries(mapping)) {
   }
   process.stdout.write(`${variable}=${ref}\n`);
 }
-process.stdout.write(`FLOWMIND_RELEASE_VERSION=${manifest.version}\n`);
-process.stdout.write(`FLOWMIND_RELEASE_REVISION=${manifest.revision}\n`);
+process.stdout.write(`FLOWMIND_RELEASE_VERSION=${manifest.candidateVersion}\n`);
+process.stdout.write(`FLOWMIND_RELEASE_REVISION=${manifest.gitSha}\n`);

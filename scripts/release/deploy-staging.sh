@@ -10,7 +10,7 @@ if [[ -z "$manifest" || -z "$staging_env" ]]; then
 fi
 
 node "$repo_dir/scripts/release/validate-manifest.mjs" "$manifest" >/dev/null
-version="$(node -e 'const m=require(process.argv[1]); process.stdout.write(m.version)' "$manifest")"
+version="$(node -e 'const m=require(process.argv[1]); process.stdout.write(m.candidateVersion)' "$manifest")"
 release_root="${FLOWMIND_RELEASE_ROOT:-/opt/flowmind/releases}"
 release_dir="$release_root/$version"
 mkdir -p "$release_dir"
@@ -96,7 +96,7 @@ if [[ "${SKIP_PREDEPLOY_BACKUP:-false}" != "true" ]]; then
   : "${BACKUP_UPLOAD_HOOK:?BACKUP_UPLOAD_HOOK is required for a staging deployment backup}"
   POSTGRES_BACKUP_ENV_FILE="$BACKUP_ENV_FILE" \
     FLOWMIND_RELEASE_VERSION="$version" \
-    FLOWMIND_RELEASE_REVISION="$(node -e 'const m=require(process.argv[1]); process.stdout.write(m.revision)' "$manifest")" \
+    FLOWMIND_RELEASE_REVISION="$(node -e 'const m=require(process.argv[1]); process.stdout.write(m.gitSha)' "$manifest")" \
     FLOWMIND_MIGRATION_STATUS="$migration_status_before" \
     "$repo_dir/scripts/rehearsal/backup-postgres.sh"
 fi

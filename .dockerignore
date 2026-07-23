@@ -9,7 +9,15 @@ node_modules
 .git
 .env
 **/.env
+.env.*
+**/.env.*
 **/.env.local
+.npmrc
+**/.npmrc
+*.key
+*.pem
+.artifacts
+release-manifest.json
 *.log
 fondo*.png
 koi-fish*

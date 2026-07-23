@@ -48,14 +48,27 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
       - run: corepack enable
       - run: pnpm install --frozen-lockfile
+      - run: python -m venv apps/ai-service/.venv
+      - run: pnpm --filter @automation/ai-service bootstrap
       - run: pnpm db:generate
       - run: pnpm --filter @automation/api exec prisma migrate deploy --schema prisma/schema.prisma
       - run: pnpm lint
       - run: pnpm typecheck
       - run: pnpm test
       - run: pnpm build
+      - name: Validate RC scripts
+        run: |
+          find scripts/release scripts/rehearsal -type f -name '*.sh' -print0 | xargs -0 -n1 bash -n
+          node --check scripts/release/validate-manifest.mjs
+          node --check scripts/release/manifest-to-env.mjs
+          node --check scripts/release/validate-go-record.mjs
+      - name: Test RC release tooling
+        run: pnpm rc:tooling:test
 
   ai-service:
     runs-on: ubuntu-latest

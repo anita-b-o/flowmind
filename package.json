@@ -14,6 +14,7 @@
     "test:staging": "bash scripts/rehearsal/staging-smoke.sh",
     "rc:acceptance": "bash scripts/rehearsal/run-acceptance.sh",
     "rc:manifest:validate": "node scripts/release/validate-manifest.mjs",
+    "rc:tooling:test": "bash scripts/release/test-release-tooling.sh",
     "typecheck": "corepack pnpm --filter @automation/shared-types build && corepack pnpm --filter @automation/config build && corepack pnpm --filter @automation/observability build && corepack pnpm --filter @automation/ui build && corepack pnpm -r --if-present typecheck",
     "format": "prettier --write \"**/*.{ts,tsx,js,json,md,yml,yaml,py}\"",
     "db:generate": "corepack pnpm --filter @automation/api prisma:generate",
