@@ -5,16 +5,19 @@ import { PrismaService } from "../prisma/prisma.service";
 import { ShutdownStateService } from "../runtime/shutdown-state.service";
 import { NOTIFICATION_DELIVERIES_QUEUE, NOTIFICATION_DELIVER_JOB } from "../queues/queue.constants";
 import { WorkerMetricsService } from "../metrics/worker-metrics.service";
+import { WorkerLoggerService } from "../observability/worker-logger.service";
 
 @Injectable()
 export class NotificationReconcilerService implements OnModuleInit, OnModuleDestroy {
-  private timer?: NodeJS.Timeout; private running = false;
-  constructor(private readonly prisma: PrismaService, private readonly shutdown: ShutdownStateService, @InjectQueue(NOTIFICATION_DELIVERIES_QUEUE) private readonly queue: Queue, private readonly metrics?: WorkerMetricsService) {}
-  onModuleInit() { this.timer = setInterval(() => void this.reconcile(), Number(process.env.NOTIFICATION_RECONCILIATION_INTERVAL_MS ?? 10_000)); this.timer.unref(); void this.reconcile(); }
-  onModuleDestroy() { if (this.timer) clearInterval(this.timer); }
-  isActive() { return Boolean(this.timer) && !this.shutdown.isShuttingDown(); }
+  private timer?: NodeJS.Timeout;
+  private currentRun?: Promise<void>;
+  private lastError?: string;
+  constructor(private readonly prisma: PrismaService, private readonly shutdown: ShutdownStateService, @InjectQueue(NOTIFICATION_DELIVERIES_QUEUE) private readonly queue: Queue, private readonly metrics?: WorkerMetricsService, private readonly logger?: WorkerLoggerService) {}
+  onModuleInit() { this.timer = setInterval(() => this.startReconcile(), Number(process.env.NOTIFICATION_RECONCILIATION_INTERVAL_MS ?? 10_000)); this.timer.unref(); this.startReconcile(); }
+  async onModuleDestroy() { if (this.timer) clearInterval(this.timer); await this.currentRun; }
+  isActive() { return Boolean(this.timer) && !this.shutdown.isShuttingDown() && !this.lastError; }
   async reconcile() {
-    if (this.running || this.shutdown.isShuttingDown()) return; this.running = true;
+    if (this.shutdown.isShuttingDown()) return;
     try {
       const now = new Date();
       await this.prisma.$transaction(async (tx) => {
@@ -30,6 +33,21 @@ export class NotificationReconcilerService implements OnModuleInit, OnModuleDest
         const grouped = await this.prisma.notificationRequest.groupBy({ by: ["status"], _count: true });
         for (const item of grouped) this.metrics.notificationBacklog.set({ state: item.status.toLowerCase() }, item._count);
       }
-    } finally { this.running = false; }
+      this.lastError = undefined;
+    } catch (error) {
+      this.lastError = error instanceof Error ? error.message : String(error);
+      throw error;
+    }
+  }
+  private startReconcile() {
+    if (this.currentRun || this.shutdown.isShuttingDown()) return;
+    const run = this.reconcile().catch((error) => {
+      this.logger?.error("worker.notification_reconciler.failed", {
+        error: error instanceof Error ? error.message : String(error)
+      });
+    });
+    this.currentRun = run.finally(() => {
+      this.currentRun = undefined;
+    });
   }
 }

@@ -22,6 +22,12 @@ export class AuthController {
 
   @Post("register")
   async register(@Body() dto: RegisterDto, @Req() request: Request, @Res({ passthrough: true }) response: Response) {
+    if (
+      process.env.FLOWMIND_DEPLOYMENT_PROFILE === "demo-free" &&
+      process.env.DEMO_REGISTRATION_ENABLED !== "true"
+    ) {
+      throw new ForbiddenException("Registration is disabled for this demo");
+    }
     const metadata = sessionMetadata(request);
     await this.rateLimit.assertAllowed("register", metadata.ipHash, dto.email);
     const result = await this.authService.register(dto, metadata);

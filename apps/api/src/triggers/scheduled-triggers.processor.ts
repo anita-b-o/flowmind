@@ -8,7 +8,10 @@ type ScheduledTriggerJobPayload = {
   triggerId: string;
 };
 
-@Processor(SCHEDULED_TRIGGERS_QUEUE)
+@Processor(SCHEDULED_TRIGGERS_QUEUE, {
+  concurrency: 1,
+  drainDelay: drainDelaySeconds()
+})
 export class ScheduledTriggersProcessor extends WorkerHost {
   constructor(private readonly scheduledTriggers: ScheduledTriggersService) {
     super();
@@ -20,4 +23,13 @@ export class ScheduledTriggersProcessor extends WorkerHost {
     }
     return this.scheduledTriggers.runDue(job.data.triggerId, job.data.organizationId);
   }
+
+  isRunning() {
+    return Boolean(this.worker);
+  }
+}
+
+function drainDelaySeconds() {
+  const value = Number(process.env.BULLMQ_DRAIN_DELAY_SECONDS ?? 5);
+  return Number.isInteger(value) && value >= 1 && value <= 300 ? value : 5;
 }

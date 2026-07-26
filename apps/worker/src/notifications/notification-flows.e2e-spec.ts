@@ -95,7 +95,7 @@ describe("durable notification flow", () => {
   });
 });
 
-function processor(send: jest.Mock, workerId: string) { return new NotificationProcessor(prisma as any, { id: workerId } as any, { resolveSmtp: jest.fn(async () => ({ id: "smtp", type: "SMTP", host: "localhost", port: 1025, secure: false, username: "user", password: "not-used", fromEmail: "flowmind@example.com" })) } as any, new NotificationTemplates(), { send } as any); }
+function processor(send: jest.Mock, workerId: string) { return new NotificationProcessor(prisma as any, { id: workerId } as any, { resolveSmtp: jest.fn(async () => ({ id: "smtp", type: "SMTP", host: "localhost", port: 1025, secure: false, username: "user", password: "not-used", fromEmail: "flowmind@example.com" })) } as any, new NotificationTemplates(), { send } as any, { isShuttingDown: () => false } as any); }
 
 async function executionFixture(name: string, type: "EXECUTION_FAILED" | "EXECUTION_COMPLETED", enabled: boolean) {
   const suffix = `${prefix}-${name}-${Math.random().toString(16).slice(2)}`; const organization = await prisma.organization.create({ data: { name, slug: suffix } }); const user = await prisma.user.create({ data: { email: `${suffix}@example.com`, name, passwordHash: "hash" } });

@@ -11,7 +11,10 @@ import { WorkerIdentityService } from "../runtime/worker-identity.service";
 import { newTraceId } from "@automation/observability";
 import { WorkerMetricsService } from "../metrics/worker-metrics.service";
 
-@Processor(WORKFLOW_EXECUTIONS_QUEUE)
+@Processor(WORKFLOW_EXECUTIONS_QUEUE, {
+  concurrency: 1,
+  drainDelay: drainDelaySeconds()
+})
 export class ExecutionsProcessor extends WorkerHost {
   private shutdownStarted = false;
 
@@ -57,6 +60,10 @@ export class ExecutionsProcessor extends WorkerHost {
     });
   }
 
+  isRunning() {
+    return Boolean(this.worker) && !this.shutdownStarted && !this.shutdown.isShuttingDown();
+  }
+
   async onApplicationShutdown() {
     await this.closeWorker();
   }
@@ -91,4 +98,9 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs: number) {
   } finally {
     if (timer) clearTimeout(timer);
   }
+}
+
+function drainDelaySeconds() {
+  const value = Number(process.env.BULLMQ_DRAIN_DELAY_SECONDS ?? 5);
+  return Number.isInteger(value) && value >= 1 && value <= 300 ? value : 5;
 }

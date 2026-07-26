@@ -17,6 +17,7 @@ import { WaitUntilHandler } from "./engine/handlers/wait-until.handler";
 import { TransformHandler } from "./engine/handlers/transform.handler";
 import { DatabaseRecordHandler } from "./engine/handlers/database-record.handler";
 import { AiHandler } from "./engine/handlers/ai.handler";
+import { AiGateway, EmbeddedFakeAiGateway, HttpAiGateway } from "./engine/handlers/ai-gateway";
 import { EmailNotificationHandler } from "./engine/handlers/email-notification.handler";
 import { SafeHttpClient } from "./http/safe-http-client";
 import { ErrorClassifier } from "./engine/error-classifier";
@@ -54,8 +55,9 @@ import { NotificationMaterializerService } from "./notifications/notification-ma
 import { NotificationProcessor } from "./notifications/notification.processor";
 import { NotificationReconcilerService } from "./notifications/notification-reconciler.service";
 import { NotificationTemplates } from "./notifications/notification-templates";
-import { EmailProvider, SmtpEmailProvider } from "./notifications/email-provider";
+import { EmailProvider, EmbeddedFakeEmailProvider, SmtpEmailProvider } from "./notifications/email-provider";
 import { redisConnectionOptions } from "@automation/config";
+import { DemoTelemetryService } from "./observability/demo-telemetry.service";
 
 const redisConnection = redisConnectionOptions(process.env.REDIS_URL ?? "redis://localhost:6379");
 
@@ -90,6 +92,7 @@ const redisConnection = redisConnectionOptions(process.env.REDIS_URL ?? "redis:/
     JobContextService,
     WorkerLoggerService,
     WorkerMetricsService,
+    DemoTelemetryService,
     DataStoreRuntimeService,
     ConnectionCryptoService,
     ConnectionResolver,
@@ -114,6 +117,14 @@ const redisConnection = redisConnectionOptions(process.env.REDIS_URL ?? "redis:/
     IncrementVariableHandler,
     AppendVariableHandler,
     AiHandler,
+    HttpAiGateway,
+    EmbeddedFakeAiGateway,
+    {
+      provide: AiGateway,
+      useFactory: (http: HttpAiGateway, fake: EmbeddedFakeAiGateway) =>
+        process.env.FLOWMIND_AI_MODE === "embedded-fake" ? fake : http,
+      inject: [HttpAiGateway, EmbeddedFakeAiGateway]
+    },
     EmailNotificationHandler
     ,ReturnWorkflowOutputHandler,
     ApprovalHandler
@@ -124,7 +135,13 @@ const redisConnection = redisConnectionOptions(process.env.REDIS_URL ?? "redis:/
     ,NotificationReconcilerService
     ,NotificationTemplates
     ,SmtpEmailProvider
-    ,{ provide: EmailProvider, useExisting: SmtpEmailProvider }
+    ,EmbeddedFakeEmailProvider
+    ,{
+      provide: EmailProvider,
+      useFactory: (smtp: SmtpEmailProvider, fake: EmbeddedFakeEmailProvider) =>
+        process.env.FLOWMIND_EMAIL_MODE === "embedded-fake" ? fake : smtp,
+      inject: [SmtpEmailProvider, EmbeddedFakeEmailProvider]
+    }
   ]
 })
 export class WorkerModule {}

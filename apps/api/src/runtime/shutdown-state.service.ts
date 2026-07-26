@@ -5,6 +5,10 @@ export class ShutdownStateService implements OnApplicationShutdown {
   private shuttingDown = false;
 
   onApplicationShutdown() {
+    this.beginShutdown();
+  }
+
+  beginShutdown() {
     this.shuttingDown = true;
   }
 

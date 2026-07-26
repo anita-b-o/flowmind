@@ -12,6 +12,7 @@ __pycache__/
 postgres-data/
 redis-data/
 .artifacts/
+.vercel/
 release-manifest.json
 infrastructure/staging/alertmanager.yml
 infrastructure/staging/staging.env

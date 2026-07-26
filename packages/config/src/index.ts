@@ -2,6 +2,9 @@ import { z } from "zod";
 
 const baseEnvSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "staging", "production"]).default("development"),
+  FLOWMIND_DEPLOYMENT_PROFILE: z.enum(["production", "demo-free"]).default("production"),
+  FLOWMIND_AI_MODE: z.enum(["external", "embedded-fake"]).default("external"),
+  FLOWMIND_EMAIL_MODE: z.enum(["smtp", "embedded-fake"]).default("smtp"),
   DATABASE_URL: z.string().url(),
   REDIS_URL: z.string().url(),
   JWT_ACCESS_SECRET: z.string().min(16),
@@ -11,6 +14,8 @@ const baseEnvSchema = z.object({
   REFRESH_COOKIE_NAME: z.string().default("refresh_token"),
   REFRESH_COOKIE_DOMAIN: z.string().optional(),
   REFRESH_COOKIE_SAME_SITE: z.enum(["lax", "strict", "none"]).default("lax"),
+  REFRESH_COOKIE_PATH: z.string().startsWith("/").default("/auth"),
+  DEMO_REGISTRATION_ENABLED: z.enum(["true", "false"]).default("false").transform((value) => value === "true"),
   SESSION_IP_HASH_PEPPER: z.string().min(16).default("change-me-session-ip-pepper"),
   CORS_ORIGIN: z.string().default("http://localhost:3000"),
   PUBLIC_APP_URL: z.string().url().default("http://localhost:3000"),
@@ -22,8 +27,8 @@ const baseEnvSchema = z.object({
   CONNECTION_ENCRYPTION_KEY: z.string().optional(),
   CONNECTION_ENCRYPTION_VERSION: z.coerce.number().int().positive().default(1),
   CONNECTION_TEST_TIMEOUT_MS: z.coerce.number().int().positive().default(5000),
-  AI_SERVICE_URL: z.string().url(),
-  AI_SERVICE_API_KEY: z.string().min(8),
+  AI_SERVICE_URL: z.string().url().optional(),
+  AI_SERVICE_API_KEY: z.string().min(8).optional(),
   PUBLIC_API_URL: z.string().url().default("http://localhost:3001"),
   WEBHOOK_TOKEN_PEPPER: z.string().min(16).default("change-me-webhook-token-pepper"),
   WEBHOOK_PAYLOAD_MAX_BYTES: z.coerce.number().int().positive().default(1_048_576),
@@ -39,6 +44,8 @@ const baseEnvSchema = z.object({
   NOTIFICATION_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(20).default(5),
   NOTIFICATION_MAX_BACKOFF_MS: z.coerce.number().int().positive().default(300_000),
   WORKER_SHUTDOWN_TIMEOUT_MS: z.coerce.number().int().positive().default(30_000),
+  BULLMQ_DRAIN_DELAY_SECONDS: z.coerce.number().int().min(1).max(300).default(5),
+  DEMO_TELEMETRY_INTERVAL_MS: z.coerce.number().int().min(10_000).max(3_600_000).default(60_000),
   WORKER_HEALTH_PORT: z.coerce.number().int().positive().default(3002),
   METRICS_ENABLED: z.coerce.boolean().default(false),
   METRICS_API_KEY: z.string().default(""),
@@ -70,6 +77,7 @@ export type MailEnv = z.infer<typeof mailEnvSchema>;
 
 export function parseBaseEnv(env: NodeJS.ProcessEnv): BaseEnv {
   const parsed = baseEnvSchema.parse(env);
+  validateDeploymentProfile(parsed);
   validateMetricsConfig(parsed);
   validateConnectionEncryptionConfig(parsed);
   validateProductionSecurity(parsed);
@@ -84,12 +92,28 @@ function validateProductionSecurity(env: BaseEnv) {
     ["JWT_REFRESH_SECRET", env.JWT_REFRESH_SECRET],
     ["SESSION_IP_HASH_PEPPER", env.SESSION_IP_HASH_PEPPER],
     ["WEBHOOK_TOKEN_PEPPER", env.WEBHOOK_TOKEN_PEPPER],
-    ["AI_SERVICE_API_KEY", env.AI_SERVICE_API_KEY]
+    ...(env.FLOWMIND_AI_MODE === "external" && env.AI_SERVICE_API_KEY
+      ? [["AI_SERVICE_API_KEY", env.AI_SERVICE_API_KEY] as const]
+      : [])
   ] as const) {
     if (value.length < 32 || insecure.has(value)) throw new Error(`${name} must contain at least 32 non-default characters in production`);
   }
   if (env.REFRESH_COOKIE_SAME_SITE === "none") {
     throw new Error("REFRESH_COOKIE_SAME_SITE=none is not supported in production until CSRF token protection is enabled");
+  }
+}
+
+function validateDeploymentProfile(env: BaseEnv) {
+  if (env.FLOWMIND_DEPLOYMENT_PROFILE !== "demo-free") {
+    if (env.FLOWMIND_AI_MODE === "embedded-fake") {
+      throw new Error("FLOWMIND_AI_MODE=embedded-fake is only allowed in demo-free");
+    }
+    if (env.FLOWMIND_EMAIL_MODE === "embedded-fake") {
+      throw new Error("FLOWMIND_EMAIL_MODE=embedded-fake is only allowed in demo-free");
+    }
+  }
+  if (env.FLOWMIND_AI_MODE === "external" && (!env.AI_SERVICE_URL || !env.AI_SERVICE_API_KEY)) {
+    throw new Error("AI_SERVICE_URL and AI_SERVICE_API_KEY are required when FLOWMIND_AI_MODE=external");
   }
 }
 

@@ -10,12 +10,41 @@ import { EmailProvider } from "./email-provider";
 import { NotificationTemplates } from "./notification-templates";
 import { validEmail } from "./notification-domain";
 import { WorkerMetricsService } from "../metrics/worker-metrics.service";
+import { ShutdownStateService } from "../runtime/shutdown-state.service";
+import { WorkerLoggerService } from "../observability/worker-logger.service";
 
 @Injectable()
-@Processor(NOTIFICATION_DELIVERIES_QUEUE)
+@Processor(NOTIFICATION_DELIVERIES_QUEUE, {
+  concurrency: 1,
+  drainDelay: drainDelaySeconds()
+})
 export class NotificationProcessor extends WorkerHost {
-  constructor(private readonly prisma: PrismaService, private readonly identity: WorkerIdentityService, private readonly connections: ConnectionResolver, private readonly templates: NotificationTemplates, private readonly provider: EmailProvider, private readonly metrics?: WorkerMetricsService) { super(); }
+  private shutdownStarted = false;
+  constructor(private readonly prisma: PrismaService, private readonly identity: WorkerIdentityService, private readonly connections: ConnectionResolver, private readonly templates: NotificationTemplates, private readonly provider: EmailProvider, private readonly shutdown: ShutdownStateService, private readonly metrics?: WorkerMetricsService, private readonly logger?: WorkerLoggerService) { super(); }
   async process(job: Job<{ requestId: string }>) { if (job.name === NOTIFICATION_DELIVER_JOB) await this.deliver(job.data.requestId); }
+
+  isRunning() {
+    return Boolean(this.worker) && !this.shutdownStarted && !this.shutdown.isShuttingDown();
+  }
+
+  async onApplicationShutdown() {
+    await this.closeWorker();
+  }
+
+  async onModuleDestroy() {
+    await this.closeWorker();
+  }
+
+  private async closeWorker() {
+    if (this.shutdownStarted) return;
+    this.shutdownStarted = true;
+    await this.worker?.pause();
+    await withTimeout(
+      this.worker?.close(false) ?? Promise.resolve(),
+      Number(process.env.WORKER_SHUTDOWN_TIMEOUT_MS ?? 30_000)
+    );
+    this.logger?.info("worker.notification_processor.shutdown.completed");
+  }
 
   async deliver(requestId: string) {
     const now = new Date(); const leaseMs = intEnv("NOTIFICATION_LEASE_MS", 60_000, 5_000, 300_000);
@@ -25,7 +54,9 @@ export class NotificationProcessor extends WorkerHost {
     try {
       if (!validEmail(request.recipient)) throw permanent("INVALID_RECIPIENT", NotificationErrorCategory.INVALID_RECIPIENT);
       const payload = record(request.payloadJson); const rendered = this.templates.render(request.templateKey, payload);
-      const connection = await this.connections.resolveSmtp(request.organizationId, request.rule.connectionId);
+      const connection = this.provider.requiresConnection === false
+        ? undefined
+        : await this.connections.resolveSmtp(request.organizationId, request.rule.connectionId);
       await this.prisma.notificationDelivery.update({ where: { notificationRequestId: request.id }, data: { attempts: { increment: 1 }, lastAttemptAt: now, status: "PROCESSING" } });
       const result = await this.provider.send({ to: request.recipient, subject: rendered.subject, html: rendered.html, text: rendered.text, connection });
       const sentAt = new Date();
@@ -65,3 +96,17 @@ function safeMessage(error: any) { return String(error?.message ?? "Notification
 function record(value: unknown): Record<string, unknown> { return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {}; }
 function intEnv(name: string, fallback: number, min: number, max: number) { const value = Number(process.env[name] ?? fallback); return Number.isInteger(value) && value >= min && value <= max ? value : fallback; }
 function json(value: unknown): Prisma.InputJsonValue { return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue; }
+function drainDelaySeconds() { return intEnv("BULLMQ_DRAIN_DELAY_SECONDS", 5, 1, 300); }
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number) {
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((resolve) => {
+        timer = setTimeout(() => resolve(undefined as T), timeoutMs);
+      })
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}

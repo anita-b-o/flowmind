@@ -1,5 +1,5 @@
 import { ExecutionStatus } from "@automation/shared-types";
-import { ExecutionReconcilerService } from "./execution-reconciler.service";
+import { ExecutionReconcilerService, recoveryJobId } from "./execution-reconciler.service";
 import { ShutdownStateService } from "../runtime/shutdown-state.service";
 
 describe("ExecutionReconcilerService trace propagation", () => {
@@ -19,6 +19,7 @@ describe("ExecutionReconcilerService trace propagation", () => {
                 workflowId: "workflow-1",
                 workflowVersionId: "version-1",
                 status: ExecutionStatus.Queued,
+                runAttempt: 3,
                 correlationId: state.correlationId
               }
             ];
@@ -43,6 +44,13 @@ describe("ExecutionReconcilerService trace propagation", () => {
     expect(state.correlationId).toMatch(/^[A-Za-z0-9._:-]{8,128}$/);
     expect(jobs[0].data).toMatchObject({ executionId: "execution-1", correlationId: state.correlationId });
     expect(jobs[0].data.requestId).toMatch(/^[A-Za-z0-9._:-]{8,128}$/);
-    expect(jobs[0].opts.jobId).toBe("execution-execution-1");
+    expect(jobs[0].opts.jobId).toBe("execution-execution-1-recovery-queued_job_recovered-run-3");
+  });
+
+  it("uses an ID distinct from the retained canonical BullMQ job", () => {
+    expect(recoveryJobId("execution-1", "queued_job_recovered", 2)).toBe(
+      "execution-execution-1-recovery-queued_job_recovered-run-2"
+    );
+    expect(recoveryJobId("execution-1", "queued_job_recovered", 2)).not.toBe("execution-execution-1");
   });
 });

@@ -6,6 +6,8 @@ import { ShutdownStateService } from "../runtime/shutdown-state.service";
 import { ExecutionReconcilerService } from "../recovery/execution-reconciler.service";
 import { EventDispatcherService } from "../internal-events/event-dispatcher.service";
 import { NotificationReconcilerService } from "../notifications/notification-reconciler.service";
+import { ExecutionsProcessor } from "../queues/executions.processor";
+import { NotificationProcessor } from "../notifications/notification.processor";
 
 @Injectable()
 export class WorkerHealthService implements OnModuleInit, OnModuleDestroy {
@@ -16,7 +18,9 @@ export class WorkerHealthService implements OnModuleInit, OnModuleDestroy {
     private readonly shutdown: ShutdownStateService,
     private readonly reconciler: ExecutionReconcilerService,
     private readonly eventDispatcher: EventDispatcherService,
-    private readonly notificationReconciler: NotificationReconcilerService
+    private readonly notificationReconciler: NotificationReconcilerService,
+    private readonly executionsProcessor: ExecutionsProcessor,
+    private readonly notificationProcessor: NotificationProcessor
   ) {}
 
   onModuleInit() {
@@ -55,11 +59,13 @@ export class WorkerHealthService implements OnModuleInit, OnModuleDestroy {
     this.server = undefined;
   }
 
-  private async ready() {
+  async ready(): Promise<{ status: "ready" | "not_ready"; checks: Record<string, string> }> {
     const checks: Record<string, string> = {
       shutdown: this.shutdown.isShuttingDown() ? "draining" : "ok",
-      reconciler: this.reconciler.isActive() ? "up" : "down"
-      ,eventDispatcher: this.eventDispatcher.isActive() ? "up" : "down"
+      executionProcessor: this.executionsProcessor.isRunning() ? "up" : "down",
+      notificationProcessor: this.notificationProcessor.isRunning() ? "up" : "down",
+      reconciler: this.reconciler.isActive() ? "up" : "down",
+      eventDispatcher: this.eventDispatcher.isActive() ? "up" : "down"
     };
     checks.database = await this.checkDatabase();
     checks.redis = await this.checkRedis();
@@ -70,6 +76,9 @@ export class WorkerHealthService implements OnModuleInit, OnModuleDestroy {
 
   private async notificationState() {
     try {
+      if (process.env.FLOWMIND_EMAIL_MODE === "embedded-fake") {
+        return this.notificationReconciler.isActive() ? "ready" : "degraded";
+      }
       const enabled = await this.prisma.notificationRule.count({ where: { enabled: true, deletedAt: null } });
       if (!enabled) return "disabled";
       if (!this.notificationReconciler.isActive()) return "degraded";

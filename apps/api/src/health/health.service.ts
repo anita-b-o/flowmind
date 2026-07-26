@@ -4,6 +4,7 @@ import { PrismaService } from "../prisma/prisma.service";
 import { ShutdownStateService } from "../runtime/shutdown-state.service";
 import { StructuredLoggerService } from "../observability/structured-logger.service";
 import { ApiMetricsService } from "../metrics/metrics.service";
+import { EmbeddedWorkerHealthBridge } from "./embedded-worker-health.bridge";
 
 @Injectable()
 export class HealthService {
@@ -11,7 +12,8 @@ export class HealthService {
     private readonly prisma: PrismaService,
     private readonly shutdown: ShutdownStateService,
     private readonly logger?: StructuredLoggerService,
-    private readonly metrics?: ApiMetricsService
+    private readonly metrics?: ApiMetricsService,
+    private readonly embeddedWorker?: EmbeddedWorkerHealthBridge
   ) {}
 
   async ready() {
@@ -20,16 +22,34 @@ export class HealthService {
     checks.shutdown = this.shutdown.isShuttingDown() ? "draining" : "ok";
     checks.database = await this.checkDatabase();
     checks.redis = await this.checkRedis();
-    const ready = Object.values(checks).every((value) => ["up", "valid", "ok"].includes(value));
+    if (process.env.FLOWMIND_DEPLOYMENT_PROFILE === "demo-free") {
+      const worker = await this.embeddedWorker?.ready();
+      checks.embeddedWorker = worker?.status === "ready" ? "up" : "down";
+      for (const [name, value] of Object.entries(worker?.checks ?? {})) {
+        checks[`worker.${name}`] = value;
+      }
+    }
+    const accepted = ["up", "valid", "ok", "ready", "disabled"];
+    const ready = Object.values(checks).every((value) => accepted.includes(value));
     if (!ready) {
       for (const [key, value] of Object.entries(checks)) {
-        if (!["up", "valid", "ok"].includes(value)) {
+        if (!accepted.includes(value)) {
           this.metrics?.readinessFailures.inc({ reason_code: key });
         }
       }
       this.logger?.warn("api.health.readiness_failed", { checks });
     }
-    return { status: ready ? "ready" : "not_ready", checks };
+    const result = {
+      status: ready ? "ready" : "not_ready",
+      checks
+    };
+    return process.env.FLOWMIND_DEPLOYMENT_PROFILE === "demo-free"
+      ? {
+          ...result,
+          profile: "demo-free",
+          memoryRssMiB: Math.round(process.memoryUsage().rss / 1024 / 1024)
+        }
+      : result;
   }
 
   private async checkDatabase() {

@@ -35,3 +35,32 @@ describe("production configuration", () => {
     });
   });
 });
+
+describe("deployment profiles", () => {
+  it("accepts embedded providers only for demo-free", () => {
+    const demo = parseBaseEnv({
+      ...validProduction,
+      FLOWMIND_DEPLOYMENT_PROFILE: "demo-free",
+      FLOWMIND_AI_MODE: "embedded-fake",
+      FLOWMIND_EMAIL_MODE: "embedded-fake",
+      AI_SERVICE_URL: undefined,
+      AI_SERVICE_API_KEY: undefined,
+      REFRESH_COOKIE_PATH: "/api/auth"
+    });
+    expect(demo).toMatchObject({
+      FLOWMIND_DEPLOYMENT_PROFILE: "demo-free",
+      FLOWMIND_AI_MODE: "embedded-fake",
+      FLOWMIND_EMAIL_MODE: "embedded-fake",
+      REFRESH_COOKIE_PATH: "/api/auth"
+    });
+  });
+
+  it("rejects fake providers in the production profile", () => {
+    expect(() =>
+      parseBaseEnv({
+        ...validProduction,
+        FLOWMIND_AI_MODE: "embedded-fake"
+      })
+    ).toThrow("only allowed in demo-free");
+  });
+});

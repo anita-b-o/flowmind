@@ -1,11 +1,9 @@
-import { NestFactory } from "@nestjs/core";
 import { parseBaseEnv } from "@automation/config";
-import { WorkerModule } from "./worker.module";
+import { createWorkerApplication } from "./bootstrap";
 
 async function bootstrap() {
   parseBaseEnv(process.env);
-  const app = await NestFactory.createApplicationContext(WorkerModule, { bufferLogs: true });
-  app.enableShutdownHooks();
+  await createWorkerApplication({ enableShutdownHooks: true });
 }
 
 void bootstrap();

@@ -13,7 +13,8 @@ import { InternalEventEmitter } from "../internal-events/internal-event-emitter.
 @Injectable()
 export class ExecutionReconcilerService implements OnModuleInit, OnModuleDestroy {
   private timer?: NodeJS.Timeout;
-  private running = false;
+  private currentRun?: Promise<void>;
+  private lastError?: string;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -25,23 +26,23 @@ export class ExecutionReconcilerService implements OnModuleInit, OnModuleDestroy
   ) {}
 
   onModuleInit() {
-    this.timer = setInterval(() => void this.reconcile(), Number(process.env.EXECUTION_RECONCILIATION_INTERVAL_MS ?? 10_000));
+    this.timer = setInterval(() => this.startReconcile(), Number(process.env.EXECUTION_RECONCILIATION_INTERVAL_MS ?? 10_000));
     this.timer.unref();
-    void this.reconcile();
+    this.startReconcile();
   }
 
   async onModuleDestroy() {
     if (this.timer) clearInterval(this.timer);
+    await this.currentRun;
     await this.queue.close().catch(() => undefined);
   }
 
   isActive() {
-    return Boolean(this.timer) && !this.shutdown.isShuttingDown();
+    return Boolean(this.timer) && !this.shutdown.isShuttingDown() && !this.lastError;
   }
 
   async reconcile() {
-    if (this.running || this.shutdown.isShuttingDown()) return;
-    this.running = true;
+    if (this.shutdown.isShuttingDown()) return;
     const started = process.hrtime.bigint();
     try {
       await this.recoverExpiredRunning();
@@ -49,15 +50,27 @@ export class ExecutionReconcilerService implements OnModuleInit, OnModuleDestroy
       await this.requeueDueRetries();
       await this.requeueQueuedExecutions();
       await this.refreshBacklogMetrics();
+      this.lastError = undefined;
       this.metrics?.reconcilerRuns.inc({ outcome: "completed" });
       this.metrics?.reconcilerDuration.observe(Number(process.hrtime.bigint() - started) / 1_000_000_000);
     } catch (error) {
+      this.lastError = error instanceof Error ? error.message : String(error);
       this.metrics?.reconcilerRuns.inc({ outcome: "failed" });
       this.metrics?.reconcilerDuration.observe(Number(process.hrtime.bigint() - started) / 1_000_000_000);
       throw error;
-    } finally {
-      this.running = false;
     }
+  }
+
+  private startReconcile() {
+    if (this.currentRun || this.shutdown.isShuttingDown()) return;
+    const run = this.reconcile().catch((error) => {
+      this.logger?.error("worker.reconciler.failed", {
+        error: error instanceof Error ? error.message : String(error)
+      });
+    });
+    this.currentRun = run.finally(() => {
+      this.currentRun = undefined;
+    });
   }
 
   private async refreshBacklogMetrics() {
@@ -121,7 +134,7 @@ export class ExecutionReconcilerService implements OnModuleInit, OnModuleDestroy
           }
         });
       }
-      await this.enqueue(execution.id, execution.organizationId, execution.workflowId, execution.workflowVersionId, execution.correlationId, "expired_lease_recovered");
+      await this.enqueue(execution.id, execution.organizationId, execution.workflowId, execution.workflowVersionId, execution.correlationId, "expired_lease_recovered", recoveryJobId(execution.id, "expired_lease_recovered", execution.runAttempt));
     }
   }
 
@@ -143,7 +156,7 @@ export class ExecutionReconcilerService implements OnModuleInit, OnModuleDestroy
         where: { id: execution.id, status: { in: [ExecutionStatus.Retrying, ExecutionStatus.Queued] } },
         data: { status: ExecutionStatus.Queued }
       });
-      await this.enqueue(execution.id, execution.organizationId, execution.workflowId, execution.workflowVersionId, execution.correlationId, "retry_recovered");
+      await this.enqueue(execution.id, execution.organizationId, execution.workflowId, execution.workflowVersionId, execution.correlationId, "retry_recovered", recoveryJobId(execution.id, "retry_recovered", execution.runAttempt));
     }
   }
 
@@ -160,7 +173,7 @@ export class ExecutionReconcilerService implements OnModuleInit, OnModuleDestroy
       take: 100
     });
     for (const execution of executions) {
-      await this.enqueue(execution.id, execution.organizationId, execution.workflowId, execution.workflowVersionId, execution.correlationId, "queued_job_recovered");
+      await this.enqueue(execution.id, execution.organizationId, execution.workflowId, execution.workflowVersionId, execution.correlationId, "queued_job_recovered", recoveryJobId(execution.id, "queued_job_recovered", execution.runAttempt));
     }
   }
 
@@ -171,7 +184,7 @@ export class ExecutionReconcilerService implements OnModuleInit, OnModuleDestroy
     workflowVersionId: string | null,
     existingCorrelationId?: string | null,
     reasonCode: ReconcilerReason = "execution_requeued",
-    jobId = `execution-${executionId}`
+    jobId = recoveryJobId(executionId, reasonCode, 0)
   ) {
     const correlationId = existingCorrelationId ?? (await this.ensureExecutionCorrelationId(executionId));
     const job = await this.queue.add(
@@ -195,6 +208,10 @@ export class ExecutionReconcilerService implements OnModuleInit, OnModuleDestroy
 
 function approvalResumeJobId(executionId: string, approvalId: string, version: number) {
   return `execution-${executionId}-approval-${approvalId}-v${version}`;
+}
+
+export function recoveryJobId(executionId: string, reasonCode: ReconcilerReason, runAttempt: number) {
+  return `execution-${executionId}-recovery-${reasonCode}-run-${runAttempt}`;
 }
 
 function isAmbiguousWhenAbandoned(stepType: string) {

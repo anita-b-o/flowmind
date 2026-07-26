@@ -1,7 +1,5 @@
 import type { CookieOptions, Request } from "express";
 
-export const REFRESH_COOKIE_PATH = "/auth";
-
 export function refreshCookieName() {
   return process.env.REFRESH_COOKIE_NAME ?? "refresh_token";
 }
@@ -24,7 +22,7 @@ export function refreshCookieOptions(): CookieOptions {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production" || sameSite === "none",
     sameSite,
-    path: REFRESH_COOKIE_PATH,
+    path: process.env.REFRESH_COOKIE_PATH ?? "/auth",
     maxAge: refreshTokenMaxAgeMs(),
     ...(process.env.REFRESH_COOKIE_DOMAIN ? { domain: process.env.REFRESH_COOKIE_DOMAIN } : {})
   };

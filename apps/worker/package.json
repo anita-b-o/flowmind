@@ -2,6 +2,8 @@
   "name": "@automation/worker",
   "version": "0.1.0",
   "private": true,
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
   "scripts": {
     "dev": "nest start --watch",
     "start:prod": "node dist/main.js",

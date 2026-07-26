@@ -10,20 +10,29 @@ import { ShutdownStateService } from "../runtime/shutdown-state.service";
 import { EXECUTION_RUN_JOB, WORKFLOW_EXECUTIONS_QUEUE } from "../queues/queue.constants";
 import { WorkerMetricsService } from "../metrics/worker-metrics.service";
 import { NotificationMaterializerService } from "../notifications/notification-materializer.service";
+import { WorkerLoggerService } from "../observability/worker-logger.service";
 
 @Injectable()
 export class EventDispatcherService implements OnModuleInit, OnModuleDestroy {
   private timer?: NodeJS.Timeout;
   private currentRun?: Promise<void>;
   private destroyed = false;
-  constructor(private readonly prisma: PrismaService, private readonly identity: WorkerIdentityService, private readonly shutdown: ShutdownStateService, @InjectQueue(WORKFLOW_EXECUTIONS_QUEUE) private readonly queue: Queue, private readonly metrics?: WorkerMetricsService, private readonly notifications?: NotificationMaterializerService) {}
-  onModuleInit() { this.timer = setInterval(() => void this.dispatch(), numberEnv("INTERNAL_EVENT_POLL_INTERVAL_MS", 1_000, 100, 60_000)); this.timer.unref(); void this.dispatch(); }
+  private lastError?: string;
+  constructor(private readonly prisma: PrismaService, private readonly identity: WorkerIdentityService, private readonly shutdown: ShutdownStateService, @InjectQueue(WORKFLOW_EXECUTIONS_QUEUE) private readonly queue: Queue, private readonly metrics?: WorkerMetricsService, private readonly notifications?: NotificationMaterializerService, private readonly logger?: WorkerLoggerService) {}
+  onModuleInit() { this.timer = setInterval(() => this.startDispatch(), numberEnv("INTERNAL_EVENT_POLL_INTERVAL_MS", 1_000, 100, 60_000)); this.timer.unref(); this.startDispatch(); }
   async onModuleDestroy() {
     this.destroyed = true;
     if (this.timer) clearInterval(this.timer);
     await this.currentRun;
   }
-  isActive() { return Boolean(this.timer) && !this.destroyed && !this.shutdown.isShuttingDown(); }
+  isActive() { return Boolean(this.timer) && !this.destroyed && !this.shutdown.isShuttingDown() && !this.lastError; }
+
+  private startDispatch() {
+    void this.dispatch().catch((error) => {
+      this.lastError = error instanceof Error ? error.message : String(error);
+      this.logger?.error("worker.event_dispatcher.failed", { error: this.lastError });
+    });
+  }
 
   dispatch(): Promise<void> {
     if (this.currentRun) return this.currentRun;
@@ -39,6 +48,7 @@ export class EventDispatcherService implements OnModuleInit, OnModuleDestroy {
         try { await this.process(row.id); }
         catch (error) { if (!this.destroyed) await this.fail(row.id, error); }
       }
+      this.lastError = undefined;
     }
     catch (error) { if (!this.destroyed) throw error; }
     finally { await this.recordBacklog().catch(() => undefined); }
