@@ -96,6 +96,9 @@ export class WorkflowRunner {
       const graph = parseRuntimeGraph(definition);
       runtimeContext = await this.createRuntimeContext(current);
       if (graph) {
+        if (runtimeStepRows(current).some((step) => step.position > 0 && step.type === "conditional")) {
+          throw new Error("Legacy conditional is not supported in graph workflows. Use IF or Switch.");
+        }
         return await this.runGraph(payload, execution, current, graph, runtimeContext, () => {
           if (heartbeat) clearInterval(heartbeat);
         });

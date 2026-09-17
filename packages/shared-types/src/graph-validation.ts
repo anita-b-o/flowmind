@@ -34,6 +34,7 @@ export type GraphLike = {
 
 const EDGE_KINDS = new Set(["next", "if_true", "if_false", "switch_case", "switch_default", "for_each_body", "for_each_done", "try_body", "try_catch", "try_finally", "try_done", "approval_approved", "approval_rejected", "approval_expired"]);
 const STEP_TYPES = {
+  Conditional: "conditional",
   If: "if",
   Switch: "switch",
   Delay: "delay",
@@ -108,7 +109,9 @@ export function validateGraphV2(steps: GraphStepLike[], graph: GraphLike | undef
   }
 
   for (const step of steps) {
-    if (step.type === STEP_TYPES.If) validateIf(step, stepKeySet, edges, issues);
+    if (step.type === STEP_TYPES.Conditional) {
+      issues.push(issue("legacy_conditional_not_supported", "Legacy conditional is not supported in graph workflows. Use IF or Switch.", step.key));
+    } else if (step.type === STEP_TYPES.If) validateIf(step, stepKeySet, edges, issues);
     else if (step.type === STEP_TYPES.Switch) validateSwitch(step, stepKeySet, edges, issues);
     else if (step.type === STEP_TYPES.ForEach) validateForEach(step, steps, stepKeySet, edges, issues);
     else if (step.type === STEP_TYPES.TryCatch) validateTryCatch(step, steps, stepKeySet, edges, issues);

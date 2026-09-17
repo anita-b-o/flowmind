@@ -38,6 +38,7 @@ export function WorkflowConfigPanel({
   }
 
   function changeType(type: StepType) {
+    if (type === "conditional") return;
     if (!window.confirm("Changing this node type removes incompatible configuration fields.")) return;
     const currentConfig = getValues(`steps.${index}.config`);
     setValue(`steps.${index}.type`, type, { shouldDirty: true, shouldValidate: true });
@@ -76,7 +77,7 @@ export function WorkflowConfigPanel({
           <label>
             Type
             <select disabled={draft.readOnly} value={step.type} onChange={(event) => changeType(event.target.value as StepType)}>
-              {["http_request", "ai_classification", "ai_structured_extraction", "ai_summary", "email_notification", "database_record", "data_store_get_record", "data_store_upsert_record", "data_store_delete_record", "data_store_exists_record", "data_store_count_records", "data_store_list_records", "transform", "if", "switch", "for_each", "delay", "wait_until", "conditional"].map((type) => (
+              {["http_request", "ai_classification", "ai_structured_extraction", "ai_summary", "email_notification", "database_record", "data_store_get_record", "data_store_upsert_record", "data_store_delete_record", "data_store_exists_record", "data_store_count_records", "data_store_list_records", "transform", "if", "switch", "for_each", "delay", "wait_until", ...(step.type === "conditional" ? ["conditional"] : [])].map((type) => (
                 <option key={type} value={type}>
                   {type}
                 </option>

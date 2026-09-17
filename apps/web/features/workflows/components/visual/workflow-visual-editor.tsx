@@ -88,6 +88,7 @@ export function WorkflowVisualEditor({
   };
 
   function addNode(type: StepType) {
+    if (type === "conditional") return;
     applyDraft(addStepToDraft(draft, type));
   }
 

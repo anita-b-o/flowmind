@@ -105,6 +105,50 @@ describe("step recovery engine", () => {
     ]);
   });
 
+  it("keeps legacy conditional true-path behavior in linear workflows", async () => {
+    const seed = await seedExecution([step("condition", StepType.Conditional), step("next", StepType.Transform)]);
+    const calls: string[] = [];
+    const runner = runnerWith({
+      [StepType.Conditional]: async () => {
+        calls.push("condition");
+        return { status: StepExecutionStatus.Completed, output: { passed: true }, control: { skipNext: false } };
+      },
+      [StepType.Transform]: async () => {
+        calls.push("next");
+        return { status: StepExecutionStatus.Completed, output: { ran: true } };
+      }
+    });
+
+    await runner.run(seed.payload);
+
+    expect(calls).toEqual(["condition", "next"]);
+  });
+
+  it("keeps legacy conditional skipNextOnFalse behavior in linear workflows", async () => {
+    const seed = await seedExecution([
+      { ...step("condition", StepType.Conditional), config: { left: "x", operator: "equals", right: "y", skipNextOnFalse: true } },
+      step("skipped", StepType.Transform),
+      step("after", StepType.Transform)
+    ]);
+    const calls: string[] = [];
+    const runner = runnerWith({
+      [StepType.Conditional]: async () => {
+        calls.push("condition");
+        return { status: StepExecutionStatus.Completed, output: { passed: false }, control: { skipNext: true } };
+      },
+      [StepType.Transform]: async (workflowStep) => {
+        calls.push(workflowStep.key);
+        return { status: StepExecutionStatus.Completed, output: { ran: true } };
+      }
+    });
+
+    await runner.run(seed.payload);
+
+    expect(calls).toEqual(["condition", "after"]);
+    const skipped = await prisma.stepExecution.findFirstOrThrow({ where: { executionId: seed.executionId, stepKey: "skipped" } });
+    expect(skipped.status).toBe(StepExecutionStatus.Skipped);
+  });
+
   it("does not duplicate database_record effects", async () => {
     const seed = await seedExecution([step("save", StepType.DatabaseRecord)]);
     const handler = new DatabaseRecordHandler(prisma as any, new ExpressionResolver());
@@ -240,7 +284,7 @@ describe("step recovery engine", () => {
     ]);
   });
 
-  it("keeps execution variables in one runtime context and omits them from terminal context cache", async () => {
+  it("rejects persisted graph workflows containing legacy conditional before executing any step", async () => {
     const seed = await seedExecution(
       [
         { ...step("set_flag", StepType.SetVariable), config: { scope: "execution", name: "flag", expression: "{{trigger.body.ok}}" } },
@@ -263,26 +307,17 @@ describe("step recovery engine", () => {
     const resolver = new ExpressionResolver();
     const set = new SetVariableHandler(resolver);
     const get = new GetVariableHandler(resolver);
-    const runner = runnerWith(
-      {
-        [StepType.SetVariable]: set.execute.bind(set),
-        [StepType.GetVariable]: get.execute.bind(get),
-        [StepType.Conditional]: async (workflowStep: WorkflowStepDefinition) => ({ status: StepExecutionStatus.Completed, output: { passed: workflowStep.config.left === true } })
-      },
-      resolver
-    );
+    const runner = runnerWith({
+      [StepType.SetVariable]: set.execute.bind(set),
+      [StepType.GetVariable]: get.execute.bind(get),
+      [StepType.Conditional]: async () => ({ status: StepExecutionStatus.Completed, output: { passed: true } })
+    }, resolver);
 
-    await runner.run(seed.payload);
+    await expect(runner.run(seed.payload)).rejects.toThrow("Legacy conditional is not supported in graph workflows. Use IF or Switch.");
 
-    const getStep = await prisma.stepExecution.findFirstOrThrow({ where: { executionId: seed.executionId, stepKey: "get_flag" } });
-    expect(getStep.outputJson).toMatchObject({ exists: true, value: true, type: "boolean" });
-    const checkStep = await prisma.stepExecution.findFirstOrThrow({ where: { executionId: seed.executionId, stepKey: "check_flag" } });
-    expect(checkStep.outputJson).toEqual({ passed: true });
+    expect(await prisma.stepExecution.count({ where: { executionId: seed.executionId } })).toBe(0);
     const execution = await prisma.execution.findUniqueOrThrow({ where: { id: seed.executionId } });
-    expect((execution.contextJson as any).__runtime).toBeUndefined();
-    expect((execution.contextJson as any).variables).toEqual({});
-    expect((execution.contextJson as any).workflow.variables.published).toBe("unchanged");
-    expect((execution.contextJson as any).workflow.environment.region).toBe("test");
+    expect(execution.status).toBe(ExecutionStatus.Failed);
   });
 
   it("rejects invalid increment and append operations as non retryable variable errors", async () => {
@@ -369,7 +404,7 @@ describe("step recovery engine", () => {
 
   it("schedules and resumes graph delay without recalculating it", async () => {
     const seed = await seedExecution(
-      [step("delay", StepType.Delay), step("done", StepType.Conditional)],
+      [step("delay", StepType.Delay), step("done", StepType.Transform)],
       {
         workflowDefinitionSchemaVersion: 2,
         graph: { entryStepKey: "delay", edges: [{ from: "delay", to: "done", kind: "next" }] }
@@ -381,7 +416,7 @@ describe("step recovery engine", () => {
         output: { waitUntil: new Date(Date.now() + 60_000).toISOString(), durationMs: 60_000, waitReason: "delay" },
         control: { waitUntil: new Date(Date.now() + 60_000).toISOString(), waitReason: "delay" }
       }),
-      [StepType.Conditional]: async () => ({ status: StepExecutionStatus.Completed, output: { done: true } })
+      [StepType.Transform]: async () => ({ status: StepExecutionStatus.Completed, output: { done: true } })
     });
 
     const first = await runner.run(seed.payload);

@@ -35,6 +35,27 @@ describe("workflow graph validator", () => {
     ).not.toThrow();
   });
 
+  it("rejects legacy conditional while accepting graph-native branching", () => {
+    expect(() =>
+      validateWorkflowGraph(
+        [
+          { key: "legacy", type: "conditional", config: { left: "{{trigger.body.ok}}", operator: "equals", right: true } },
+          { key: "next", type: "transform", config: {} }
+        ],
+        { entryStepKey: "legacy", edges: [{ from: "legacy", to: "next", kind: "next" }] }
+      )
+    ).toThrow("Legacy conditional is not supported in graph workflows. Use IF or Switch.");
+
+    expect(() => validateWorkflowGraph([
+      { key: "route", type: "switch", config: { value: "{{trigger.body.kind}}", cases: [{ key: "vip", match: "vip", stepKey: "vip" }], defaultStepKey: "normal" } },
+      { key: "vip", type: "transform", config: {} },
+      { key: "normal", type: "transform", config: {} }
+    ], { entryStepKey: "route", edges: [
+      { from: "route", to: "vip", kind: "switch_case", caseKey: "vip" },
+      { from: "route", to: "normal", kind: "switch_default" }
+    ] })).not.toThrow();
+  });
+
   it("rejects cycles and invalid waits", () => {
     expect(() =>
       validateWorkflowGraph(
