@@ -395,16 +395,21 @@ export class WebhooksService {
     const execution = await this.prisma.execution.findFirst({ where: { id: executionId, organizationId } });
     if (!execution) throw new ServiceUnavailableException("Execution is not recoverable");
     const correlationId = execution.correlationId ?? (await this.ensureExecutionCorrelationId(execution.id));
-    await this.queueService.enqueueExecution({
-      organizationId,
-      executionId,
-      workflowId: execution.workflowId,
-      workflowVersionId: execution.workflowVersionId ?? undefined,
-      requestId: this.requestContext.getRequestId(),
-      correlationId,
-      enqueuedAt: new Date().toISOString(),
-      executionMode: ExecutionMode.Real
-    });
+    try {
+      await this.queueService.enqueueExecution({
+        organizationId,
+        executionId,
+        workflowId: execution.workflowId,
+        workflowVersionId: execution.workflowVersionId ?? undefined,
+        requestId: this.requestContext.getRequestId(),
+        correlationId,
+        enqueuedAt: new Date().toISOString(),
+        executionMode: ExecutionMode.Real
+      });
+    } catch (error) {
+      this.metrics.recordEnqueueFailure("webhook", classifyError(error));
+      throw new ServiceUnavailableException("Execution could not be queued");
+    }
     const accepted = { accepted: true, executionId, correlationId };
     await this.prisma.$transaction([
       this.prisma.execution.update({ where: { id: executionId }, data: { status: ExecutionStatus.Queued, errorJson: Prisma.JsonNull } }),

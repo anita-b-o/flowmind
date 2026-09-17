@@ -45,6 +45,32 @@ describeRedis("Execution reconciler recovery job IDs with retained BullMQ jobs",
       await queue.close();
     }
   });
+
+  it("deduplicates concurrent initial-dispatch recovery adds by canonical job ID", async () => {
+    const queueName = `flowmind-pending-dispatch-${process.pid}-${Date.now()}`;
+    const connection = redisConnectionOptions(process.env.REDIS_URL!);
+    const queue = new Queue(queueName, { connection });
+    const processed: string[] = [];
+    try {
+      const executionId = "pending-dispatch";
+      const jobId = `execution-${executionId}`;
+      await Promise.all([
+        queue.add("run", { executionId }, { jobId, attempts: 1, removeOnComplete: 1000, removeOnFail: false }),
+        queue.add("run", { executionId }, { jobId, attempts: 1, removeOnComplete: 1000, removeOnFail: false })
+      ]);
+      const worker = new Worker(queueName, async (job) => { processed.push(String(job.id)); }, { connection });
+      try {
+        await waitFor(() => processed.length === 1);
+        expect(processed).toEqual([jobId]);
+        expect(await queue.getJob(jobId)).not.toBeNull();
+      } finally {
+        await worker.close();
+      }
+    } finally {
+      await queue.obliterate({ force: true });
+      await queue.close();
+    }
+  });
 });
 
 async function waitFor(predicate: () => boolean, timeoutMs = 10_000) {

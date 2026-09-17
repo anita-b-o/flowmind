@@ -9,7 +9,7 @@ export type WorkerErrorCategory = "retryable" | "non_retryable" | "ambiguous" | 
 export type LeaseOutcome = "acquired" | "conflict" | "expired_recovery" | "lost" | "released";
 export type StepOutcome = "completed" | "retry_scheduled" | "failed" | "skipped" | "ambiguous";
 export type TransformOutcome = "success" | "failure";
-export type ReconcilerReason = "run_completed" | "run_failed" | "execution_requeued" | "retry_recovered" | "expired_lease_recovered" | "queued_job_recovered";
+export type ReconcilerReason = "run_completed" | "run_failed" | "execution_requeued" | "retry_recovered" | "expired_lease_recovered" | "queued_job_recovered" | "pending_dispatch_recovered";
 export type DlqReason = "non_retryable" | "attempts_exhausted" | "ambiguous_effect" | "inconsistent_state" | "invalid_wait" | "branch_resolution_failed" | "control_validation_failed";
 
 @Injectable()

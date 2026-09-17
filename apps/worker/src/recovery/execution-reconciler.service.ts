@@ -48,6 +48,7 @@ export class ExecutionReconcilerService implements OnModuleInit, OnModuleDestroy
       await this.recoverExpiredRunning();
       await this.recoverApprovals();
       await this.requeueDueRetries();
+      await this.recoverPendingDispatches();
       await this.requeueQueuedExecutions();
       await this.refreshBacklogMetrics();
       this.lastError = undefined;
@@ -160,6 +161,36 @@ export class ExecutionReconcilerService implements OnModuleInit, OnModuleDestroy
     }
   }
 
+  /**
+   * PENDING is the durable intent written by webhook ingestion before its
+   * best-effort BullMQ dispatch.  Do not promote it here: keeping it PENDING
+   * makes an interrupted initial dispatch distinguishable from ordinary
+   * queued recovery, and retrying the canonical job id is idempotent in
+   * BullMQ.  The grace period keeps this path out of an in-flight API call.
+   */
+  private async recoverPendingDispatches() {
+    const cutoff = new Date(Date.now() - pendingDispatchGraceMs());
+    const executions = await this.prisma.execution.findMany({
+      where: {
+        status: ExecutionStatus.Pending,
+        createdAt: { lte: cutoff },
+        lockedBy: null
+      },
+      take: 100
+    });
+    for (const execution of executions) {
+      await this.enqueue(
+        execution.id,
+        execution.organizationId,
+        execution.workflowId,
+        execution.workflowVersionId,
+        execution.correlationId,
+        "pending_dispatch_recovered",
+        `execution-${execution.id}`
+      );
+    }
+  }
+
   private async requeueQueuedExecutions() {
     const now = new Date();
     const executions = await this.prisma.execution.findMany({
@@ -212,6 +243,11 @@ function approvalResumeJobId(executionId: string, approvalId: string, version: n
 
 export function recoveryJobId(executionId: string, reasonCode: ReconcilerReason, runAttempt: number) {
   return `execution-${executionId}-recovery-${reasonCode}-run-${runAttempt}`;
+}
+
+export function pendingDispatchGraceMs() {
+  const configured = Number(process.env.EXECUTION_PENDING_DISPATCH_GRACE_MS ?? 30_000);
+  return Number.isFinite(configured) && configured >= 0 ? configured : 30_000;
 }
 
 function isAmbiguousWhenAbandoned(stepType: string) {

@@ -69,6 +69,32 @@ describe("webhook enqueue failure", () => {
     });
     expect(idempotency.status).toBe("FAILED");
     expect(await prisma.execution.count({ where: { workflowId: workflow.body.id, status: "FAILED" } })).toBe(1);
+
+    // The same idempotency key retries the original execution instead of
+    // materializing another logical workflow run.
+    await request(app.getHttpServer())
+      .post(`/webhooks/${workflow.body.id}/${trigger.body.token}`)
+      .set("Idempotency-Key", "enqueue-fails")
+      .send({ name: "Ada" })
+      .expect(503);
+    expect(await prisma.execution.count({ where: { workflowId: workflow.body.id } })).toBe(1);
+
+    // Model a process death after the durable webhook transaction and before
+    // BullMQ add: an idempotency retry must keep the original PENDING row.
+    const original = await prisma.execution.findFirstOrThrow({ where: { workflowId: workflow.body.id } });
+    await prisma.execution.update({ where: { id: original.id }, data: { status: "PENDING", completedAt: null } });
+    await prisma.idempotencyKey.update({
+      where: { organizationId_scope_key: { organizationId: user.organizationId, scope: `webhook:${trigger.body.id}`, key: "enqueue-fails" } },
+      data: { status: "PROCESSING", responseJson: { accepted: true, executionId: original.id, correlationId: original.correlationId } }
+    });
+    const abandonedRetry = await request(app.getHttpServer())
+      .post(`/webhooks/${workflow.body.id}/${trigger.body.token}`)
+      .set("Idempotency-Key", "enqueue-fails")
+      .send({ name: "Ada" })
+      .expect(202);
+    expect(abandonedRetry.body.executionId).toBe(original.id);
+    expect(await prisma.execution.count({ where: { workflowId: workflow.body.id } })).toBe(1);
+    expect(await prisma.execution.findUniqueOrThrow({ where: { id: original.id } })).toMatchObject({ status: "PENDING" });
   });
 
   async function register() {
