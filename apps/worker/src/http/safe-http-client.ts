@@ -91,6 +91,10 @@ export class SafeHttpClient {
         throw new Error("Redirect response is missing Location header");
       }
       const nextUrl = new URL(location, url);
+      await this.assertSafeUrl(nextUrl);
+      if (url.protocol === "https:" && nextUrl.protocol === "http:") {
+        throw new Error("Redirect from HTTPS to HTTP is not allowed");
+      }
       const nextHeaders = nextUrl.host === url.host ? headers : {};
       return this.requestWithRedirects(input, redirectCount + 1, nextUrl, nextHeaders);
     }
