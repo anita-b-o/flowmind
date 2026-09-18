@@ -10,7 +10,8 @@ const config: Config = {
   collectCoverageFrom: ["src/**/*.(t|j)s"],
   testPathIgnorePatterns: ["/node_modules/", "/dist/", "/build/"],
   modulePathIgnorePatterns: ["<rootDir>/dist", "<rootDir>/build"],
-  testEnvironment: "node"
+  testEnvironment: "node",
+  setupFiles: ["<rootDir>/test/setup-test-env.ts"]
 };
 
 export default config;
