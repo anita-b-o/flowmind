@@ -63,7 +63,7 @@ describe("operability controls", () => {
     await reconciler.reconcile();
 
     expect(queue.jobs).toHaveLength(1);
-    expect(queue.jobs[0].opts.jobId).toBe(`execution-${seed.executionId}`);
+    expect(queue.jobs[0].opts.jobId).toBe(`execution-${seed.executionId}-recovery-retry_recovered-run-0`);
   });
 
   it("creates persistent DLQ even when publishing to BullMQ fails", async () => {
