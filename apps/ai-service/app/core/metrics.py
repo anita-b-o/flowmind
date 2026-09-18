@@ -1,7 +1,6 @@
 import hmac
 import time
-from collections.abc import Callable
-from typing import Awaitable
+from collections.abc import Awaitable, Callable
 
 from fastapi import HTTPException, Request
 from prometheus_client import CollectorRegistry, Counter, Histogram, generate_latest

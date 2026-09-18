@@ -115,7 +115,7 @@ def test_missing_model_is_invalid_configuration() -> None:
         ("max_output_tokens", 0),
     ],
 )
-def test_invalid_numeric_configuration(field: str, value: int | float) -> None:
+def test_invalid_numeric_configuration(field: str, value: float) -> None:
     with pytest.raises(ProviderConfigurationError):
         provider(**{field: value})
 
