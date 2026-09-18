@@ -5,9 +5,16 @@ import {
   type Page,
 } from "@playwright/test";
 
-const api = required("STAGING_API_URL").replace(/\/$/, "");
-const email = required("STAGING_SMOKE_EMAIL");
-const password = required("STAGING_SMOKE_PASSWORD");
+const stagingConfigured = Boolean(
+  process.env.STAGING_API_URL &&
+    process.env.STAGING_SMOKE_EMAIL &&
+    process.env.STAGING_SMOKE_PASSWORD,
+);
+const api = process.env.STAGING_API_URL?.replace(/\/$/, "") ?? "";
+const email = process.env.STAGING_SMOKE_EMAIL ?? "";
+const password = process.env.STAGING_SMOKE_PASSWORD ?? "";
+
+test.skip(!stagingConfigured, "requires explicit staging smoke credentials");
 
 test("RC staging release journey", async ({ page, request }) => {
   const account = await apiLogin(request, email, password);
@@ -355,10 +362,5 @@ function authHeaders(token: string, organizationId: string) {
   };
 }
 
-function required(name: string) {
-  const value = process.env[name];
-  if (!value) throw new Error(`${name} is required`);
-  return value;
-}
 
 type Account = { token: string; organizationId: string };
