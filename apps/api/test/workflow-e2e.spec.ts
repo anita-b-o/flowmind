@@ -741,7 +741,8 @@ describe("workflow webhook execution e2e", () => {
             { from: "shape", to: "set_session", kind: "next" },
             { from: "set_session", to: "get_session", kind: "next" },
             { from: "get_session", to: "has_session", kind: "next" },
-            { from: "has_session", to: "save_state", kind: "next" },
+            { from: "has_session", to: "save_state", kind: "if_true" },
+            { from: "has_session", to: "save_state", kind: "if_false" },
             { from: "save_state", to: "save_result", kind: "next" }
           ],
           terminalStepKeys: ["save_result"]
@@ -776,8 +777,8 @@ describe("workflow webhook execution e2e", () => {
           {
             key: "has_session",
             name: "Has session",
-            type: "conditional",
-            config: { left: "{{variables.session_id}}", operator: "equals", right: "session-99", skipNextOnFalse: true }
+            type: "if",
+            config: { left: "{{variables.session_id}}", operator: "equals", right: "session-99", trueStepKey: "save_state", falseStepKey: "save_state" }
           },
           {
             key: "save_state",
