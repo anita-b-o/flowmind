@@ -3,7 +3,7 @@ import { PrismaClient } from "@prisma/client";
 import { Queue, Worker } from "bullmq";
 import Redis from "ioredis";
 import { ExecutionLeaseService } from "../engine/execution-lease.service";
-import { ExecutionReconcilerService } from "../recovery/execution-reconciler.service";
+import { ExecutionReconcilerService, recoveryJobId } from "../recovery/execution-reconciler.service";
 import { ShutdownStateService } from "../runtime/shutdown-state.service";
 
 const prisma = new PrismaClient();
@@ -56,7 +56,7 @@ describeChaos("RC1 real infrastructure chaos and recovery", () => {
     await expect(first.assertOwned(fixture.execution.id)).rejects.toThrow("lease");
     const queue = new Queue(`${queueName}-reconcile`, { connection });
     await new ExecutionReconcilerService(prisma as any, new ShutdownStateService(), queue as any).reconcile();
-    await poll(async () => Boolean(await queue.getJob(`execution-${fixture.execution.id}`)));
+    await poll(async () => Boolean(await queue.getJob(recoveryJobId(fixture.execution.id, "expired_lease_recovered", 1))));
     expect(await prisma.execution.findUnique({ where: { id: fixture.execution.id } })).toMatchObject({ status: "QUEUED", lockedBy: null, lockedUntil: null });
     await queue.close();
   }, 20_000);
@@ -82,4 +82,14 @@ function signalWorker() { const source = `let draining=false;console.log('active
 async function waitForLine(child: ChildProcess, expected: string) { const state = child as ChildProcess & { rcOutput?: string; rcListening?: boolean }; state.rcOutput ??= ""; if (!state.rcListening) { state.rcListening = true; child.stdout!.on("data", (chunk) => { state.rcOutput += chunk; }); child.stderr!.on("data", (chunk) => { state.rcOutput += chunk; }); } await poll(() => Boolean(state.rcOutput?.includes(expected)), 5_000).catch(() => { throw new Error(`Child did not emit ${expected}: ${state.rcOutput}`); }); }
 async function waitForExit(child: ChildProcess, timeout: number) { if (child.exitCode !== null) return; await new Promise<void>((resolve, reject) => { const timer = setTimeout(() => reject(new Error("Child did not exit")), timeout); child.once("exit", () => { clearTimeout(timer); resolve(); }); }); }
 async function seedExecution(name: string) { const suffix = `${name}-${Date.now()}-${Math.random()}`; const organization = await prisma.organization.create({ data: { name, slug: suffix } }); const user = await prisma.user.create({ data: { email: `${suffix}@example.com`, name, passwordHash: "hash" } }); const workflow = await prisma.workflow.create({ data: { organizationId: organization.id, name, createdByUserId: user.id } }); const execution = await prisma.execution.create({ data: { organizationId: organization.id, workflowId: workflow.id, status: "QUEUED", inputJson: {}, contextJson: {} } }); return { organization, execution }; }
-async function clean() { await prisma.execution.deleteMany(); await prisma.workflow.deleteMany(); await prisma.organizationMember.deleteMany(); await prisma.user.deleteMany(); await prisma.organization.deleteMany(); }
+async function clean() {
+  await prisma.executionStepReuse.deleteMany();
+  await prisma.internalRecord.deleteMany();
+  await prisma.stepExecutionAttempt.deleteMany();
+  await prisma.stepExecution.deleteMany();
+  await prisma.execution.deleteMany();
+  await prisma.workflow.deleteMany();
+  await prisma.organizationMember.deleteMany();
+  await prisma.user.deleteMany();
+  await prisma.organization.deleteMany();
+}
