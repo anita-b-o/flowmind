@@ -62,7 +62,7 @@ function AppShell({ children }: { children: ReactNode }) {
       {mobileOpen && <button className="nav-scrim" aria-label="Close navigation" onClick={() => setMobileOpen(false)} />}
       <aside className={`app-sidebar ${mobileOpen ? "is-open" : ""}`} aria-label="Primary navigation">
         <div className="app-brand-row">
-          <Link href="/dashboard" className="app-brand" aria-label="FlowMind home">
+          <Link href="/dashboard" className="app-brand" aria-label="FlowMind home" onClick={() => setMobileOpen(false)}>
             <span className="koi-mark" aria-hidden="true"><img src="/brand/koi-line.webp" alt="" /></span>
             <span className="app-brand-name">FlowMind</span>
           </Link>
@@ -74,7 +74,7 @@ function AppShell({ children }: { children: ReactNode }) {
               <span className="nav-group-label">{group.label}</span>
               {group.items.map((item) => {
                 const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
-                return <Link key={item.href} href={item.href} className={`nav-item ${active ? "active" : ""}`} aria-current={active ? "page" : undefined} title={collapsed ? item.label : undefined}><span className="nav-icon" aria-hidden="true">{item.short}</span><span className="nav-label">{item.label}</span></Link>;
+                return <Link key={item.href} href={item.href} onClick={() => setMobileOpen(false)} className={`nav-item ${active ? "active" : ""}`} aria-current={active ? "page" : undefined} title={collapsed ? item.label : undefined}><span className="nav-icon" aria-hidden="true">{item.short}</span><span className="nav-label">{item.label}</span></Link>;
               })}
             </div>
           ) : null)}
