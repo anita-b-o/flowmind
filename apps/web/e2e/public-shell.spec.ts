@@ -5,12 +5,21 @@ test("login and registration remain usable across viewports", async ({ page }) =
   await expect(page.getByRole("heading", { name: "Sign in to FlowMind" })).toBeVisible();
   await expect(page.getByLabel("Email address")).toBeVisible();
   await expect(page.getByLabel("Password")).toBeVisible();
+  await expect(page.getByText("Don't have an account?")).toBeVisible();
+  await expect(page.getByRole("link", { name: "Create one" })).toHaveAttribute("href", "/register");
+  await expect(page.locator(".demo-banner")).toHaveCount(0);
   await expect(page.locator("body")).not.toHaveCSS("overflow-x", "scroll");
 
   await page.getByRole("link", { name: /create/i }).click();
   if (!/\/register$/.test(page.url())) await page.goto("/register");
   await expect(page).toHaveURL(/\/register$/);
   await expect(page.getByRole("heading", { name: "Get started" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Create account" })).toBeVisible();
+});
+
+test("landing registration link remains valid", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByRole("link", { name: "Start building" })).toHaveAttribute("href", "/register");
 });
 
 test("unknown routes render a safe 404", async ({ page }) => {

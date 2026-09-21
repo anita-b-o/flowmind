@@ -18,7 +18,6 @@ const schema = z.object({
 type FormValues = z.infer<typeof schema>;
 
 export default function RegisterPage() {
-  const demoFree = process.env.NEXT_PUBLIC_FLOWMIND_DEMO_FREE === "true";
   const { register, handleSubmit } = useForm<FormValues>({ resolver: zodResolver(schema) });
   const { login } = useAuth();
   const [error, setError] = useState<string | undefined>();
@@ -32,15 +31,6 @@ export default function RegisterPage() {
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Registration failed");
     }
-  }
-
-  if (demoFree) {
-    return (
-      <main className="auth-page">
-        <section className="auth-art" aria-label="FlowMind visual identity"><img src="/brand/koi-hero.webp" alt="" /><div className="auth-art-copy"><span className="eyebrow">Portfolio demo</span><h1>A curated workspace, ready to inspect.</h1><p>Registration is disabled so the durable demo data and workflows stay consistent.</p></div></section>
-        <section className="auth-panel"><div className="auth-card"><header><span className="eyebrow">Demo access</span><h1>Use the curated account</h1><p className="muted">Use the credentials supplied with the portfolio link. They are never embedded in this site.</p></header><Link className="button--primary" href="/login">Go to sign in</Link></div></section>
-      </main>
-    );
   }
 
   return (

@@ -13,20 +13,12 @@ export const metadata: Metadata = {
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
-  const demoFree = process.env.NEXT_PUBLIC_FLOWMIND_DEMO_FREE === "true";
   return (
     <html lang="en">
       <body>
         <Script src="/runtime-config.js" strategy="beforeInteractive" />
         <QueryProvider>
           <AuthProvider>
-            {demoFree ? (
-              <div className="demo-banner" role="status">
-                Portfolio demo: the first request may take up to 90 seconds. AI
-                and email are simulated, and background processing pauses while
-                the free runtime sleeps.
-              </div>
-            ) : null}
             <AppFrame>{children}</AppFrame>
           </AuthProvider>
         </QueryProvider>

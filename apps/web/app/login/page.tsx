@@ -16,7 +16,6 @@ const schema = z.object({
 type FormValues = z.infer<typeof schema>;
 
 export default function LoginPage() {
-  const demoFree = process.env.NEXT_PUBLIC_FLOWMIND_DEMO_FREE === "true";
   const { register, handleSubmit } = useForm<FormValues>({ resolver: zodResolver(schema) });
   const { login } = useAuth();
   const [error, setError] = useState<string | undefined>();
@@ -41,7 +40,7 @@ export default function LoginPage() {
         <label>Password<input autoComplete="current-password" placeholder="At least 8 characters" type="password" {...register("password")} /></label>
         {error ? <p className="error" role="alert">{error}</p> : null}
         <button type="submit">Sign in</button>
-      </form>{demoFree ? <p className="auth-foot">Use the curated credentials supplied with the portfolio link.</p> : <p className="auth-foot">New to FlowMind? <Link href="/register">Create an account</Link></p>}</div></section>
+      </form><p className="auth-foot">Don&apos;t have an account? <Link href="/register">Create one</Link></p></div></section>
     </main>
   );
 }
