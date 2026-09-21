@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { canManageDataStores, canViewAuditLog, canViewDeadLetters } from "../features/auth/rbac";
 import { RequireAuth } from "../features/auth/require-auth";
 import { useAuth } from "../features/auth/use-auth";
+import { SiteFooter } from "./site-footer";
 
 const PUBLIC_ROUTES = new Set(["/", "/login", "/register"]);
 const PROTECTED_PREFIXES = ["/dashboard", "/workflows", "/templates", "/executions", "/approvals", "/dead-letter-executions", "/notifications", "/data-stores", "/connections", "/members", "/audit-log", "/settings"];
@@ -15,7 +16,9 @@ type NavGroup = { label: string; items: NavItem[] };
 
 export function AppFrame({ children }: { children: ReactNode }) {
   const pathname = usePathname();
-  if (PUBLIC_ROUTES.has(pathname) || !PROTECTED_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`))) return <>{children}</>;
+  if (PUBLIC_ROUTES.has(pathname) || !PROTECTED_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`))) {
+    return <div className="public-shell">{children}<SiteFooter /></div>;
+  }
   return <RequireAuth><AppShell>{children}</AppShell></RequireAuth>;
 }
 
@@ -99,6 +102,7 @@ function AppShell({ children }: { children: ReactNode }) {
           <Link href="/dashboard" className="app-brand"><span className="koi-mark" aria-hidden="true"><img src="/brand/koi-line.webp" alt="" /></span><span className="app-brand-name">FlowMind</span></Link>
         </header>
         <div id="main-content" className="app-content">{children}</div>
+        <SiteFooter />
       </div>
     </div>
   );
