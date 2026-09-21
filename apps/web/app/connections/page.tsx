@@ -1,6 +1,8 @@
 "use client";
 
 import { useState } from "react";
+import { EmptyState } from "../../components/brand";
+import { LoadingState } from "../../components/loading-state";
 import { ConfirmDialog } from "../../components/confirm-dialog";
 import { ErrorMessage } from "../../components/error-message";
 import { RequireAuth } from "../../features/auth/require-auth";
@@ -80,8 +82,8 @@ export default function ConnectionsPage() {
             {connections.error && <ErrorMessage error={connections.error} onRetry={() => connections.refetch()} />}
             {error && <ErrorMessage error={error} />}
             <section className="panel stack">
-              {connections.isLoading && <p className="muted">Loading connections...</p>}
-              {!connections.isLoading && !connections.data?.length && <p className="muted">No connections match these filters.</p>}
+              {connections.isLoading && <LoadingState label="Loading connections..." />}
+              {!connections.isLoading && !connections.error && !connections.data?.length && <EmptyState title="No connections found"><p>HTTP connections provide reusable credentials for workflow requests. SMTP connections send notification emails. Create one above or adjust your filters.</p></EmptyState>}
               {!!connections.data?.length && (
                 <table className="table">
                   <thead><tr><th>Name</th><th>Type</th><th>Status</th><th>Credential</th><th>Last test</th><th>Used by</th><th>Updated</th><th>Actions</th></tr></thead>

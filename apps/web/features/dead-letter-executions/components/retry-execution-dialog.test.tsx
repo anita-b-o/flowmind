@@ -26,9 +26,9 @@ describe("RetryExecutionDialog", () => {
     mutateAsync.mockResolvedValue({ execution: { id: "retry-1" } });
     render(<RetryExecutionDialog open executionId="execution-1" deadLetterId="dlq-1" onClose={vi.fn()} />);
 
-    expect(screen.getByText(/podrían repetirse/i)).toBeInTheDocument();
-    expect(screen.getByText(/no garantiza exactly-once/i)).toBeInTheDocument();
-    await userEvent.type(screen.getByLabelText(/motivo/i), "reviewed");
+    expect(screen.getByText(/may run again/i)).toBeInTheDocument();
+    expect(screen.getByText(/cannot guarantee exactly-once/i)).toBeInTheDocument();
+    await userEvent.type(screen.getByLabelText(/optional reason/i), "reviewed");
     await userEvent.click(screen.getByRole("button", { name: /create retry/i }));
 
     expect(mutateAsync).toHaveBeenCalledWith("reviewed");
@@ -38,10 +38,10 @@ describe("RetryExecutionDialog", () => {
   it("renders conflict and recoverable enqueue errors", () => {
     state.currentError = new ApiError(409, "conflict");
     const { rerender } = render(<RetryExecutionDialog open executionId="execution-1" onClose={vi.fn()} />);
-    expect(screen.getByText(/ya existe un retry activo/i)).toBeInTheDocument();
+    expect(screen.getByText(/an active retry already exists/i)).toBeInTheDocument();
 
     state.currentError = new ApiError(503, "recoverable", { recoverable: true });
     rerender(<RetryExecutionDialog open executionId="execution-1" onClose={vi.fn()} />);
-    expect(screen.getByText(/no reenvíes automáticamente/i)).toBeInTheDocument();
+    expect(screen.getByText(/do not retry the request/i)).toBeInTheDocument();
   });
 });

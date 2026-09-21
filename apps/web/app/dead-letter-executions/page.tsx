@@ -1,6 +1,8 @@
 "use client";
 
 import { useState } from "react";
+import { EmptyState } from "../../components/brand";
+import { LoadingState } from "../../components/loading-state";
 import { ErrorMessage } from "../../components/error-message";
 import { Pagination } from "../../components/pagination";
 import { RequireAuth } from "../../features/auth/require-auth";
@@ -34,8 +36,8 @@ export default function DeadLetterExecutionsPage() {
             />
             {query.error && <ErrorMessage error={query.error} onRetry={() => query.refetch()} />}
             <section className="panel stack">
-              {query.isLoading && <p className="muted">Loading dead letters...</p>}
-              {!query.isLoading && !query.data?.items.length && <p className="muted">No hay ejecuciones en la cola de fallos para los filtros seleccionados.</p>}
+              {query.isLoading && <LoadingState label="Loading dead letters..." />}
+              {!query.isLoading && !query.error && !query.data?.items.length && <EmptyState title="No dead letters found"><p>No failed executions match the selected filters.</p></EmptyState>}
               {!!query.data?.items.length && (
                 <>
                   <DeadLetterTable items={query.data.items} />

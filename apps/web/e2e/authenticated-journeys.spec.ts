@@ -12,7 +12,7 @@ test.describe("authenticated RC1 journeys", () => {
     await login(page, account);
     await expect(page).toHaveURL(/\/dashboard$/);
     await expect(page.getByRole("heading", { name: /Welcome/ })).toBeVisible();
-    await expect(page.getByText("Queue health")).toBeVisible();
+    await expect(page.getByText("Recent executions")).toBeVisible();
   });
 
   test("B. creates, edits, versions, and publishes a workflow through the UI", async ({ page }) => {

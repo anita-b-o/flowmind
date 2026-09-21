@@ -1,5 +1,8 @@
 "use client";
 import Link from "next/link";
+import { EmptyState } from "../../components/brand";
+import { ErrorMessage } from "../../components/error-message";
+import { LoadingState } from "../../components/loading-state";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { RequireAuth } from "../../features/auth/require-auth";
@@ -19,9 +22,25 @@ export default function NotificationsPage() {
 }
 
 function Rules({ canManage }: { canManage: boolean }) {
-  const query = useNotificationRules(); const mutations = useNotificationRuleMutations(); const { activeOrganizationId } = useAuth(); const [editing, setEditing] = useState<NotificationRule | null>(null); const [showForm, setShowForm] = useState(false);
+  const query = useNotificationRules();
+  const mutations = useNotificationRuleMutations();
+  const { activeOrganizationId } = useAuth();
+  const [editing, setEditing] = useState<NotificationRule | null>(null);
+  const [showForm, setShowForm] = useState(false);
   const connections = useQuery({ queryKey: ["connections", activeOrganizationId, "smtp-notifications"], queryFn: () => apiClient.get<Array<{ id: string; name: string; status: string }>>("/connections", { type: "SMTP", status: "ACTIVE" }), enabled: Boolean(activeOrganizationId && canManage) });
-  return <section className="stack">{canManage && <button onClick={() => { setEditing(null); setShowForm(true); }}>Create rule</button>}{showForm && <RuleForm initial={editing} connections={connections.data ?? []} busy={mutations.create.isPending || mutations.update.isPending} onCancel={() => setShowForm(false)} onSave={(dto) => { const operation = editing ? mutations.update.mutateAsync({ id: editing.id, dto }) : mutations.create.mutateAsync(dto); void operation.then(() => { setShowForm(false); setEditing(null); }); }} />}{query.isLoading && <p>Loading rules...</p>}{query.error && <p role="alert">Could not load notification rules.</p>}<div className="panel"><table className="table"><thead><tr><th>Event</th><th>Channel</th><th>Recipient</th><th>Connection</th><th>Enabled</th>{canManage && <th>Actions</th>}</tr></thead><tbody>{query.data?.map((rule) => <tr key={rule.id}><td>{LABELS[rule.eventType] ?? rule.eventType}</td><td>{rule.channel}</td><td>{rule.recipientConfigJson.kind === "EMAILS" ? rule.recipientConfigJson.emails.join(", ") : `Roles: ${rule.recipientConfigJson.roles.join(", ")}`}</td><td>{rule.connection.name}</td><td>{rule.enabled ? "Yes" : "No"}</td>{canManage && <td><button onClick={() => { setEditing(rule); setShowForm(true); }}>Edit</button> <button onClick={() => { if (window.confirm("Delete this notification rule?")) mutations.remove.mutate(rule.id); }}>Delete</button></td>}</tr>)}</tbody></table></div></section>;
+  const mutationError = mutations.create.error ?? mutations.update.error ?? mutations.remove.error;
+  return <section className="stack">
+    {canManage && (!!query.data?.length || showForm) && <div><button onClick={() => { setEditing(null); setShowForm(true); }}>Create rule</button></div>}
+    {showForm && <RuleForm initial={editing} connections={connections.data ?? []} busy={mutations.create.isPending || mutations.update.isPending} onCancel={() => setShowForm(false)} onSave={(dto) => { const operation = editing ? mutations.update.mutateAsync({ id: editing.id, dto }) : mutations.create.mutateAsync(dto); void operation.then(() => { setShowForm(false); setEditing(null); }).catch(() => undefined); }} />}
+    {connections.error && showForm && <ErrorMessage error={connections.error} onRetry={() => connections.refetch()} />}
+    {mutationError && <ErrorMessage error={mutationError} />}
+    {query.error && <ErrorMessage error={query.error} onRetry={() => query.refetch()} />}
+    <div className="panel stack">
+      {query.isLoading && <LoadingState label="Loading rules..." />}
+      {!query.isLoading && !query.error && !query.data?.length && <EmptyState title="No notification rules yet" action={canManage ? <button type="button" onClick={() => { setEditing(null); setShowForm(true); }}>Create rule</button> : undefined}><p>Rules send email when selected workflow and approval events occur. An active SMTP connection is required.</p></EmptyState>}
+      {!!query.data?.length && <table className="table"><thead><tr><th>Event</th><th>Channel</th><th>Recipient</th><th>Connection</th><th>Enabled</th>{canManage && <th>Actions</th>}</tr></thead><tbody>{query.data.map((rule) => <tr key={rule.id}><td>{LABELS[rule.eventType] ?? rule.eventType}</td><td>{rule.channel}</td><td>{rule.recipientConfigJson.kind === "EMAILS" ? rule.recipientConfigJson.emails.join(", ") : `Roles: ${rule.recipientConfigJson.roles.join(", ")}`}</td><td>{rule.connection.name}</td><td>{rule.enabled ? "Yes" : "No"}</td>{canManage && <td><button onClick={() => { setEditing(rule); setShowForm(true); }}>Edit</button> <button onClick={() => { if (window.confirm("Delete this notification rule?")) mutations.remove.mutate(rule.id); }}>Delete</button></td>}</tr>)}</tbody></table>}
+    </div>
+  </section>;
 }
 
 function RuleForm({ initial, connections, busy, onCancel, onSave }: { initial: NotificationRule | null; connections: Array<{ id: string; name: string }>; busy: boolean; onCancel: () => void; onSave: (dto: Record<string, unknown>) => void }) {
@@ -29,5 +48,18 @@ function RuleForm({ initial, connections, busy, onCancel, onSave }: { initial: N
   return <form className="panel stack" onSubmit={(event) => { event.preventDefault(); onSave({ eventType, channel: "EMAIL", connectionId, enabled, templateKey: TEMPLATES[eventType], filters: initial?.filtersJson ?? {}, recipientConfig: kind === "EMAILS" ? { kind, emails: emails.split(",").map((value) => value.trim()).filter(Boolean) } : { kind, roles } }); }}><h2>{initial ? "Edit rule" : "Create rule"}</h2><label>Event type<select value={eventType} onChange={(event) => { const value = event.target.value as NotificationEventType; setEventType(value); if (!value.startsWith("APPROVAL_")) setKind("EMAILS"); }}>{EVENTS.map((value) => <option key={value} value={value}>{LABELS[value] ?? value}</option>)}</select></label><label>SMTP connection<select required value={connectionId} onChange={(event) => setConnectionId(event.target.value)}><option value="">Select connection</option>{connections.map((connection) => <option key={connection.id} value={connection.id}>{connection.name}</option>)}</select></label>{approval && <label>Recipient mode<select value={kind} onChange={(event) => setKind(event.target.value as any)}><option value="EMAILS">Explicit emails</option><option value="APPROVAL_ROLES">Authorized approval roles</option></select></label>}{kind === "EMAILS" ? <label>Recipient emails<input required value={emails} onChange={(event) => setEmails(event.target.value)} placeholder="ops@example.com, owner@example.com" /></label> : <fieldset><legend>Roles</legend>{["owner", "admin", "editor", "viewer"].map((role) => <label key={role}><input type="checkbox" checked={roles.includes(role)} onChange={(event) => setRoles(event.target.checked ? [...roles, role] : roles.filter((item) => item !== role))} /> {role}</label>)}</fieldset>}<label><input type="checkbox" checked={enabled} onChange={(event) => setEnabled(event.target.checked)} /> Enabled</label><div><button disabled={busy || !connectionId}>Save</button> <button type="button" onClick={onCancel}>Cancel</button></div></form>;
 }
 
-function Deliveries() { const [status, setStatus] = useState<NotificationStatus | "">(""); const [page, setPage] = useState(1); const query = useNotifications(status, page); return <section className="stack"><label>Status<select value={status} onChange={(event) => { setStatus(event.target.value as NotificationStatus | ""); setPage(1); }}><option value="">All</option>{["PENDING", "PROCESSING", "SENT", "FAILED", "DEAD_LETTER", "CANCELLED"].map((value) => <option key={value}>{value}</option>)}</select></label><div className="panel"><table className="table"><thead><tr><th>Type</th><th>Recipient</th><th>Status</th><th>Created</th><th>Sent</th><th>Attempts</th></tr></thead><tbody>{query.data?.items.map((item) => <tr key={item.id}><td><Link href={`/notifications/${item.id}`}>{LABELS[item.type] ?? item.type}</Link></td><td>{item.recipient}</td><td>{item.status}</td><td>{new Date(item.createdAt).toLocaleString()}</td><td>{item.delivery?.sentAt ? new Date(item.delivery.sentAt).toLocaleString() : "—"}</td><td>{item.delivery?.attempts ?? 0}</td></tr>)}</tbody></table></div><div><button disabled={page <= 1} onClick={() => setPage(page - 1)}>Previous</button> <span> Page {page} </span><button disabled={!query.data || page * query.data.pageSize >= query.data.total} onClick={() => setPage(page + 1)}>Next</button></div></section>; }
-
+function Deliveries() {
+  const [status, setStatus] = useState<NotificationStatus | "">("");
+  const [page, setPage] = useState(1);
+  const query = useNotifications(status, page);
+  return <section className="stack">
+    <label>Status<select value={status} onChange={(event) => { setStatus(event.target.value as NotificationStatus | ""); setPage(1); }}><option value="">All</option>{["PENDING", "PROCESSING", "SENT", "FAILED", "DEAD_LETTER", "CANCELLED"].map((value) => <option key={value}>{value}</option>)}</select></label>
+    {query.error && <ErrorMessage error={query.error} onRetry={() => query.refetch()} />}
+    <div className="panel stack">
+      {query.isLoading && <LoadingState label="Loading deliveries..." />}
+      {!query.isLoading && !query.error && !query.data?.items.length && <EmptyState title="No deliveries found"><p>Email deliveries appear here after a notification rule matches an event. Try another status to see past deliveries.</p></EmptyState>}
+      {!!query.data?.items.length && <table className="table"><thead><tr><th>Type</th><th>Recipient</th><th>Status</th><th>Created</th><th>Sent</th><th>Attempts</th></tr></thead><tbody>{query.data.items.map((item) => <tr key={item.id}><td><Link href={`/notifications/${item.id}`}>{LABELS[item.type] ?? item.type}</Link></td><td>{item.recipient}</td><td>{item.status}</td><td>{new Date(item.createdAt).toLocaleString()}</td><td>{item.delivery?.sentAt ? new Date(item.delivery.sentAt).toLocaleString() : "—"}</td><td>{item.delivery?.attempts ?? 0}</td></tr>)}</tbody></table>}
+    </div>
+    {!!query.data?.items.length && <div><button disabled={page <= 1} onClick={() => setPage(page - 1)}>Previous</button> <span> Page {page} </span><button disabled={page * query.data.pageSize >= query.data.total} onClick={() => setPage(page + 1)}>Next</button></div>}
+  </section>;
+}

@@ -3,6 +3,8 @@
 import Link from "next/link";
 import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { EmptyState } from "../../components/brand";
+import { LoadingState } from "../../components/loading-state";
 import { ErrorMessage } from "../../components/error-message";
 import { StatusBadge } from "../../components/status-badge";
 import { RequireAuth } from "../../features/auth/require-auth";
@@ -108,8 +110,8 @@ function ExecutionsPageContent() {
         </section>
         {executions.error && <ErrorMessage error={executions.error} onRetry={() => executions.refetch()} />}
         <section className="panel stack">
-          {executions.isLoading && <p className="muted">Loading executions...</p>}
-          {!executions.isLoading && !executions.data?.items.length && <p className="muted">No executions match these filters.</p>}
+          {executions.isLoading && <LoadingState label="Loading executions..." />}
+          {!executions.isLoading && !executions.error && !executions.data?.items.length && <EmptyState title="No executions found" action={<Link href="/workflows">Open workflows</Link>}><p>Runs appear here after a workflow executes. Adjust the filters to find earlier runs.</p></EmptyState>}
           {!!executions.data?.items.length && (
             <>
               <table className="table">

@@ -6,6 +6,7 @@ import { useForm } from "react-hook-form";
 import { ErrorMessage } from "../../components/error-message";
 import { RequireAuth } from "../../features/auth/require-auth";
 import { useCreateWorkflow, useWorkflows } from "../../features/workflows/hooks";
+import { LoadingState } from "../../components/loading-state";
 import { EmptyState } from "../../components/brand";
 
 export default function WorkflowsPage() {
@@ -45,8 +46,8 @@ export default function WorkflowsPage() {
           </div>
         </form>
         <section className="panel stack">
-          {isLoading && <p className="muted">Loading...</p>}
-          {!isLoading && !data?.length && <EmptyState branded title="Your first flow starts here"><p>Create a workflow, add a trigger and connect your first action.</p></EmptyState>}
+          {isLoading && <LoadingState label="Loading workflows..." />}
+          {!isLoading && !error && !data?.length && <EmptyState branded title="Your first flow starts here"><p>Create a workflow, add a trigger and connect your first action.</p></EmptyState>}
           {data?.map((workflow) => (
             <div className="resource-row" key={workflow.id}>
               <Link href={`/workflows/${workflow.id}`}>

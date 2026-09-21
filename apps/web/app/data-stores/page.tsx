@@ -1,6 +1,9 @@
 "use client";
 
 import { useState } from "react";
+import { EmptyState } from "../../components/brand";
+import { LoadingState } from "../../components/loading-state";
+import { ErrorMessage } from "../../components/error-message";
 import { JsonViewer } from "../../components/json-viewer";
 import { Pagination } from "../../components/pagination";
 import { canManageDataStores } from "../../features/auth/rbac";
@@ -68,9 +71,9 @@ export default function DataStoresPage() {
       <div className="debugger-grid">
         <section className="panel stack">
           <h2>Stores</h2>
-          {stores.isLoading && <p className="muted">Loading Data Stores...</p>}
-          {stores.error && <p className="field-error">Could not load Data Stores.</p>}
-          {stores.data?.length === 0 && <p className="muted">No Data Stores yet.</p>}
+          {stores.isLoading && <LoadingState label="Loading Data Stores..." />}
+          {stores.error && <ErrorMessage error={stores.error} onRetry={() => stores.refetch()} />}
+          {!stores.isLoading && !stores.error && stores.data?.length === 0 && <EmptyState title="No Data Stores yet"><p>Create a Data Store above to keep persistent state for your workflows.</p></EmptyState>}
           {stores.data?.map((store) => (
             <button key={store.id} type="button" className="version-item" onClick={() => { setSelected(store); setPage(1); }}>
               <strong>{store.name}</strong>
@@ -97,9 +100,9 @@ export default function DataStoresPage() {
               <button type="button" onClick={() => window.confirm(`Delete Data Store "${selected.name}"?`) && deleteStore.mutate(selected.id, { onSuccess: () => setSelected(null) })}>
                 Delete Data Store
               </button>
-              {records.isLoading && <p className="muted">Loading records...</p>}
-              {records.error && <p className="field-error">Could not load records.</p>}
-              {records.data?.items.length === 0 && <p className="muted">No records found.</p>}
+              {records.isLoading && <LoadingState label="Loading records..." />}
+              {records.error && <ErrorMessage error={records.error} onRetry={() => records.refetch()} />}
+              {!records.isLoading && !records.error && records.data?.items.length === 0 && <EmptyState title="No records found"><p>Records appear after this Data Store is used by a workflow.</p></EmptyState>}
               {records.data?.items.map((record) => (
                 <div key={record.id} className="version-item">
                   <strong>{record.key}</strong>

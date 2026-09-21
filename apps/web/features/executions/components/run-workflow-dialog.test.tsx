@@ -28,7 +28,7 @@ describe("RunWorkflowDialog", () => {
 
     fireEvent.change(screen.getByLabelText(/input json/i), { target: { value: "{bad" } });
     await userEvent.click(screen.getByRole("button", { name: "Run" }));
-    expect(screen.getByText(/json no es válido/i)).toBeInTheDocument();
+    expect(screen.getByText(/the JSON is invalid/i)).toBeInTheDocument();
     expect(mutateAsync).not.toHaveBeenCalled();
 
     fireEvent.change(screen.getByLabelText(/input json/i), { target: { value: '{ "trigger": { "lead": "Ada" }, "metadata": {} }' } });

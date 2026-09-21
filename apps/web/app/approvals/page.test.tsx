@@ -21,7 +21,7 @@ describe("ApprovalsPage", () => {
     expect(screen.getByText("Loading approvals...")).toBeInTheDocument();
     state.status = "ready";
     view.rerender(<ApprovalsPage />);
-    expect(screen.queryAllByRole("row")).toHaveLength(1);
+    expect(screen.getByRole("heading", { name: "No approvals found" })).toBeInTheDocument();
     expect(screen.queryByText("foreign-approval")).not.toBeInTheDocument();
     state.status = "error";
     view.rerender(<ApprovalsPage />);

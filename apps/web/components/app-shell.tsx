@@ -43,7 +43,6 @@ function AppShell({ children }: { children: ReactNode }) {
       { label: "Connections", href: "/connections", short: "CN" }
     ] },
     { label: "Organization", items: [
-      { label: "Members", href: "/members", short: "MB" },
       ...(canViewAuditLog(role) ? [{ label: "Audit log", href: "/audit-log", short: "AL" }] : []),
       { label: "Settings", href: "/settings", short: "ST" }
     ] }

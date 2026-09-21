@@ -730,6 +730,11 @@ summary:focus-visible,
 .empty-state--branded { position: relative; min-height: 240px; align-content: end; overflow: hidden; background: var(--brand-primary-soft); }
 .empty-state--branded img { position: absolute; width: 200px; top: -70px; right: -24px; opacity: .22; }
 .empty-state-action { margin-top: 8px; }
+.settings-details { display: grid; gap: 0; margin: 0; }
+.settings-details > div { display: grid; grid-template-columns: minmax(100px, 180px) minmax(0, 1fr); gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--border-subtle); }
+.settings-details > div:last-child { border-bottom: 0; }
+.settings-details dt { color: var(--text-secondary); }
+.settings-details dd { margin: 0; overflow-wrap: anywhere; font-weight: 650; }
 .dashboard-hero { margin-bottom: 8px; }
 .stat-card { position: relative; overflow: hidden; min-height: 150px; }
 .stat-card::before { position: absolute; inset: 0 auto 0 0; width: 4px; background: var(--brand-primary); content: ""; }

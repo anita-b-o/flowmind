@@ -36,10 +36,10 @@ export function RetryExecutionDialog({
     <div className="modal-backdrop" role="presentation">
       <section className="modal panel stack" role="dialog" aria-modal="true" aria-label="Retry execution">
         <h2>Retry execution</h2>
-        <p className="muted">Se creará una nueva ejecución usando la misma versión y el mismo input.</p>
-        <p className="muted">Los efectos externos que hayan quedado en estado ambiguo podrían repetirse. Flowmind no garantiza exactly-once.</p>
+        <p className="muted">A new execution will use the same workflow version and input.</p>
+        <p className="muted">External effects with an uncertain outcome may run again. FlowMind cannot guarantee exactly-once execution.</p>
         <label className="stack">
-          Motivo opcional
+          Optional reason
           <textarea value={reason} maxLength={500} onChange={(event) => setReason(event.target.value)} />
         </label>
         {retry.error && <RetryError error={retry.error} />}
@@ -58,15 +58,15 @@ export function RetryExecutionDialog({
 
 function RetryError({ error }: { error: unknown }) {
   if (error instanceof ApiError && error.status === 403) {
-    return <p role="alert">No tenés permisos para solicitar retry.</p>;
+    return <p role="alert">You do not have permission to retry this execution.</p>;
   }
   if (error instanceof ApiError && error.status === 409) {
-    return <p role="alert">Ya existe un retry activo para esta ejecución.</p>;
+    return <p role="alert">An active retry already exists for this execution.</p>;
   }
   if (error instanceof ApiError && error.status === 503 && isRecoverable(error.details)) {
-    return <p role="alert">La nueva ejecución fue creada pero no se pudo encolar de inmediato. No reenvíes automáticamente; el reconciliador puede recuperarla.</p>;
+    return <p role="alert">The new execution was created but could not be queued immediately. Do not retry the request; recovery may queue it.</p>;
   }
-  return <p role="alert">No se pudo crear el retry.</p>;
+  return <p role="alert">Could not create the retry.</p>;
 }
 
 function isRecoverable(value: unknown) {

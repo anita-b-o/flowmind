@@ -1,6 +1,8 @@
 "use client";
 
 import { useState } from "react";
+import { EmptyState } from "../../components/brand";
+import { LoadingState } from "../../components/loading-state";
 import { ErrorMessage } from "../../components/error-message";
 import { JsonViewer } from "../../components/json-viewer";
 import { Pagination } from "../../components/pagination";
@@ -72,8 +74,8 @@ export default function AuditLogPage() {
             </section>
             {query.error && <ErrorMessage error={query.error} onRetry={() => query.refetch()} />}
             <section className="panel stack">
-              {query.isLoading && <p className="muted">Loading audit log...</p>}
-              {!query.isLoading && !query.data?.items.length && <p className="muted">No audit events match these filters.</p>}
+              {query.isLoading && <LoadingState label="Loading audit log..." />}
+              {!query.isLoading && !query.error && !query.data?.items.length && <EmptyState title="No audit events found"><p>Workflow, execution and security events appear here when they occur. Adjust the filters to see more activity.</p></EmptyState>}
               {!!query.data?.items.length && (
                 <>
                   <table className="table">

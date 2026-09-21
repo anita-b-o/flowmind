@@ -30,12 +30,12 @@ export function RunWorkflowDialog({
       try {
         const parsed = JSON.parse(json);
         if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-          setParseError("El payload debe ser un objeto JSON.");
+          setParseError("The payload must be a JSON object.");
           return;
         }
         payload = parsed;
       } catch {
-        setParseError("El JSON no es válido.");
+        setParseError("The JSON is invalid.");
         return;
       }
     } else {

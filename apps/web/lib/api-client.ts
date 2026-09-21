@@ -150,7 +150,7 @@ export const apiClient = {
   get: <T = any>(
     path: string,
     query?: Record<string, string | number | undefined>,
-  ) => request<T>(path, {}, query),
+  ) => request<T>(path, { signal: AbortSignal.timeout(60000) }, query),
   post: <T = any>(path: string, body?: unknown) =>
     request<T>(path, {
       method: "POST",
